@@ -1,8 +1,6 @@
-using Azure;
-using Azure.AI.OpenAI;
 using IQFlowAgent.Web.Models;
-using OpenAI.Chat;
-using System.ClientModel;
+using System.Net.Http.Headers;
+using System.Text.Json;
 
 namespace IQFlowAgent.Web.Services;
 
@@ -13,34 +11,38 @@ public class AzureOpenAiService : IAzureOpenAiService
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger)
+    public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger,
+        IHttpClientFactory httpClientFactory)
     {
         _config = config;
         _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<string> AnalyzeIntakeAsync(IntakeRecord intake, string? documentText)
     {
-        var endpoint = _config["AzureOpenAI:Endpoint"];
-        var apiKey = _config["AzureOpenAI:ApiKey"];
+        var endpoint  = _config["AzureOpenAI:Endpoint"];
+        var apiKey    = _config["AzureOpenAI:ApiKey"];
         var deployment = _config["AzureOpenAI:DeploymentName"];
         var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
-        var maxTokens = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
 
+        // Guard: all three fields must be set to real values
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
             || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
             || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
-                "Azure OpenAI is not fully configured (endpoint, apiKey, and deploymentName are all required). " +
-                "Set 'AzureOpenAI:Endpoint', 'AzureOpenAI:ApiKey', and 'AzureOpenAI:DeploymentName' via user secrets or environment variables. " +
-                "Returning mock analysis.");
+                "Azure OpenAI is not fully configured. " +
+                "Set 'AzureOpenAI:Endpoint', 'AzureOpenAI:ApiKey', and 'AzureOpenAI:DeploymentName' " +
+                "via user secrets or environment variables. Returning mock analysis.");
             return GenerateMockAnalysis(intake);
         }
 
-        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
         {
             _logger.LogWarning(
                 "Azure OpenAI endpoint '{Endpoint}' is not a valid URI. " +
@@ -49,17 +51,15 @@ public class AzureOpenAiService : IAzureOpenAiService
             return GenerateMockAnalysis(intake);
         }
 
+        // Build the URL exactly as shown in the Azure AI Foundry cURL example:
+        // POST {endpoint}/openai/deployments/{deployment}/chat/completions?api-version={version}
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+
+        _logger.LogInformation(
+            "Calling Azure OpenAI — url: {RequestUrl}", requestUrl);
+
         try
         {
-            var serviceVersion = ResolveServiceVersion(apiVersion);
-            _logger.LogInformation(
-                "Calling Azure OpenAI — endpoint: {Endpoint}, deployment: {Deployment}, api-version: {ApiVersion}",
-                endpointUri.Host, deployment, apiVersion);
-
-            var clientOptions = new AzureOpenAIClientOptions(serviceVersion);
-            var client = new AzureOpenAIClient(endpointUri, new AzureKeyCredential(apiKey!), clientOptions);
-            var chatClient = client.GetChatClient(deployment);
-
             var systemPrompt = """
                 You are an expert business process analyst. 
                 Analyze the provided business process intake information and produce a structured JSON analysis.
@@ -91,29 +91,59 @@ public class AzureOpenAiService : IAzureOpenAiService
                 Respond ONLY with the JSON object, no markdown fences.
                 """;
 
-            var userMessage = BuildUserMessage(intake, documentText);
-
-            var messages = new List<ChatMessage>
+            var requestBody = new
             {
-                new SystemChatMessage(systemPrompt),
-                new UserChatMessage(userMessage)
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = BuildUserMessage(intake, documentText) }
+                },
+                max_tokens  = maxTokens,
+                temperature = 0.7,
+                top_p       = 1.0,
+                model       = deployment   // included for compatibility; Azure ignores it
             };
 
-            var options = new ChatCompletionOptions { MaxOutputTokenCount = maxTokens };
-            var completion = await chatClient.CompleteChatAsync(messages, options);
-            return completion.Value.Content[0].Text;
-        }
-        catch (ClientResultException ex) when (ex.Status == 404)
-        {
-            _logger.LogWarning(
-                "Azure OpenAI returned 404 for intake {IntakeId}. " +
-                "The deployment name '{Deployment}' was not found on endpoint '{Endpoint}'. " +
-                "Possible causes: (1) The deployment name does not match — check Azure OpenAI Studio under 'Deployments' and ensure 'AzureOpenAI:DeploymentName' matches exactly (it is case-sensitive). " +
-                "(2) The resource is not yet fully deployed — verify the deployment status in the Azure portal. " +
-                "(3) The API version used by the SDK may be incompatible with your resource SKU — ensure you are using a supported model/version combination. " +
-                "Falling back to mock analysis.",
-                intake.IntakeId, deployment, endpoint);
-            return GenerateMockAnalysis(intake);
+            var http = _httpClientFactory.CreateClient();
+            // Azure AI Foundry uses "Authorization: Bearer <key>" — matches the cURL in the portal
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                if ((int)response.StatusCode == 404)
+                {
+                    _logger.LogWarning(
+                        "Azure OpenAI returned 404 for intake {IntakeId}. " +
+                        "Deployment '{Deployment}' was not found at {RequestUrl}. " +
+                        "Check the deployment name in Azure AI Foundry → Deployments (case-sensitive). " +
+                        "Response: {ErrorBody}. Falling back to mock analysis.",
+                        intake.IntakeId, deployment, requestUrl, errorBody);
+                }
+                else
+                {
+                    _logger.LogError(
+                        "Azure OpenAI returned HTTP {StatusCode} for intake {IntakeId}. " +
+                        "Response: {ErrorBody}. Falling back to mock analysis.",
+                        (int)response.StatusCode, intake.IntakeId, errorBody);
+                }
+                return GenerateMockAnalysis(intake);
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(responseText);
+            var content = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            return string.IsNullOrWhiteSpace(content)
+                ? GenerateMockAnalysis(intake)
+                : content;
         }
         catch (Exception ex)
         {
@@ -121,20 +151,6 @@ public class AzureOpenAiService : IAzureOpenAiService
             return GenerateMockAnalysis(intake);
         }
     }
-
-    private static AzureOpenAIClientOptions.ServiceVersion ResolveServiceVersion(string? apiVersion) =>
-        apiVersion?.ToLowerInvariant() switch
-        {
-            "2024-06-01"           => AzureOpenAIClientOptions.ServiceVersion.V2024_06_01,
-            "2024-08-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_08_01_Preview,
-            "2024-09-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_09_01_Preview,
-            "2024-10-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_10_01_Preview,
-            "2024-10-21"           => AzureOpenAIClientOptions.ServiceVersion.V2024_10_21,
-            "2024-12-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_12_01_Preview,
-            "2025-01-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2025_01_01_Preview,
-            "2025-03-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2025_03_01_Preview,
-            _                      => AzureOpenAIClientOptions.ServiceVersion.V2025_01_01_Preview
-        };
 
     private static string BuildUserMessage(IntakeRecord intake, string? documentText)
     {

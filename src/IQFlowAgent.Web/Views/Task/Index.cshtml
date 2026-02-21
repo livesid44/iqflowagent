@@ -12,11 +12,8 @@
         ["Completed"] = "#059669",
         ["Cancelled"] = "#6b7280"
     };
-    var priorityColors = new Dictionary<string, string>
-    {
-        ["High"] = "#e31837", ["Medium"] = "#d97706", ["Low"] = "#059669"
-    };
     var tasks = Model.ToList();
+    int? selId = ViewBag.IntakePickerSelected is int sv ? (int?)sv : null;
     Func<IntakeTask, bool> IsOverdue = t =>
         t.DueDate < DateTime.UtcNow && (t.Status == "Open" || t.Status == "In Progress");
 }
@@ -126,12 +123,22 @@
         </div>
     }
 
+    @* ── Intake picker ────────────────────────────────────── *@
+    @await Html.PartialAsync("_IntakePicker")
+
+    @* ── No intake selected prompt ─────────────────────────── *@
+    @if (!selId.HasValue)
+    {
+        <div style="text-align:center;padding:50px 20px;color:#aaa;">
+            <i class="bi bi-arrow-up-circle" style="font-size:2.8rem;display:block;margin-bottom:12px;color:#d0d5e8;"></i>
+            <p style="font-size:.9rem;"><strong>Select an intake</strong> from the list above to view its tasks.</p>
+        </div>
+    }
+    else
+    {
     <!-- ── Toolbar ──────────────────────────────────────────────── -->
     <form method="get" asp-action="Index">
-        @if (ViewBag.FilterIntakeId != null)
-        {
-            <input type="hidden" name="intakeRecordId" value="@ViewBag.FilterIntakeId" />
-        }
+        <input type="hidden" name="selectedId" value="@selId" />
         <div class="tasks-toolbar">
             <select name="status">
                 <option value="">All Statuses</option>
@@ -147,7 +154,7 @@
                 <option value="Low" selected="@(ViewBag.FilterPriority == "Low")">Low</option>
             </select>
             <button type="submit" class="btn-filter"><i class="bi bi-funnel me-1"></i>Filter</button>
-            <a href="@Url.Action("Index")" class="btn-clear">Clear</a>
+            <a href="@Url.Action("Index", new { selectedId = selId })" class="btn-clear">Clear</a>
             <div class="view-toggle">
                 <button type="button" class="btn-view active" id="btnBoard" onclick="switchView('board')">
                     <i class="bi bi-kanban"></i>
@@ -277,6 +284,7 @@
             </div>
         }
     </div>
+    } @* end: intake selected *@
 </main>
 
 <script>

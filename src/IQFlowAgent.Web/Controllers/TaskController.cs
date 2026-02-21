@@ -27,34 +27,71 @@ public class TaskController : Controller
     private static string GenerateTaskId() =>
         "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
 
-    // ── GET /Task/Index (optionally filtered by intakeRecordId) ──────────────
-    public async Task<IActionResult> Index(int? intakeRecordId, string? status, string? priority)
+    // ── GET /Task/Index (intake selector + optional status/priority filters) ──
+    public async Task<IActionResult> Index(
+        int? selectedId, int? intakeRecordId,
+        string? status, string? priority,
+        string? search, string? country, string? businessUnit, string? processType)
     {
-        var query = _db.IntakeTasks
-            .Include(t => t.IntakeRecord)
-            .Include(t => t.ActionLogs)
-            .AsQueryable();
+        // selectedId takes precedence over the legacy intakeRecordId param
+        var resolvedIntakeId = selectedId ?? intakeRecordId;
 
-        if (intakeRecordId.HasValue)
-            query = query.Where(t => t.IntakeRecordId == intakeRecordId.Value);
-        if (!string.IsNullOrWhiteSpace(status))
-            query = query.Where(t => t.Status == status);
-        if (!string.IsNullOrWhiteSpace(priority))
-            query = query.Where(t => t.Priority == priority);
+        var allIntakes = await _db.IntakeRecords
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
 
-        var tasks = await query.OrderByDescending(t => t.CreatedAt).ToListAsync();
+        // ── Populate picker ViewBag ─────────────────────────────────────────
+        var filtered = allIntakes.Where(x =>
+            (string.IsNullOrWhiteSpace(search) ||
+             x.IntakeId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             x.ProcessName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             x.BusinessUnit.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             x.Department.Contains(search, StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrWhiteSpace(country) || x.Country == country)
+            && (string.IsNullOrWhiteSpace(businessUnit) || x.BusinessUnit == businessUnit)
+            && (string.IsNullOrWhiteSpace(processType) || x.ProcessType == processType)
+        ).ToList();
 
-        ViewBag.FilterIntakeId = intakeRecordId;
-        ViewBag.FilterStatus = status;
-        ViewBag.FilterPriority = priority;
+        ViewBag.IntakePickerIntakes      = filtered;
+        ViewBag.IntakePickerSelected     = resolvedIntakeId;
+        ViewBag.IntakePickerSearch       = search;
+        ViewBag.IntakePickerCountry      = country;
+        ViewBag.IntakePickerBusinessUnit = businessUnit;
+        ViewBag.IntakePickerProcessType  = processType;
+        ViewBag.IntakePickerController   = "Task";
+        ViewBag.IntakePickerAction       = "Index";
+        ViewBag.Countries     = allIntakes.Select(x => x.Country)
+            .Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        ViewBag.BusinessUnits = allIntakes.Select(x => x.BusinessUnit)
+            .Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        ViewBag.ProcessTypes  = allIntakes.Select(x => x.ProcessType)
+            .Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
 
-        // For the intake name in breadcrumb if filtered
-        if (intakeRecordId.HasValue)
+        // ── Load tasks only when an intake is selected ──────────────────────
+        List<IntakeTask> tasks = new();
+        if (resolvedIntakeId.HasValue)
         {
-            var intake = await _db.IntakeRecords.FindAsync(intakeRecordId.Value);
+            var query = _db.IntakeTasks
+                .Include(t => t.IntakeRecord)
+                .Include(t => t.ActionLogs)
+                .Where(t => t.IntakeRecordId == resolvedIntakeId.Value)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(status))
+                query = query.Where(t => t.Status == status);
+            if (!string.IsNullOrWhiteSpace(priority))
+                query = query.Where(t => t.Priority == priority);
+
+            tasks = await query.OrderByDescending(t => t.CreatedAt).ToListAsync();
+
+            var intake = allIntakes.FirstOrDefault(x => x.Id == resolvedIntakeId.Value);
             ViewBag.IntakeName = intake?.ProcessName;
-            ViewBag.IntakeRef = intake?.IntakeId;
+            ViewBag.IntakeRef  = intake?.IntakeId;
         }
+
+        ViewBag.FilterIntakeId = resolvedIntakeId;
+        ViewBag.FilterStatus   = status;
+        ViewBag.FilterPriority = priority;
 
         return View(tasks);
     }

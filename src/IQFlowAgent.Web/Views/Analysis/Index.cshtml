@@ -5,209 +5,241 @@
     ViewData["Title"] = "AI Analysis";
     ViewData["ActivePage"] = "analysis";
 
-    var complete = Model.Count(x => x.Status == "Complete");
-    var inProgress = Model.Count(x => x.Status is "Analyzing" or "Submitted");
-    var errors = Model.Count(x => x.Status == "Error");
-    var drafts = Model.Count(x => x.Status == "Draft");
+    // When an intake is selected, Model has exactly one item; otherwise it is empty.
+    var record   = Model.Count == 1 ? Model[0] : null;
+    int? selId   = ViewBag.IntakePickerSelected is int sv ? (int?)sv : null;
+
+    // Parse the analysis JSON once (only when an intake is selected)
+    JsonElement? analysis = null;
+    if (record != null && !string.IsNullOrWhiteSpace(record.AnalysisResult))
+    {
+        try { analysis = JsonSerializer.Deserialize<JsonElement>(record.AnalysisResult); } catch { }
+    }
+
+    int confidence   = analysis.HasValue && analysis.Value.TryGetProperty("confidenceScore",  out var cv)  ? cv.GetInt32()  : 0;
+    int quality      = analysis.HasValue && analysis.Value.TryGetProperty("qualityScore",      out var qv)  ? qv.GetInt32()  : 0;
+    int steps        = analysis.HasValue && analysis.Value.TryGetProperty("stepsIdentified",   out var sv2) ? sv2.GetInt32() : 0;
+    string autoPot   = analysis.HasValue && analysis.Value.TryGetProperty("automationPotential", out var ap) ? (ap.GetString() ?? "—") : "—";
+    string compStat  = analysis.HasValue && analysis.Value.TryGetProperty("complianceStatus",  out var cs)  ? (cs.GetString() ?? "—") : "—";
+
+    var insights = new List<string>();
+    var recs     = new List<(string icon, string text)>();
+    if (analysis.HasValue)
+    {
+        if (analysis.Value.TryGetProperty("keyInsights", out var ins))
+            insights = ins.EnumerateArray().Select(e => e.GetString() ?? "").Where(s => s != "").Take(5).ToList();
+        if (analysis.Value.TryGetProperty("recommendations", out var recArr))
+            recs = recArr.EnumerateArray().Select(e => (
+                e.TryGetProperty("icon", out var ic) ? ic.GetString() ?? "arrow-right" : "arrow-right",
+                e.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : ""
+            )).Where(r => r.Item2 != "").Take(4).ToList();
+    }
+
+    int totalTasks = (int)(ViewBag.SelectedTaskCount ?? 0);
+    int openTasks  = (int)(ViewBag.SelectedOpenTaskCount ?? 0);
 }
 
 <style>
-    /* ── Status summary cards ─────────────────────────────── */
-    .dash-cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
+    /* ── Status / stat cards ───────────────────────────── */
+    .dash-cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:22px; }
     .dash-card {
-        flex: 1; min-width: 140px; background: #fff;
-        border-radius: 12px; padding: 20px 18px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.07); text-align: center;
+        flex:1; min-width:130px; background:#fff; border-radius:12px;
+        padding:18px 16px; box-shadow:0 2px 10px rgba(0,0,0,.07); text-align:center;
     }
-    .dash-card .dc-num { font-size: 2.4rem; font-weight: 800; line-height: 1; }
-    .dash-card .dc-label { font-size: 0.8rem; color: #888; margin-top: 5px; }
-    .dash-card.green .dc-num { color: #059669; }
-    .dash-card.orange .dc-num { color: #d97706; }
-    .dash-card.red .dc-num { color: #e31837; }
-    .dash-card.blue .dc-num { color: #1a2a5e; }
+    .dash-card .dc-num { font-size:2.1rem; font-weight:800; line-height:1; }
+    .dash-card .dc-label { font-size:.78rem; color:#888; margin-top:5px; }
+    .dash-card.green .dc-num { color:#059669; }
+    .dash-card.orange .dc-num { color:#d97706; }
+    .dash-card.red .dc-num { color:#e31837; }
+    .dash-card.blue .dc-num { color:#1a2a5e; }
 
-    /* ── Suggestion card ─────────────────────────────────── */
-    .suggestion-card {
-        background: #fff; border-radius: 12px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.07);
-        margin-bottom: 18px; overflow: hidden;
+    /* ── Selected intake banner ────────────────────────── */
+    .sel-banner {
+        display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+        background:#fff; border-radius:12px; padding:16px 22px;
+        box-shadow:0 2px 10px rgba(0,0,0,.07); margin-bottom:22px;
+        border-left:5px solid #e31837;
     }
-    .sug-header {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 16px 22px; border-bottom: 1px solid #f0f0f0;
-        background: #f8faff;
+    .sel-banner-id   { font-family:monospace; font-size:.82rem; color:#888; }
+    .sel-banner-name { font-size:1.1rem; font-weight:700; color:#1a2a5e; }
+    .sel-banner-tags { display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
+    .sel-tag { font-size:.74rem; background:#f0f2f8; color:#555; border-radius:6px; padding:3px 9px; }
+    .sel-tag-status-Complete  { background:#d1fae5; color:#065f46; }
+    .sel-tag-status-Analyzing { background:#fef3c7; color:#92400e; }
+    .sel-tag-status-Error     { background:#fde8ec; color:#c01530; }
+    .sel-banner-actions { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+    .btn-sel-action {
+        background:#1a2a5e; color:#fff; border:none; border-radius:7px;
+        padding:7px 14px; font-size:.8rem; cursor:pointer; text-decoration:none;
+        display:inline-flex; align-items:center; gap:5px;
     }
-    .sug-header h3 { font-size: 0.95rem; font-weight: 700; color: #1a2a5e; margin: 0; }
-    .conf-badge {
-        padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
+    .btn-sel-action:hover { background:#294993; color:#fff; }
+    .btn-sel-action.outline {
+        background:#fff; color:#1a2a5e; border:1.5px solid #1a2a5e;
     }
-    .conf-high   { background: #d1fae5; color: #065f46; }
-    .conf-medium { background: #fef3c7; color: #92400e; }
-    .conf-low    { background: #ffe0e6; color: #c01530; }
-    .sug-body { padding: 18px 22px; }
-    .sug-body h4 { font-size: 0.82rem; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
-    .insights-list { list-style: none; padding: 0; margin: 0 0 16px; }
-    .insights-list li { display: flex; align-items: flex-start; gap: 7px; padding: 6px 0; font-size: 0.87rem; color: #444; border-bottom: 1px solid #f5f5f5; }
-    .insights-list li:last-child { border-bottom: none; }
-    .insights-list .bi-check-circle-fill { color: #059669; }
-    .insights-list .bi-exclamation-circle-fill { color: #d97706; }
-    .rec-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: #f8faff; border-radius: 7px; margin-bottom: 8px; font-size: 0.86rem; color: #444; }
-    .rec-row .bi { color: #e31837; font-size: 1rem; flex-shrink: 0; }
-    .sug-actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
-    .btn-view-full {
-        background: #1a2a5e; border: none; color: #fff;
-        border-radius: 7px; padding: 7px 16px; font-size: 0.82rem;
-        cursor: pointer; text-decoration: none; display: inline-block;
-    }
-    .btn-view-full:hover { background: #294993; color: #fff; }
+    .btn-sel-action.outline:hover { background:#f0f2f8; color:#1a2a5e; }
 
-    /* ── Empty state ─────────────────────────────────────── */
-    .empty-state { text-align: center; padding: 60px 20px; color: #aaa; font-size: 0.9rem; }
-    .empty-state .bi { font-size: 2.5rem; display: block; margin-bottom: 10px; }
+    /* ── Analysis content cards ────────────────────────── */
+    .analysis-card {
+        background:#fff; border-radius:12px; margin-bottom:18px;
+        box-shadow:0 2px 10px rgba(0,0,0,.07); overflow:hidden;
+    }
+    .analysis-card-header {
+        display:flex; align-items:center; justify-content:space-between;
+        padding:14px 22px; border-bottom:1px solid #f0f0f0; background:#f8faff;
+    }
+    .analysis-card-header h3 { font-size:.93rem; font-weight:700; color:#1a2a5e; margin:0; }
+    .conf-badge { padding:4px 12px; border-radius:20px; font-size:.74rem; font-weight:700; }
+    .conf-high   { background:#d1fae5; color:#065f46; }
+    .conf-medium { background:#fef3c7; color:#92400e; }
+    .conf-low    { background:#fde8ec; color:#c01530; }
+    .analysis-card-body { padding:18px 22px; }
+    .analysis-card-body h4 { font-size:.8rem; font-weight:700; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; }
+    .insights-list { list-style:none; padding:0; margin:0 0 16px; }
+    .insights-list li { display:flex; align-items:flex-start; gap:7px; padding:6px 0; font-size:.86rem; color:#444; border-bottom:1px solid #f5f5f5; }
+    .insights-list li:last-child { border-bottom:none; }
+    .insights-list .bi-check-circle-fill { color:#059669; }
+    .rec-row { display:flex; align-items:flex-start; gap:10px; padding:9px 12px; background:#f8faff; border-radius:7px; margin-bottom:7px; font-size:.85rem; color:#444; }
+    .rec-row .bi { color:#e31837; font-size:.95rem; flex-shrink:0; }
+
+    /* ── Empty / select prompt ─────────────────────────── */
+    .select-prompt { text-align:center; padding:50px 20px; color:#aaa; }
+    .select-prompt .bi { font-size:2.8rem; display:block; margin-bottom:12px; color:#d0d5e8; }
+    .select-prompt p { font-size:.9rem; }
 </style>
 
 @await Html.PartialAsync("_AppShell")
 
 <main class="app-main">
-    <div class="page-title">AI Analysis Dashboard</div>
-    <div class="page-sub">LLM-powered process discovery and validation using Azure OpenAI</div>
+    <div class="page-title"><i class="bi bi-cpu me-2" style="color:#e31837;"></i>AI Analysis Dashboard</div>
+    <div class="page-sub">Select an intake below to view its LLM-powered process analysis</div>
 
-    <!-- Stats cards -->
-    <div class="dash-cards">
-        <div class="dash-card green">
-            <div class="dc-num">@complete</div>
-            <div class="dc-label">Complete</div>
-        </div>
-        <div class="dash-card orange">
-            <div class="dc-num">@inProgress</div>
-            <div class="dc-label">In Progress</div>
-        </div>
-        <div class="dash-card red">
-            <div class="dc-num">@errors</div>
-            <div class="dc-label">Errors</div>
-        </div>
-        <div class="dash-card blue">
-            <div class="dc-num">@drafts</div>
-            <div class="dc-label">Drafts</div>
-        </div>
-        <div class="dash-card blue">
-            <div class="dc-num">@Model.Count</div>
-            <div class="dc-label">Total Intakes</div>
-        </div>
-    </div>
+    @* ── Intake picker ─────────────────────────────────────── *@
+    @await Html.PartialAsync("_IntakePicker")
 
-    @{
-        var completed = Model.Where(x => x.Status == "Complete").ToList();
-    }
-
-    @if (Model.Count == 0)
+    @* ── No intake selected ────────────────────────────────── *@
+    @if (record == null)
     {
-        <div class="empty-state">
-            <i class="bi bi-cpu"></i>
-            No intakes analysed yet.
-            <br />
-            <a asp-controller="Intake" asp-action="Create" style="color:#e31837;text-decoration:none;font-weight:600;">
-                Create your first intake →
+        <div class="select-prompt">
+            <i class="bi bi-arrow-up-circle"></i>
+            <p><strong>Select an intake</strong> from the list above to view its AI analysis, insights, and recommendations.</p>
+            <a asp-controller="Intake" asp-action="Chat" style="color:#e31837;font-weight:600;text-decoration:none;">
+                + Create new intake
             </a>
         </div>
     }
     else
     {
-        var pending = Model.Where(x => x.Status is "Analyzing" or "Submitted" or "Error" or "Draft").ToList();
-
-        <!-- LLM Suggestions — show completed intakes with parsed results -->
-        @if (completed.Count > 0)
-        {
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-                <h2 style="font-size:1.05rem;font-weight:700;color:#1a2a5e;margin:0;">
-                    <i class="bi bi-robot me-2" style="color:#e31837;"></i>LLM Suggestions &amp; Insights
-                </h2>
-                <a asp-controller="Intake" asp-action="Create" style="color:#e31837;font-size:0.85rem;text-decoration:none;font-weight:600;">
-                    + New Intake
-                </a>
+        @* ── Selected intake banner ─────────────────────────── *@
+        <div class="sel-banner">
+            <div>
+                <div class="sel-banner-id">@record.IntakeId</div>
+                <div class="sel-banner-name">@record.ProcessName</div>
+                <div class="sel-banner-tags">
+                    @if (!string.IsNullOrEmpty(record.BusinessUnit))
+                    { <span class="sel-tag">@record.BusinessUnit</span> }
+                    @if (!string.IsNullOrEmpty(record.Country))
+                    { <span class="sel-tag"><i class="bi bi-geo-alt"></i> @record.Country@(string.IsNullOrEmpty(record.City) ? "" : $", {record.City}")</span> }
+                    @if (!string.IsNullOrEmpty(record.ProcessType))
+                    { <span class="sel-tag">@record.ProcessType</span> }
+                    <span class="sel-tag sel-tag-status-@record.Status">@record.Status</span>
+                </div>
             </div>
+            <div class="sel-banner-actions">
+                <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id"
+                   class="btn-sel-action"><i class="bi bi-eye"></i> Full Analysis</a>
+                <a asp-controller="Task" asp-action="Index" asp-route-selectedId="@record.Id"
+                   class="btn-sel-action outline"><i class="bi bi-kanban"></i> Tasks (@totalTasks)</a>
+            </div>
+        </div>
 
-            @foreach (var record in completed)
-            {
-                JsonElement? analysis = null;
-                try { if (!string.IsNullOrWhiteSpace(record.AnalysisResult)) analysis = JsonSerializer.Deserialize<JsonElement>(record.AnalysisResult); } catch { }
-                var confidence = analysis.HasValue && analysis.Value.TryGetProperty("confidenceScore", out var cv) ? cv.GetInt32() : 0;
-                var confClass = confidence >= 85 ? "conf-high" : confidence >= 65 ? "conf-medium" : "conf-low";
-                var insights = new List<string>();
-                var recs = new List<(string icon, string text)>();
-                if (analysis.HasValue)
-                {
-                    if (analysis.Value.TryGetProperty("keyInsights", out var ins))
-                        insights = ins.EnumerateArray().Select(e => e.GetString() ?? "").Take(4).ToList();
-                    if (analysis.Value.TryGetProperty("recommendations", out var recArr))
-                        recs = recArr.EnumerateArray().Select(e => (
-                            e.TryGetProperty("icon", out var ic) ? ic.GetString() ?? "arrow-right" : "arrow-right",
-                            e.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : ""
-                        )).Take(3).ToList();
-                }
+        @* ── Stat cards ─────────────────────────────────────── *@
+        <div class="dash-cards">
+            @{
+                var confClass = confidence >= 85 ? "green" : confidence >= 65 ? "orange" : "red";
+            }
+            <div class="dash-card @confClass">
+                <div class="dc-num">@confidence<span style="font-size:1.1rem;">%</span></div>
+                <div class="dc-label">Confidence</div>
+            </div>
+            <div class="dash-card blue">
+                <div class="dc-num">@steps</div>
+                <div class="dc-label">Steps Identified</div>
+            </div>
+            <div class="dash-card @(totalTasks > 0 ? "orange" : "blue")">
+                <div class="dc-num">@openTasks</div>
+                <div class="dc-label">Open Tasks</div>
+            </div>
+            <div class="dash-card blue">
+                <div class="dc-num">@totalTasks</div>
+                <div class="dc-label">Total Tasks</div>
+            </div>
+            <div class="dash-card @(autoPot == "High" ? "green" : autoPot == "Low" ? "red" : "orange")">
+                <div class="dc-num" style="font-size:1.3rem;">@autoPot</div>
+                <div class="dc-label">Automation Potential</div>
+            </div>
+            <div class="dash-card @(compStat == "Passed" ? "green" : compStat == "Failed" ? "red" : "orange")">
+                <div class="dc-num" style="font-size:1.3rem;">@compStat</div>
+                <div class="dc-label">Compliance</div>
+            </div>
+        </div>
 
-                <div class="suggestion-card">
-                    <div class="sug-header">
-                        <h3><i class="bi bi-diagram-3 me-2"></i>@record.ProcessName</h3>
-                        <span class="conf-badge @confClass">@confidence% Confidence</span>
+        @* ── Analysis unavailable ─────────────────────────── *@
+        @if (record.Status != "Complete" || analysis == null)
+        {
+            <div class="analysis-card">
+                <div class="analysis-card-header">
+                    <h3><i class="bi bi-hourglass-split me-2"></i>@record.Status</h3>
+                    <span class="conf-badge conf-medium">@record.Status</span>
+                </div>
+                <div class="analysis-card-body">
+                    <p style="color:#888;font-size:.87rem;margin:0;">
+                        @(record.Status == "Error"     ? "Analysis encountered an error. You can re-trigger it from the full analysis page." :
+                          record.Status == "Analyzing" ? "Analysis is currently running — refresh in a moment." :
+                          record.Status == "Submitted" ? "Submitted — analysis will start shortly." :
+                                                         "Draft intake — not yet submitted for analysis.")
+                    </p>
+                    <div style="margin-top:14px;">
+                        <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id"
+                           class="btn-sel-action" style="font-size:.82rem;">
+                            <i class="bi bi-eye"></i> View Details
+                        </a>
                     </div>
-                    <div class="sug-body">
-                        @if (insights.Count > 0)
+                </div>
+            </div>
+        }
+        else
+        {
+            @* ── Key insights ────────────────────────────────── *@
+            @if (insights.Any())
+            {
+                <div class="analysis-card">
+                    <div class="analysis-card-header">
+                        <h3><i class="bi bi-lightbulb me-2" style="color:#e31837;"></i>Key Insights</h3>
+                        <span class="conf-badge @(confidence >= 85 ? "conf-high" : confidence >= 65 ? "conf-medium" : "conf-low")">
+                            @confidence% Confidence
+                        </span>
+                    </div>
+                    <div class="analysis-card-body">
+                        <ul class="insights-list">
+                            @foreach (var ins in insights)
+                            {
+                                <li><i class="bi bi-check-circle-fill"></i> @ins</li>
+                            }
+                        </ul>
+                        @if (recs.Any())
                         {
-                            <h4>Key Insights</h4>
-                            <ul class="insights-list">
-                                @foreach (var ins in insights)
-                                {
-                                    <li><i class="bi bi-check-circle-fill"></i> @ins</li>
-                                }
-                            </ul>
-                        }
-                        @if (recs.Count > 0)
-                        {
-                            <h4>Recommendations</h4>
+                            <h4>Top Recommendations</h4>
                             @foreach (var (icon, text) in recs)
                             {
                                 <div class="rec-row"><i class="bi bi-arrow-right-circle-fill"></i> @text</div>
                             }
                         }
-                        <div class="sug-actions">
-                            <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id" class="btn-view-full">
-                                <i class="bi bi-eye me-1"></i> View Full Analysis
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            }
-        }
-
-        <!-- In-progress or pending intakes -->
-        @if (pending.Count > 0)
-        {
-            <div style="margin-bottom:12px;margin-top:22px;">
-                <h2 style="font-size:1.05rem;font-weight:700;color:#1a2a5e;margin:0;">
-                    <i class="bi bi-hourglass-split me-2" style="color:#d97706;"></i>Pending / In-Progress
-                </h2>
-            </div>
-            @foreach (var record in pending)
-            {
-                <div class="suggestion-card">
-                    <div class="sug-header">
-                        <h3>@record.ProcessName <code style="font-size:0.73rem;color:#aaa;background:#f1f5f9;padding:2px 7px;border-radius:4px;margin-left:6px;">@record.IntakeId</code></h3>
-                        <span class="conf-badge @(record.Status == "Error" ? "conf-low" : record.Status == "Analyzing" ? "conf-medium" : "")">
-                            @record.Status
-                        </span>
-                    </div>
-                    <div class="sug-body" style="padding:14px 22px;">
-                        <p style="color:#888;font-size:0.85rem;margin:0;">
-                            @(record.Status == "Error" ? "Analysis encountered an error." :
-                              record.Status == "Analyzing" ? "Analysis is currently running…" :
-                              record.Status == "Submitted" ? "Submitted — analysis will start shortly." :
-                              "Draft — not yet submitted.")
-                        </p>
-                        <div class="sug-actions mt-3">
-                            <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id" class="btn-view-full">
-                                <i class="bi bi-eye me-1"></i> View
-                            </a>
+                        <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+                            <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id"
+                               class="btn-sel-action"><i class="bi bi-eye"></i> View Full Analysis</a>
+                            <a asp-controller="Task" asp-action="Index" asp-route-selectedId="@record.Id"
+                               class="btn-sel-action outline"><i class="bi bi-kanban"></i> View Tasks</a>
                         </div>
                     </div>
                 </div>
@@ -215,4 +247,5 @@
         }
     }
 </main>
-</div><!-- close app-layout -->
+
+</div>@* close app-layout *@
