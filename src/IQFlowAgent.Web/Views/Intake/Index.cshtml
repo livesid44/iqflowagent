@@ -1,0 +1,145 @@
+@model List<IQFlowAgent.Web.Models.IntakeRecord>
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Intake";
+    ViewData["ActivePage"] = "intake";
+}
+
+<style>
+    /* ── Intake start screen ─────────────────────────────────── */
+    .intake-hero {
+        background: linear-gradient(135deg, #1a2a5e 0%, #e31837 100%);
+        border-radius: 16px;
+        color: #fff;
+        padding: 48px 40px;
+        text-align: center;
+        margin-bottom: 28px;
+    }
+    .intake-hero h1 { font-size: 1.8rem; font-weight: 800; margin-bottom: 10px; }
+    .intake-hero p { font-size: 0.95rem; color: rgba(255,255,255,0.85); max-width: 560px; margin: 0 auto 28px; }
+    .btn-begin {
+        background: #fff; color: #e31837; border: none; border-radius: 30px;
+        padding: 14px 44px; font-size: 1rem; font-weight: 700;
+        cursor: pointer; transition: all 0.2s;
+        text-decoration: none; display: inline-block;
+    }
+    .btn-begin:hover { background: #ffe0e6; color: #c01530; transform: translateY(-1px); }
+    .steps-preview {
+        display: flex; justify-content: center; gap: 24px; flex-wrap: wrap;
+        margin-top: 28px;
+    }
+    .step-item {
+        display: flex; align-items: center; gap: 8px;
+        background: rgba(255,255,255,0.12); border-radius: 30px;
+        padding: 7px 16px; font-size: 0.85rem;
+    }
+    .step-num {
+        background: #fff; color: #e31837; border-radius: 50%;
+        width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+        font-weight: 800; font-size: 0.75rem;
+    }
+
+    /* ── Recent intakes ──────────────────────────────────────── */
+    .section-card {
+        background: #fff; border-radius: 12px; padding: 24px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    }
+    .section-card h3 { font-size: 1rem; font-weight: 700; color: #1a2a5e; margin-bottom: 16px; }
+    .intakes-table { width: 100%; border-collapse: collapse; }
+    .intakes-table th {
+        background: #f5f6fa; color: #1a2a5e;
+        font-size: 0.8rem; padding: 10px 14px; text-align: left; font-weight: 600;
+    }
+    .intakes-table td { padding: 11px 14px; border-bottom: 1px solid #f0f0f0; font-size: 0.87rem; vertical-align: middle; }
+    .intakes-table tr:last-child td { border-bottom: none; }
+    .intakes-table tr:hover td { background: #fafbff; }
+    .status-badge {
+        padding: 3px 10px; border-radius: 20px; font-size: 0.74rem; font-weight: 600;
+        display: inline-block;
+    }
+    .status-draft     { background: #f1f5f9; color: #64748b; }
+    .status-submitted { background: #dbeafe; color: #1d4ed8; }
+    .status-analyzing { background: #fef3c7; color: #92400e; }
+    .status-complete  { background: #d1fae5; color: #065f46; }
+    .status-error     { background: #ffe0e6; color: #c01530; }
+    .btn-view { background: #1a2a5e; border: none; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 0.78rem; cursor: pointer; text-decoration: none; }
+    .btn-view:hover { background: #294993; color: #fff; }
+    .empty-state { text-align: center; padding: 40px; color: #aaa; font-size: 0.9rem; }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <div class="page-title">Process Intake</div>
+    <div class="page-sub">Capture essential business process information and generate AI-powered analysis</div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success py-2 small mb-3">@TempData["Success"]</div>
+    }
+
+    <!-- Hero / Start screen -->
+    <div class="intake-hero">
+        <h1>Start a New Process Intake</h1>
+        <p>Our AI assistant will guide you through capturing all essential information about your business process. Each intake receives a unique ID and is analysed using Azure OpenAI.</p>
+        <a asp-action="Create" class="btn-begin">Begin Intake</a>
+        <div class="steps-preview">
+            <div class="step-item"><span class="step-num">1</span> Process Name &amp; Description</div>
+            <div class="step-item"><span class="step-num">2</span> Ownership &amp; Business Unit</div>
+            <div class="step-item"><span class="step-num">3</span> Location Details</div>
+            <div class="step-item"><span class="step-num">4</span> Document Upload</div>
+        </div>
+    </div>
+
+    <!-- Recent intakes -->
+    <div class="section-card">
+        <h3><i class="bi bi-clock-history me-2"></i>Recent Intakes</h3>
+        @if (Model.Count == 0)
+        {
+            <div class="empty-state">
+                <i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:8px;"></i>
+                No intakes yet. Click <strong>Begin Intake</strong> to get started.
+            </div>
+        }
+        else
+        {
+            <table class="intakes-table">
+                <thead>
+                    <tr>
+                        <th>Intake ID</th>
+                        <th>Process Name</th>
+                        <th>Business Unit</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model)
+                    {
+                        <tr>
+                            <td><code style="font-size:0.78rem;">@item.IntakeId</code></td>
+                            <td>@item.ProcessName</td>
+                            <td>@item.BusinessUnit</td>
+                            <td>@item.City, @item.Country</td>
+                            <td>
+                                <span class="status-badge status-@item.Status.ToLower()">
+                                    @item.Status
+                                </span>
+                            </td>
+                            <td style="white-space:nowrap;">@item.CreatedAt.ToString("MMM dd, yyyy")</td>
+                            <td>
+                                <a asp-action="AnalysisResult" asp-route-id="@item.Id" class="btn-view">
+                                    <i class="bi bi-eye"></i> View
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</main>
+
+</div><!-- close app-layout -->

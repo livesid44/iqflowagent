@@ -2,38 +2,10 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = "Auth Settings";
+    ViewData["ActivePage"] = "authsettings";
 }
 
 <style>
-    body { background: #f5f6fa; }
-    .platform-header {
-        background: #294993; color: #fff;
-        padding: 0 20px; height: 56px;
-        display: flex; align-items: center; justify-content: space-between;
-        position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    }
-    .platform-logo { font-weight: 900; font-size: 1.3rem; letter-spacing: 1px; color: #fff; }
-    .platform-logo span { color: #e31837; }
-    .platform-layout { display: flex; margin-top: 56px; min-height: calc(100vh - 56px); }
-    .platform-sidebar {
-        width: 220px; min-width: 220px; background: #1e2d5a; color: #fff;
-        padding: 20px 0; min-height: calc(100vh - 56px);
-    }
-    .sidebar-nav a {
-        display: flex; align-items: center; gap: 10px;
-        padding: 12px 20px; color: #b0c4de; text-decoration: none;
-        font-size: 0.9rem; transition: all 0.2s;
-    }
-    .sidebar-nav a:hover, .sidebar-nav a.active {
-        background: rgba(227,24,55,0.15); color: #fff;
-        border-left: 3px solid #e31837;
-    }
-    .sidebar-nav a .bi { font-size: 1.1rem; }
-    .sidebar-section { padding: 10px 20px 5px; color: #7a8db5; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
-    .platform-main { flex: 1; padding: 30px; }
-    .page-title { font-size: 1.5rem; font-weight: 700; color: #294993; margin-bottom: 5px; }
-    .page-sub { color: #888; font-size: 0.9rem; margin-bottom: 20px; }
     .card-panel {
         background: #fff; border-radius: 12px; padding: 28px;
         box-shadow: 0 2px 12px rgba(0,0,0,0.07); max-width: 700px;
@@ -42,9 +14,9 @@
         border: 2px solid #e8ecf5; border-radius: 10px; padding: 16px 20px;
         margin-bottom: 12px; cursor: pointer; transition: all 0.2s;
     }
-    .auth-mode-card:hover { border-color: #294993; }
-    .auth-mode-card.selected { border-color: #294993; background: #f0f4ff; }
-    .auth-mode-title { font-weight: 600; color: #294993; margin-bottom: 2px; }
+    .auth-mode-card:hover { border-color: #1a2a5e; }
+    .auth-mode-card.selected { border-color: #1a2a5e; background: #f0f4ff; }
+    .auth-mode-title { font-weight: 600; color: #1a2a5e; margin-bottom: 2px; }
     .auth-mode-desc { font-size: 0.82rem; color: #888; }
     .ldap-config { background: #f8faff; border: 1px solid #dbe4ff; border-radius: 10px; padding: 20px; margin-top: 16px; }
     .form-group { margin-bottom: 14px; }
@@ -52,40 +24,22 @@
     .form-group input[type=text], .form-group input[type=password], .form-group input[type=number] {
         width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; font-size: 0.9rem;
     }
-    .form-group input:focus { border-color: #294993; outline: none; }
+    .form-group input:focus { border-color: #1a2a5e; outline: none; }
     .btn-save {
-        background: #294993; border: none; color: #fff;
+        background: #1a2a5e; border: none; color: #fff;
         border-radius: 8px; padding: 10px 24px; font-size: 0.95rem;
         cursor: pointer; transition: background 0.2s;
     }
-    .btn-save:hover { background: #1e3572; }
+    .btn-save:hover { background: #294993; }
     .form-row { display: flex; gap: 16px; }
     .form-row .form-group { flex: 1; }
 </style>
 
-<header class="platform-header">
-    <div class="platform-logo">IQ<span>Flow</span>Agent</div>
-    <div class="d-flex align-items-center gap-3">
-        <span style="font-size:0.9rem;">@User.Identity?.Name</span>
-        <form asp-action="Logout" asp-controller="Account" method="post" style="margin:0;">
-            @Html.AntiForgeryToken()
-            <button type="submit" class="btn btn-sm" style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:5px 14px;">Logout</button>
-        </form>
-    </div>
-</header>
+@await Html.PartialAsync("_AppShell")
 
-<div class="platform-layout">
-    <aside class="platform-sidebar">
-        <div class="sidebar-section">Navigation</div>
-        <nav class="sidebar-nav">
-            <a asp-action="Index" asp-controller="UserManagement"><i class="bi bi-people"></i> User Management</a>
-            <a href="#" class="active"><i class="bi bi-shield-lock"></i> Auth Settings</a>
-        </nav>
-    </aside>
-
-    <main class="platform-main">
-        <div class="page-title">Authentication Settings</div>
-        <div class="page-sub">Configure how users authenticate to the platform</div>
+<main class="app-main">
+    <div class="page-title">Authentication Settings</div>
+    <div class="page-sub">Configure how users authenticate to the platform</div>
 
         @if (TempData["Success"] != null)
         {
@@ -99,7 +53,7 @@
         <div class="card-panel">
             <form asp-action="Save" asp-controller="AuthSettings" method="post">
                 @Html.AntiForgeryToken()
-                <h6 style="color:#294993;font-weight:700;margin-bottom:14px;">Authentication Mode</h6>
+                <h6 style="color:#1a2a5e;font-weight:700;margin-bottom:14px;">Authentication Mode</h6>
 
                 <div class="auth-mode-card @(Model.AuthMode == "AppPassword" ? "selected" : "")" onclick="selectMode('AppPassword')">
                     <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
@@ -122,7 +76,7 @@
                 </div>
 
                 <div class="ldap-config" id="ldapConfig" style="display: @(Model.AuthMode == "LDAP" ? "block" : "none");">
-                    <h6 style="color:#294993;margin-bottom:14px;">LDAP Configuration</h6>
+                    <h6 style="color:#1a2a5e;margin-bottom:14px;">LDAP Configuration</h6>
                     <div class="form-row">
                         <div class="form-group">
                             <label>LDAP Server</label>
@@ -162,8 +116,8 @@
                 </div>
             </form>
         </div>
-    </main>
-</div>
+</main>
+</div><!-- close app-layout -->
 
 @section Scripts {
 <script>

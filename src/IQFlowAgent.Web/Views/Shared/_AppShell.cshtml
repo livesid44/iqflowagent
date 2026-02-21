@@ -1,0 +1,122 @@
+@* Shared App Shell: Header + Sidebar (matching the FlowIQ wireframe theme)
+   Usage: @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "intake" } })
+   ActivePage values: intake, analysis, usermgmt, authsettings
+*@
+@{
+    var activePage = (string?)ViewData["ActivePage"] ?? "";
+    string Nav(string page) => activePage.Equals(page, StringComparison.OrdinalIgnoreCase) ? "sidebar-link active" : "sidebar-link";
+}
+
+<style>
+    body { background: #f5f6fa; margin: 0; font-family: 'Segoe UI', sans-serif; }
+
+    /* ── Header ────────────────────────────────────────────── */
+    .app-header {
+        background: #fff;
+        border-bottom: 2px solid #e0e0e0;
+        padding: 0 20px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .app-logo img { height: 36px; width: auto; }
+    .app-user { display: flex; align-items: center; gap: 12px; }
+    .app-username { font-size: 0.88rem; color: #555; }
+    .btn-logout {
+        background: #e31837; border: none; color: #fff;
+        border-radius: 6px; padding: 6px 16px; font-size: 0.82rem; cursor: pointer;
+    }
+    .btn-logout:hover { background: #c01530; }
+
+    /* ── Layout wrapper ─────────────────────────────────────── */
+    .app-layout {
+        display: flex;
+        margin-top: 60px;
+        min-height: calc(100vh - 60px);
+    }
+
+    /* ── Sidebar ────────────────────────────────────────────── */
+    .app-sidebar {
+        width: 210px;
+        min-width: 210px;
+        background: #e31837;
+        padding: 16px 0 20px;
+        min-height: calc(100vh - 60px);
+        position: sticky; top: 60px;
+        align-self: flex-start;
+    }
+    .sidebar-section-title {
+        padding: 8px 18px 4px;
+        color: rgba(255,255,255,0.65);
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        font-weight: 600;
+        margin-top: 8px;
+    }
+    .sidebar-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 18px;
+        color: rgba(255,255,255,0.88);
+        text-decoration: none;
+        font-size: 0.88rem;
+        transition: all 0.18s;
+        border-left: 3px solid transparent;
+    }
+    .sidebar-link:hover {
+        background: rgba(0,0,0,0.12);
+        color: #fff;
+        border-left-color: #fff;
+    }
+    .sidebar-link.active {
+        background: rgba(0,0,0,0.18);
+        color: #fff;
+        border-left-color: #fff;
+        font-weight: 600;
+    }
+    .sidebar-link .bi { font-size: 1rem; opacity: 0.9; }
+    .sidebar-link img { width: 18px; height: 18px; filter: brightness(0) invert(1); opacity: 0.88; }
+    .sidebar-link.active img { opacity: 1; }
+
+    /* ── Main content ────────────────────────────────────────── */
+    .app-main { flex: 1; padding: 28px 32px; min-width: 0; }
+    .page-title { font-size: 1.45rem; font-weight: 700; color: #1a2a5e; margin-bottom: 4px; }
+    .page-sub { color: #888; font-size: 0.88rem; margin-bottom: 22px; }
+</style>
+
+<header class="app-header">
+    <div class="app-logo">
+        <img src="~/images/aura.png" alt="AURA IQFlowAgent" />
+    </div>
+    <div class="app-user">
+        <span class="app-username"><i class="bi bi-person-circle me-1"></i>@User.Identity?.Name</span>
+        <form asp-action="Logout" asp-controller="Account" method="post" style="margin:0;">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn-logout">Logout</button>
+        </form>
+    </div>
+</header>
+
+<div class="app-layout">
+    <aside class="app-sidebar">
+        <div class="sidebar-section-title">Process</div>
+        <a asp-controller="Intake" asp-action="Index" class="@Nav("intake")">
+            <i class="bi bi-inbox"></i> <span>Intake</span>
+        </a>
+        <a asp-controller="Analysis" asp-action="Index" class="@Nav("analysis")">
+            <img src="~/images/AiAnalysis.svg" alt="" /> <span>AI Analysis</span>
+        </a>
+        <div class="sidebar-section-title">Admin</div>
+        <a asp-controller="UserManagement" asp-action="Index" class="@Nav("usermgmt")">
+            <i class="bi bi-people"></i> <span>User Management</span>
+        </a>
+        <a asp-controller="AuthSettings" asp-action="Index" class="@Nav("authsettings")">
+            <i class="bi bi-shield-lock"></i> <span>Auth Settings</span>
+        </a>
+    </aside>
+    @* Main content injected by each page *@

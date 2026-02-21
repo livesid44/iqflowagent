@@ -2,42 +2,10 @@
 @{
     Layout = "_Layout";
     ViewData["Title"] = "User Management";
+    ViewData["ActivePage"] = "usermgmt";
 }
 
 <style>
-    body { background: #f5f6fa; }
-    .platform-header {
-        background: #294993;
-        color: #fff;
-        padding: 0 20px;
-        height: 56px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    }
-    .platform-logo { font-weight: 900; font-size: 1.3rem; letter-spacing: 1px; color: #fff; }
-    .platform-logo span { color: #e31837; }
-    .platform-layout { display: flex; margin-top: 56px; min-height: calc(100vh - 56px); }
-    .platform-sidebar {
-        width: 220px; min-width: 220px; background: #1e2d5a; color: #fff;
-        padding: 20px 0; min-height: calc(100vh - 56px);
-    }
-    .sidebar-nav a {
-        display: flex; align-items: center; gap: 10px;
-        padding: 12px 20px; color: #b0c4de; text-decoration: none;
-        font-size: 0.9rem; transition: all 0.2s;
-    }
-    .sidebar-nav a:hover, .sidebar-nav a.active {
-        background: rgba(227,24,55,0.15); color: #fff;
-        border-left: 3px solid #e31837;
-    }
-    .sidebar-nav a .bi { font-size: 1.1rem; }
-    .sidebar-section { padding: 10px 20px 5px; color: #7a8db5; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
-    .platform-main { flex: 1; padding: 30px; }
-    .page-title { font-size: 1.5rem; font-weight: 700; color: #294993; margin-bottom: 5px; }
-    .page-sub { color: #888; font-size: 0.9rem; margin-bottom: 20px; }
     .card-panel {
         background: #fff; border-radius: 12px; padding: 24px;
         box-shadow: 0 2px 12px rgba(0,0,0,0.07);
@@ -49,50 +17,30 @@
     }
     .btn-add:hover { background: #c01530; }
     .users-table table { width: 100%; border-collapse: collapse; }
-    .users-table th { background: #f0f4ff; color: #294993; font-size: 0.85rem; padding: 12px 14px; text-align: left; }
+    .users-table th { background: #f0f4ff; color: #1a2a5e; font-size: 0.85rem; padding: 12px 14px; text-align: left; }
     .users-table td { padding: 12px 14px; border-bottom: 1px solid #f0f0f0; font-size: 0.9rem; vertical-align: middle; }
     .users-table tr:hover td { background: #fafbff; }
-    .role-badge {
-        padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600;
-    }
+    .role-badge { padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
     .role-superadmin { background: #ffe0e6; color: #c01530; }
     .role-admin { background: #dbeafe; color: #1d4ed8; }
     .role-user { background: #d1fae5; color: #065f46; }
     .status-active { background: #d1fae5; color: #065f46; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
     .status-inactive { background: #fef3c7; color: #92400e; padding: 3px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
-    .btn-edit { background: #294993; border: none; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 0.8rem; cursor: pointer; }
+    .btn-edit { background: #1a2a5e; border: none; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 0.8rem; cursor: pointer; }
     .btn-delete { background: #e31837; border: none; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 0.8rem; cursor: pointer; }
     .add-user-form { background: #f8faff; border: 1px solid #dbe4ff; border-radius: 10px; padding: 20px; margin-top: 20px; }
     .form-row { display: flex; gap: 16px; flex-wrap: wrap; }
     .form-group { flex: 1; min-width: 200px; margin-bottom: 12px; }
     .form-group label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 4px; font-weight: 500; }
     .form-group input, .form-group select { width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; font-size: 0.9rem; }
-    .form-group input:focus, .form-group select:focus { border-color: #294993; outline: none; }
+    .form-group input:focus, .form-group select:focus { border-color: #1a2a5e; outline: none; }
 </style>
 
-<header class="platform-header">
-    <div class="platform-logo">IQ<span>Flow</span>Agent</div>
-    <div class="d-flex align-items-center gap-3">
-        <span style="font-size:0.9rem;">@User.Identity?.Name</span>
-        <form asp-action="Logout" asp-controller="Account" method="post" style="margin:0;">
-            @Html.AntiForgeryToken()
-            <button type="submit" class="btn btn-sm" style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:5px 14px;">Logout</button>
-        </form>
-    </div>
-</header>
+@await Html.PartialAsync("_AppShell")
 
-<div class="platform-layout">
-    <aside class="platform-sidebar">
-        <div class="sidebar-section">Navigation</div>
-        <nav class="sidebar-nav">
-            <a href="#" class="active"><i class="bi bi-people"></i> User Management</a>
-            <a asp-action="Index" asp-controller="AuthSettings"><i class="bi bi-shield-lock"></i> Auth Settings</a>
-        </nav>
-    </aside>
-
-    <main class="platform-main">
-        <div class="page-title">User Management</div>
-        <div class="page-sub">Manage platform users and roles</div>
+<main class="app-main">
+    <div class="page-title">User Management</div>
+    <div class="page-sub">Manage platform users and roles</div>
 
         @if (TempData["Success"] != null)
         {
@@ -105,7 +53,7 @@
 
         <div class="card-panel">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 style="margin:0;color:#294993;">Users</h5>
+                <h5 style="margin:0;color:#1a2a5e;">Users</h5>
                 <button class="btn-add" onclick="toggleAddForm()">+ Add User</button>
             </div>
 
@@ -160,7 +108,7 @@
 
             <!-- Add/Edit User Form -->
             <div class="add-user-form" id="addUserForm" style="display:none;">
-                <h5 style="color:#294993;margin-bottom:16px;" id="formTitle">Add New User</h5>
+                <h5 style="color:#1a2a5e;margin-bottom:16px;" id="formTitle">Add New User</h5>
                 <form asp-action="Create" asp-controller="UserManagement" method="post" id="userForm">
                     @Html.AntiForgeryToken()
                     <input type="hidden" id="formUserId" name="Id" value="" />
@@ -202,8 +150,8 @@
                 </form>
             </div>
         </div>
-    </main>
-</div>
+</main>
+</div><!-- close app-layout -->
 
 @section Scripts {
 <script>

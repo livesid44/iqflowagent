@@ -31,6 +31,7 @@ builder.Services.ConfigureApplicationCookie(options =>
 
 builder.Services.AddScoped<IAuthSettingsService, AuthSettingsService>();
 builder.Services.AddScoped<ILdapAuthService, LdapAuthService>();
+builder.Services.AddScoped<IAzureOpenAiService, AzureOpenAiService>();
 
 builder.Services.AddControllersWithViews();
 

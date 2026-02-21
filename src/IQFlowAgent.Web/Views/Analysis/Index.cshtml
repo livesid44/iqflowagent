@@ -1,0 +1,218 @@
+@model List<IQFlowAgent.Web.Models.IntakeRecord>
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "AI Analysis";
+    ViewData["ActivePage"] = "analysis";
+
+    var complete = Model.Count(x => x.Status == "Complete");
+    var inProgress = Model.Count(x => x.Status is "Analyzing" or "Submitted");
+    var errors = Model.Count(x => x.Status == "Error");
+    var drafts = Model.Count(x => x.Status == "Draft");
+}
+
+<style>
+    /* ── Status summary cards ─────────────────────────────── */
+    .dash-cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
+    .dash-card {
+        flex: 1; min-width: 140px; background: #fff;
+        border-radius: 12px; padding: 20px 18px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.07); text-align: center;
+    }
+    .dash-card .dc-num { font-size: 2.4rem; font-weight: 800; line-height: 1; }
+    .dash-card .dc-label { font-size: 0.8rem; color: #888; margin-top: 5px; }
+    .dash-card.green .dc-num { color: #059669; }
+    .dash-card.orange .dc-num { color: #d97706; }
+    .dash-card.red .dc-num { color: #e31837; }
+    .dash-card.blue .dc-num { color: #1a2a5e; }
+
+    /* ── Suggestion card ─────────────────────────────────── */
+    .suggestion-card {
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+        margin-bottom: 18px; overflow: hidden;
+    }
+    .sug-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 22px; border-bottom: 1px solid #f0f0f0;
+        background: #f8faff;
+    }
+    .sug-header h3 { font-size: 0.95rem; font-weight: 700; color: #1a2a5e; margin: 0; }
+    .conf-badge {
+        padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
+    }
+    .conf-high   { background: #d1fae5; color: #065f46; }
+    .conf-medium { background: #fef3c7; color: #92400e; }
+    .conf-low    { background: #ffe0e6; color: #c01530; }
+    .sug-body { padding: 18px 22px; }
+    .sug-body h4 { font-size: 0.82rem; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .insights-list { list-style: none; padding: 0; margin: 0 0 16px; }
+    .insights-list li { display: flex; align-items: flex-start; gap: 7px; padding: 6px 0; font-size: 0.87rem; color: #444; border-bottom: 1px solid #f5f5f5; }
+    .insights-list li:last-child { border-bottom: none; }
+    .insights-list .bi-check-circle-fill { color: #059669; }
+    .insights-list .bi-exclamation-circle-fill { color: #d97706; }
+    .rec-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: #f8faff; border-radius: 7px; margin-bottom: 8px; font-size: 0.86rem; color: #444; }
+    .rec-row .bi { color: #e31837; font-size: 1rem; flex-shrink: 0; }
+    .sug-actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn-view-full {
+        background: #1a2a5e; border: none; color: #fff;
+        border-radius: 7px; padding: 7px 16px; font-size: 0.82rem;
+        cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    .btn-view-full:hover { background: #294993; color: #fff; }
+
+    /* ── Empty state ─────────────────────────────────────── */
+    .empty-state { text-align: center; padding: 60px 20px; color: #aaa; font-size: 0.9rem; }
+    .empty-state .bi { font-size: 2.5rem; display: block; margin-bottom: 10px; }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <div class="page-title">AI Analysis Dashboard</div>
+    <div class="page-sub">LLM-powered process discovery and validation using Azure OpenAI</div>
+
+    <!-- Stats cards -->
+    <div class="dash-cards">
+        <div class="dash-card green">
+            <div class="dc-num">@complete</div>
+            <div class="dc-label">Complete</div>
+        </div>
+        <div class="dash-card orange">
+            <div class="dc-num">@inProgress</div>
+            <div class="dc-label">In Progress</div>
+        </div>
+        <div class="dash-card red">
+            <div class="dc-num">@errors</div>
+            <div class="dc-label">Errors</div>
+        </div>
+        <div class="dash-card blue">
+            <div class="dc-num">@drafts</div>
+            <div class="dc-label">Drafts</div>
+        </div>
+        <div class="dash-card blue">
+            <div class="dc-num">@Model.Count</div>
+            <div class="dc-label">Total Intakes</div>
+        </div>
+    </div>
+
+    @{
+        var completed = Model.Where(x => x.Status == "Complete").ToList();
+    }
+
+    @if (Model.Count == 0)
+    {
+        <div class="empty-state">
+            <i class="bi bi-cpu"></i>
+            No intakes analysed yet.
+            <br />
+            <a asp-controller="Intake" asp-action="Create" style="color:#e31837;text-decoration:none;font-weight:600;">
+                Create your first intake →
+            </a>
+        </div>
+    }
+    else
+    {
+        var pending = Model.Where(x => x.Status is "Analyzing" or "Submitted" or "Error" or "Draft").ToList();
+
+        <!-- LLM Suggestions — show completed intakes with parsed results -->
+        @if (completed.Count > 0)
+        {
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                <h2 style="font-size:1.05rem;font-weight:700;color:#1a2a5e;margin:0;">
+                    <i class="bi bi-robot me-2" style="color:#e31837;"></i>LLM Suggestions &amp; Insights
+                </h2>
+                <a asp-controller="Intake" asp-action="Create" style="color:#e31837;font-size:0.85rem;text-decoration:none;font-weight:600;">
+                    + New Intake
+                </a>
+            </div>
+
+            @foreach (var record in completed)
+            {
+                JsonElement? analysis = null;
+                try { if (!string.IsNullOrWhiteSpace(record.AnalysisResult)) analysis = JsonSerializer.Deserialize<JsonElement>(record.AnalysisResult); } catch { }
+                var confidence = analysis.HasValue && analysis.Value.TryGetProperty("confidenceScore", out var cv) ? cv.GetInt32() : 0;
+                var confClass = confidence >= 85 ? "conf-high" : confidence >= 65 ? "conf-medium" : "conf-low";
+                var insights = new List<string>();
+                var recs = new List<(string icon, string text)>();
+                if (analysis.HasValue)
+                {
+                    if (analysis.Value.TryGetProperty("keyInsights", out var ins))
+                        insights = ins.EnumerateArray().Select(e => e.GetString() ?? "").Take(4).ToList();
+                    if (analysis.Value.TryGetProperty("recommendations", out var recArr))
+                        recs = recArr.EnumerateArray().Select(e => (
+                            e.TryGetProperty("icon", out var ic) ? ic.GetString() ?? "arrow-right" : "arrow-right",
+                            e.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : ""
+                        )).Take(3).ToList();
+                }
+
+                <div class="suggestion-card">
+                    <div class="sug-header">
+                        <h3><i class="bi bi-diagram-3 me-2"></i>@record.ProcessName</h3>
+                        <span class="conf-badge @confClass">@confidence% Confidence</span>
+                    </div>
+                    <div class="sug-body">
+                        @if (insights.Count > 0)
+                        {
+                            <h4>Key Insights</h4>
+                            <ul class="insights-list">
+                                @foreach (var ins in insights)
+                                {
+                                    <li><i class="bi bi-check-circle-fill"></i> @ins</li>
+                                }
+                            </ul>
+                        }
+                        @if (recs.Count > 0)
+                        {
+                            <h4>Recommendations</h4>
+                            @foreach (var (icon, text) in recs)
+                            {
+                                <div class="rec-row"><i class="bi bi-arrow-right-circle-fill"></i> @text</div>
+                            }
+                        }
+                        <div class="sug-actions">
+                            <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id" class="btn-view-full">
+                                <i class="bi bi-eye me-1"></i> View Full Analysis
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+
+        <!-- In-progress or pending intakes -->
+        @if (pending.Count > 0)
+        {
+            <div style="margin-bottom:12px;margin-top:22px;">
+                <h2 style="font-size:1.05rem;font-weight:700;color:#1a2a5e;margin:0;">
+                    <i class="bi bi-hourglass-split me-2" style="color:#d97706;"></i>Pending / In-Progress
+                </h2>
+            </div>
+            @foreach (var record in pending)
+            {
+                <div class="suggestion-card">
+                    <div class="sug-header">
+                        <h3>@record.ProcessName <code style="font-size:0.73rem;color:#aaa;background:#f1f5f9;padding:2px 7px;border-radius:4px;margin-left:6px;">@record.IntakeId</code></h3>
+                        <span class="conf-badge @(record.Status == "Error" ? "conf-low" : record.Status == "Analyzing" ? "conf-medium" : "")">
+                            @record.Status
+                        </span>
+                    </div>
+                    <div class="sug-body" style="padding:14px 22px;">
+                        <p style="color:#888;font-size:0.85rem;margin:0;">
+                            @(record.Status == "Error" ? "Analysis encountered an error." :
+                              record.Status == "Analyzing" ? "Analysis is currently running…" :
+                              record.Status == "Submitted" ? "Submitted — analysis will start shortly." :
+                              "Draft — not yet submitted.")
+                        </p>
+                        <div class="sug-actions mt-3">
+                            <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@record.Id" class="btn-view-full">
+                                <i class="bi bi-eye me-1"></i> View
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    }
+</main>
+</div><!-- close app-layout -->
