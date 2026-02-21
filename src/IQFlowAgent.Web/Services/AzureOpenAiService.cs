@@ -25,6 +25,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         var endpoint = _config["AzureOpenAI:Endpoint"];
         var apiKey = _config["AzureOpenAI:ApiKey"];
         var deployment = _config["AzureOpenAI:DeploymentName"];
+        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
         var maxTokens = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -43,18 +44,20 @@ public class AzureOpenAiService : IAzureOpenAiService
         {
             _logger.LogWarning(
                 "Azure OpenAI endpoint '{Endpoint}' is not a valid URI. " +
-                "Expected format: https://YOUR_RESOURCE.openai.azure.com/. Returning mock analysis.",
+                "Expected format: https://YOUR_RESOURCE.cognitiveservices.azure.com/. Returning mock analysis.",
                 endpoint);
             return GenerateMockAnalysis(intake);
         }
 
         try
         {
+            var serviceVersion = ResolveServiceVersion(apiVersion);
             _logger.LogInformation(
-                "Calling Azure OpenAI — endpoint: {Endpoint}, deployment: {Deployment}",
-                endpointUri.Host, deployment);
+                "Calling Azure OpenAI — endpoint: {Endpoint}, deployment: {Deployment}, api-version: {ApiVersion}",
+                endpointUri.Host, deployment, apiVersion);
 
-            var client = new AzureOpenAIClient(endpointUri, new AzureKeyCredential(apiKey));
+            var clientOptions = new AzureOpenAIClientOptions(serviceVersion);
+            var client = new AzureOpenAIClient(endpointUri, new AzureKeyCredential(apiKey!), clientOptions);
             var chatClient = client.GetChatClient(deployment);
 
             var systemPrompt = """
@@ -118,6 +121,20 @@ public class AzureOpenAiService : IAzureOpenAiService
             return GenerateMockAnalysis(intake);
         }
     }
+
+    private static AzureOpenAIClientOptions.ServiceVersion ResolveServiceVersion(string? apiVersion) =>
+        apiVersion?.ToLowerInvariant() switch
+        {
+            "2024-06-01"           => AzureOpenAIClientOptions.ServiceVersion.V2024_06_01,
+            "2024-08-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_08_01_Preview,
+            "2024-09-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_09_01_Preview,
+            "2024-10-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_10_01_Preview,
+            "2024-10-21"           => AzureOpenAIClientOptions.ServiceVersion.V2024_10_21,
+            "2024-12-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2024_12_01_Preview,
+            "2025-01-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2025_01_01_Preview,
+            "2025-03-01-preview"   => AzureOpenAIClientOptions.ServiceVersion.V2025_03_01_Preview,
+            _                      => AzureOpenAIClientOptions.ServiceVersion.V2025_01_01_Preview
+        };
 
     private static string BuildUserMessage(IntakeRecord intake, string? documentText)
     {
