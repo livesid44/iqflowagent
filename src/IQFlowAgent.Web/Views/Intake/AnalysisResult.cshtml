@@ -360,7 +360,21 @@
         @if (analysis!.Value.TryGetProperty("actionItems", out var actionItems) && actionItems.GetArrayLength() > 0)
         {
             <div class="analysis-card">
-                <h3><i class="bi bi-list-check"></i> Action Items</h3>
+                <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <span><i class="bi bi-list-check"></i> Action Items</span>
+                    <form asp-controller="Task" asp-action="CreateFromAction" method="post" id="createAllForm">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                        <input type="hidden" name="title" id="allTitle" value="[BATCH]" />
+                        <input type="hidden" name="description" id="allDesc" value="" />
+                        <input type="hidden" name="priority" id="allPri" value="High" />
+                        <input type="hidden" name="owner" id="allOwner" value="@Model.ProcessOwnerEmail" />
+                        <button type="button" onclick="createAllTasks()"
+                            style="background:#1a2a5e;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:0.78rem;cursor:pointer;font-weight:600;">
+                            <i class="bi bi-kanban me-1"></i> Create All as Tasks
+                        </button>
+                    </form>
+                </h3>
                 <div class="action-list">
                     @{ int actionNum = 0; }
                     @foreach (var item in actionItems.EnumerateArray())
@@ -370,7 +384,7 @@
                         var aDesc     = item.TryGetProperty("description", out var ad) ? ad.GetString() ?? "" : "";
                         var aOwner    = item.TryGetProperty("owner",       out var ao) ? ao.GetString() ?? "" : "";
                         var aPriority = item.TryGetProperty("priority",    out var ap) ? ap.GetString() ?? "Medium" : "Medium";
-                        <div class="action-item priority-@aPriority">
+                        <div class="action-item priority-@aPriority" style="position:relative;">
                             <div class="action-num">@actionNum</div>
                             <div class="action-body">
                                 <div class="action-title">@aTitle</div>
@@ -384,6 +398,20 @@
                                         <span class="action-owner"><i class="bi bi-person"></i>@aOwner</span>
                                     }
                                     <span class="priority-badge @aPriority">@aPriority</span>
+                                    <!-- Create single task form -->
+                                    <form asp-controller="Task" asp-action="CreateFromAction" method="post"
+                                          style="margin:0;margin-left:auto;">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                                        <input type="hidden" name="title" value="@aTitle" />
+                                        <input type="hidden" name="description" value="@aDesc" />
+                                        <input type="hidden" name="priority" value="@aPriority" />
+                                        <input type="hidden" name="owner" value="@(string.IsNullOrWhiteSpace(aOwner) ? Model.ProcessOwnerEmail : aOwner)" />
+                                        <button type="submit"
+                                            style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:0.76rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                            <i class="bi bi-plus-circle me-1"></i>Create Task
+                                        </button>
+                                    </form>
                                 </div>
                             </div>
                         </div>
@@ -503,6 +531,15 @@
         }
     }
 
+    <!-- View Tasks link -->
+    <div style="margin-top:12px;">
+        <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
+           style="display:inline-flex;align-items:center;gap:7px;background:#1a2a5e;color:#fff;
+                  border-radius:8px;padding:9px 20px;text-decoration:none;font-size:0.87rem;font-weight:600;">
+            <i class="bi bi-kanban"></i> View Tasks for this Intake
+        </a>
+    </div>
+
     <!-- Analysed timestamp -->
     @if (Model.AnalyzedAt.HasValue)
     {
@@ -523,5 +560,26 @@
                 ?.querySelector('.confidence-pct')?.textContent?.replace('%','') + '%', 100);
         }
     });
+
+    // Collect all action items and submit them one by one via fetch
+    function createAllTasks() {
+        // Filter once: exclude the hidden "createAllForm" placeholder
+        const forms = Array.from(document.querySelectorAll('form[action*="CreateFromAction"]'))
+            .filter(f => f.id !== 'createAllForm');
+        if (!forms.length) return;
+
+        let idx = 0;
+        function submitNext() {
+            if (idx >= forms.length) {
+                window.location.href = '@Url.Action("Index", "Task", new { intakeRecordId = Model.Id })';
+                return;
+            }
+            const data = new FormData(forms[idx]);
+            fetch(forms[idx].action, { method: 'POST', body: data })
+                .then(() => { idx++; submitNext(); })
+                .catch(() => { idx++; submitNext(); });
+        }
+        submitNext();
+    }
 </script>
 }
