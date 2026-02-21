@@ -11,18 +11,30 @@ dotnet run
 
 Default login: **admin** / **Admin@123!** (SuperAdmin)
 
-## Azure OpenAI Configuration
+## Configuration – User Secrets (Development)
 
-Set Azure OpenAI credentials via **user secrets** (development) or **environment variables** / **Azure Key Vault** (production). Do **not** commit real API keys to source control.
+Set credentials via .NET User Secrets so real keys are never committed to source control.  
+Run these commands from inside the `src/IQFlowAgent.Web` directory:
 
 ```bash
-# Development – user secrets
-dotnet user-secrets set "AzureOpenAI:Endpoint" "https://YOUR_RESOURCE.openai.azure.com/"
-dotnet user-secrets set "AzureOpenAI:ApiKey"   "YOUR_API_KEY"
-dotnet user-secrets set "AzureOpenAI:DeploymentName" "gpt-4o"
+cd src/IQFlowAgent.Web
+
+# Azure OpenAI (Azure AI Foundry – cognitiveservices.azure.com)
+dotnet user-secrets set "AzureOpenAI:Endpoint"        "https://YOUR_RESOURCE.cognitiveservices.azure.com/"
+dotnet user-secrets set "AzureOpenAI:ApiKey"           "YOUR_API_KEY"
+dotnet user-secrets set "AzureOpenAI:DeploymentName"   "gpt-4o"
+dotnet user-secrets set "AzureOpenAI:ApiVersion"       "2025-01-01-preview"
+
+# Azure Blob Storage (optional – falls back to local disk if not set)
+dotnet user-secrets set "AzureStorage:ConnectionString" "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net"
+dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
 ```
 
-Without Azure OpenAI configured the application runs with mock analysis results.
+> **Tip:** If you see *"Could not find a valid 'UserSecretsId'"* make sure you are running
+> the commands from the `src/IQFlowAgent.Web` directory where the `.csproj` lives.
+
+Without Azure OpenAI configured the application runs with mock analysis results.  
+Without Azure Blob Storage configured uploaded documents are stored in `wwwroot/uploads/`.
 
 ## Roles
 
