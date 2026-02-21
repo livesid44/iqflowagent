@@ -41,7 +41,13 @@ public class IntakeController : Controller
         return View(intakes);
     }
 
-    // GET /Intake/Create — intake form
+    // GET /Intake/Chat — conversational chat-style intake
+    public IActionResult Chat()
+    {
+        return View();
+    }
+
+    // GET /Intake/Create — traditional form intake (kept for fallback)
     public IActionResult Create()
     {
         return View(new IntakeViewModel());

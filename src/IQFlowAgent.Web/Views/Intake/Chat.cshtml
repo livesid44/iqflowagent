@@ -1,0 +1,852 @@
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "New Intake";
+    ViewData["ActivePage"] = "intake";
+    var antiForgeryToken = Html.AntiForgeryToken().ToString();
+}
+
+<style>
+/* ── Chat container ──────────────────────────────────────── */
+.chat-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 60px);
+    background: #f0f4ff;
+}
+
+/* ── Chat top bar ────────────────────────────────────────── */
+.chat-topbar {
+    background: #1a2a5e;
+    color: #fff;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+}
+.chat-topbar-back {
+    color: rgba(255,255,255,0.75);
+    text-decoration: none;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.chat-topbar-back:hover { color: #fff; }
+.chat-topbar-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex: 1;
+}
+.chat-topbar-id {
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.55);
+}
+
+/* ── Progress bar ────────────────────────────────────────── */
+.chat-progress-wrap {
+    background: rgba(255,255,255,0.15);
+    height: 4px;
+    flex-shrink: 0;
+}
+.chat-progress-fill {
+    height: 4px;
+    background: #e31837;
+    transition: width 0.4s ease;
+    width: 0%;
+}
+.chat-progress-label {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.7);
+    padding: 3px 24px 6px;
+    background: #1a2a5e;
+}
+
+/* ── Messages ────────────────────────────────────────────── */
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    scroll-behavior: smooth;
+}
+
+/* Bot bubble */
+.msg-bot {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    max-width: 72%;
+    align-self: flex-start;
+}
+.bot-avatar {
+    width: 34px;
+    height: 34px;
+    background: #1a2a5e;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+.bot-bubble {
+    background: #fff;
+    border-radius: 18px 18px 18px 4px;
+    padding: 12px 16px;
+    font-size: 0.92rem;
+    color: #333;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+    line-height: 1.55;
+}
+.bot-bubble .highlight { color: #e31837; font-weight: 600; }
+
+/* User bubble */
+.msg-user {
+    display: flex;
+    justify-content: flex-end;
+    align-self: flex-end;
+    max-width: 72%;
+}
+.user-bubble {
+    background: #e31837;
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+    padding: 12px 16px;
+    font-size: 0.92rem;
+    box-shadow: 0 2px 8px rgba(227,24,55,0.2);
+    line-height: 1.55;
+}
+
+/* Typing indicator */
+.typing-indicator {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    padding: 10px 14px;
+}
+.typing-dot {
+    width: 7px;
+    height: 7px;
+    background: #999;
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@@keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+}
+
+/* ── Input area ──────────────────────────────────────────── */
+.chat-input-area {
+    background: #fff;
+    border-top: 1px solid #e8ecf5;
+    padding: 14px 20px;
+    flex-shrink: 0;
+}
+
+/* Quick-reply chips */
+.quick-replies {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+.qr-chip {
+    border: 2px solid #1a2a5e;
+    color: #1a2a5e;
+    background: #fff;
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.qr-chip:hover {
+    background: #1a2a5e;
+    color: #fff;
+}
+.qr-chip.red-chip {
+    border-color: #e31837;
+    color: #e31837;
+}
+.qr-chip.red-chip:hover { background: #e31837; color: #fff; }
+.qr-chip.gray-chip {
+    border-color: #94a3b8;
+    color: #64748b;
+}
+.qr-chip.gray-chip:hover { background: #94a3b8; color: #fff; }
+
+/* Text/email/number input row */
+.input-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.chat-text-input {
+    flex: 1;
+    border: 1.5px solid #d1d5db;
+    border-radius: 24px;
+    padding: 10px 18px;
+    font-size: 0.92rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.chat-text-input:focus { border-color: #1a2a5e; }
+.chat-send-btn {
+    background: #1a2a5e;
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+.chat-send-btn:hover { background: #e31837; }
+.chat-send-btn:disabled { background: #c0cfe8; cursor: not-allowed; }
+
+/* Skip button */
+.btn-skip {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-decoration: underline;
+    margin-top: 4px;
+}
+.btn-skip:hover { color: #64748b; }
+
+/* Upload zone in chat */
+.upload-zone-chat {
+    border: 2px dashed #c8d5f0;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    background: #f8faff;
+    cursor: pointer;
+    margin-bottom: 8px;
+    transition: all 0.2s;
+}
+.upload-zone-chat:hover { border-color: #1a2a5e; background: #eef2ff; }
+.upload-zone-chat .bi { font-size: 1.8rem; color: #c0cbe8; display: block; margin-bottom: 6px; }
+.upload-zone-chat p { color: #888; font-size: 0.83rem; margin: 0; }
+#chatFileInput { display: none; }
+#filePreviewChat { font-size: 0.82rem; color: #1a2a5e; margin-top: 6px; }
+
+/* ── Summary screen ──────────────────────────────────────── */
+.summary-card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 20px 22px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+    font-size: 0.88rem;
+    max-width: 520px;
+}
+.summary-card h4 { font-size: 0.95rem; font-weight: 700; color: #1a2a5e; margin-bottom: 14px; }
+.summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #f5f5f5;
+    gap: 12px;
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-row .s-key { color: #888; font-size: 0.82rem; flex-shrink: 0; }
+.summary-row .s-val { font-weight: 600; color: #1a2a5e; text-align: right; }
+
+.btn-submit-chat {
+    background: #e31837;
+    border: none;
+    color: #fff;
+    border-radius: 24px;
+    padding: 12px 32px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-top: 14px;
+    width: 100%;
+}
+.btn-submit-chat:hover { background: #c01530; }
+
+.success-anim {
+    text-align: center;
+    padding: 20px;
+}
+.success-anim .checkmark {
+    font-size: 3rem;
+    color: #059669;
+    animation: pop 0.4s ease;
+}
+@@keyframes pop {
+    0% { transform: scale(0); }
+    80% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<div class="chat-wrapper">
+
+    <!-- Top bar -->
+    <div class="chat-topbar">
+        <a href="/Intake" class="chat-topbar-back"><i class="bi bi-arrow-left"></i> Intakes</a>
+        <div class="chat-topbar-title"><i class="bi bi-robot me-2"></i>Process Intake Assistant</div>
+        <div class="chat-topbar-id" id="topbarIntakeId"></div>
+    </div>
+    <div class="chat-progress-wrap" style="background:#1a2a5e;">
+        <div class="chat-progress-fill" id="progressFill"></div>
+    </div>
+    <div class="chat-progress-label" id="progressLabel">Getting started…</div>
+
+    <!-- Messages -->
+    <div class="chat-messages" id="chatMessages"></div>
+
+    <!-- Input area -->
+    <div class="chat-input-area" id="inputArea"></div>
+</div>
+
+<!-- Hidden form that POSTs to the existing Create endpoint -->
+<form id="hiddenForm" asp-action="Create" asp-controller="Intake" method="post" enctype="multipart/form-data" style="display:none;">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="ProcessName"          id="f_ProcessName" />
+    <input type="hidden" name="Description"          id="f_Description" />
+    <input type="hidden" name="BusinessUnit"         id="f_BusinessUnit" />
+    <input type="hidden" name="Department"           id="f_Department" />
+    <input type="hidden" name="ProcessOwnerName"     id="f_ProcessOwnerName" />
+    <input type="hidden" name="ProcessOwnerEmail"    id="f_ProcessOwnerEmail" />
+    <input type="hidden" name="ProcessType"          id="f_ProcessType" />
+    <input type="hidden" name="EstimatedVolumePerDay" id="f_EstimatedVolumePerDay" />
+    <input type="hidden" name="Priority"             id="f_Priority" />
+    <input type="hidden" name="Country"              id="f_Country" />
+    <input type="hidden" name="City"                 id="f_City" />
+    <input type="hidden" name="SiteLocation"         id="f_SiteLocation" />
+    <input type="hidden" name="TimeZone"             id="f_TimeZone" />
+    <input type="file"   name="Document"             id="f_Document" />
+</form>
+
+@section Scripts {
+<script>
+// ─────────────────────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────────────────────
+const data = {
+    ProcessName: '', Description: '', BusinessUnit: '', Department: '',
+    ProcessOwnerName: '', ProcessOwnerEmail: '', ProcessType: 'Manual',
+    EstimatedVolumePerDay: 0, Priority: 'Medium',
+    Country: '', City: '', SiteLocation: '', TimeZone: '',
+    hasFile: false
+};
+let currentStep = 0;
+const TOTAL_STEPS = 14; // 13 questions (steps[]) + 1 summary step
+const LONG_MSG_THRESHOLD = 100;
+const LONG_TYPING_DELAY  = 900;
+const SHORT_TYPING_DELAY = 600;
+const SUMMARY_DESC_MAX   = 60;
+
+// ─────────────────────────────────────────────────────────────
+//  Step definitions
+// ─────────────────────────────────────────────────────────────
+const steps = [
+    {
+        key: 'ProcessName',
+        ask: () => "👋 Hi! I'm your Process Intake Assistant. Let's capture your business process details together.\n\nFirst — what is the <span class='highlight'>name</span> of this business process?",
+        type: 'text',
+        placeholder: 'e.g. Customer Service Call Handling',
+        required: true,
+        validate: v => v.trim().length >= 2 ? null : 'Please enter at least 2 characters.'
+    },
+    {
+        key: 'Description',
+        ask: () => `Got it — <span class='highlight'>${data.ProcessName}</span>. 📋\n\nCan you give me a brief <span class='highlight'>description</span> of what this process does?`,
+        type: 'textarea',
+        placeholder: 'Describe the process — what it does, key inputs & outputs…',
+        required: true,
+        validate: v => v.trim().length >= 10 ? null : 'Please provide at least 10 characters.'
+    },
+    {
+        key: 'BusinessUnit',
+        ask: () => `Thanks! Which <span class='highlight'>Business Unit</span> does this process belong to?`,
+        type: 'text',
+        placeholder: 'e.g. Operations, Finance, HR…',
+        required: true,
+        validate: v => v.trim().length >= 1 ? null : 'Business Unit is required.'
+    },
+    {
+        key: 'Department',
+        ask: () => `And the <span class='highlight'>Department</span> within <em>${data.BusinessUnit}</em>? (optional — press Skip if not applicable)`,
+        type: 'text',
+        placeholder: 'e.g. Customer Care, Accounts Payable…',
+        required: false,
+        skippable: true
+    },
+    {
+        key: 'ProcessOwnerName',
+        ask: () => `Who is the <span class='highlight'>Process Owner</span>? Please give their full name.`,
+        type: 'text',
+        placeholder: 'Full name',
+        required: true,
+        validate: v => v.trim().length >= 2 ? null : 'Please enter a name.'
+    },
+    {
+        key: 'ProcessOwnerEmail',
+        ask: () => `What is <span class='highlight'>${data.ProcessOwnerName}'s email address</span>?`,
+        type: 'email',
+        placeholder: 'owner@@company.com',
+        required: true,
+        validate: v => /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/.test(v) ? null : 'Please enter a valid email address.'
+    },
+    {
+        key: 'ProcessType',
+        ask: () => `How would you <span class='highlight'>classify</span> this process?`,
+        type: 'chips',
+        chips: ['Manual', 'Semi-Automated', 'Automated'],
+        default: 'Manual'
+    },
+    {
+        key: 'EstimatedVolumePerDay',
+        ask: () => `Approximately how many <span class='highlight'>transactions per day</span> does this process handle?`,
+        type: 'number',
+        placeholder: 'e.g. 500',
+        required: false,
+        skippable: true,
+        validate: v => (!v || parseInt(v) >= 0) ? null : 'Please enter a valid number.'
+    },
+    {
+        key: 'Priority',
+        ask: () => `What is the <span class='highlight'>priority</span> of this process?`,
+        type: 'chips',
+        chips: ['High', 'Medium', 'Low'],
+        chipsStyle: ['red-chip', '', 'gray-chip'],
+        default: 'Medium'
+    },
+    {
+        key: 'Country',
+        ask: () => `📍 Location time! In which <span class='highlight'>country</span> is this process located?`,
+        type: 'text',
+        placeholder: 'e.g. United States, United Kingdom, India…',
+        required: true,
+        validate: v => v.trim().length >= 2 ? null : 'Country is required.'
+    },
+    {
+        key: 'City',
+        ask: () => `And the <span class='highlight'>city</span>? (optional)`,
+        type: 'text',
+        placeholder: 'e.g. New York, London…',
+        required: false,
+        skippable: true
+    },
+    {
+        key: 'SiteLocation',
+        ask: () => `Any specific <span class='highlight'>site or office</span> location? (optional)`,
+        type: 'text',
+        placeholder: 'Building / floor / campus name…',
+        required: false,
+        skippable: true
+    },
+    {
+        key: 'TimeZone',
+        ask: () => `Which <span class='highlight'>time zone</span> does this process operate in? (optional)`,
+        type: 'select',
+        required: false,
+        skippable: true,
+        options: [
+            ['', '— Select time zone —'],
+            ['UTC-12:00','UTC-12:00 (Baker Island)'],
+            ['UTC-11:00','UTC-11:00 (Samoa)'],
+            ['UTC-10:00','UTC-10:00 (Hawaii)'],
+            ['UTC-08:00','UTC-08:00 (Pacific Time)'],
+            ['UTC-07:00','UTC-07:00 (Mountain Time)'],
+            ['UTC-06:00','UTC-06:00 (Central Time)'],
+            ['UTC-05:00','UTC-05:00 (Eastern Time)'],
+            ['UTC-04:00','UTC-04:00 (Atlantic Time)'],
+            ['UTC-03:00','UTC-03:00 (Brasília)'],
+            ['UTC+00:00','UTC+00:00 (London / GMT)'],
+            ['UTC+01:00','UTC+01:00 (Paris / Berlin)'],
+            ['UTC+02:00','UTC+02:00 (Cairo / Helsinki)'],
+            ['UTC+03:00','UTC+03:00 (Moscow / Riyadh)'],
+            ['UTC+04:00','UTC+04:00 (Dubai)'],
+            ['UTC+05:00','UTC+05:00 (Karachi)'],
+            ['UTC+05:30','UTC+05:30 (India / IST)'],
+            ['UTC+06:00','UTC+06:00 (Dhaka)'],
+            ['UTC+07:00','UTC+07:00 (Bangkok / Jakarta)'],
+            ['UTC+08:00','UTC+08:00 (Singapore / Beijing)'],
+            ['UTC+09:00','UTC+09:00 (Tokyo / Seoul)'],
+            ['UTC+10:00','UTC+10:00 (Sydney)'],
+            ['UTC+12:00','UTC+12:00 (Auckland)']
+        ]
+    },
+    {
+        key: 'Document',
+        ask: () => `📎 Do you have any supporting documents to upload? (optional)\nSupported: PDF, DOCX, TXT, CSV, JSON, MD`,
+        type: 'file',
+        required: false,
+        skippable: true
+    }
+];
+
+// ─────────────────────────────────────────────────────────────
+//  DOM helpers
+// ─────────────────────────────────────────────────────────────
+const msgEl = document.getElementById('chatMessages');
+const inputEl = document.getElementById('inputArea');
+const progressFill = document.getElementById('progressFill');
+const progressLabel = document.getElementById('progressLabel');
+
+function scrollBottom() {
+    setTimeout(() => { msgEl.scrollTop = msgEl.scrollHeight; }, 50);
+}
+
+function addBotMessage(html, delay = 0) {
+    return new Promise(resolve => {
+        // Show typing indicator
+        const typing = document.createElement('div');
+        typing.className = 'msg-bot';
+        typing.innerHTML = `
+            <div class="bot-avatar"><i class="bi bi-robot"></i></div>
+            <div class="bot-bubble">
+                <div class="typing-indicator">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            </div>`;
+        msgEl.appendChild(typing);
+        scrollBottom();
+
+        const typingDelay = delay || (html.length > LONG_MSG_THRESHOLD ? LONG_TYPING_DELAY : SHORT_TYPING_DELAY);
+        setTimeout(() => {
+            typing.querySelector('.bot-bubble').innerHTML = html.replace(/\n/g, '<br>');
+            scrollBottom();
+            resolve();
+        }, typingDelay);
+    });
+}
+
+function addUserMessage(text) {
+    const div = document.createElement('div');
+    div.className = 'msg-user';
+    div.innerHTML = `<div class="user-bubble">${escHtml(text)}</div>`;
+    msgEl.appendChild(div);
+    scrollBottom();
+}
+
+function escHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function setProgress(step) {
+    const pct = Math.round((step / TOTAL_STEPS) * 100);
+    progressFill.style.width = pct + '%';
+    progressLabel.textContent = step < TOTAL_STEPS
+        ? `Step ${step} of ${TOTAL_STEPS - 1}`
+        : 'All done!';
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Step runner
+// ─────────────────────────────────────────────────────────────
+async function runStep(index) {
+    if (index >= steps.length) {
+        await showSummary();
+        return;
+    }
+    setProgress(index + 1);
+    const step = steps[index];
+    await addBotMessage(step.ask());
+    renderInput(step, index);
+}
+
+function renderInput(step, index) {
+    inputEl.innerHTML = '';
+
+    if (step.type === 'chips') {
+        const qr = document.createElement('div');
+        qr.className = 'quick-replies';
+        (step.chips || []).forEach((label, i) => {
+            const btn = document.createElement('button');
+            const style = (step.chipsStyle && step.chipsStyle[i]) ? step.chipsStyle[i] : '';
+            btn.className = 'qr-chip ' + style;
+            btn.textContent = label;
+            btn.onclick = () => answerStep(step, index, label);
+            qr.appendChild(btn);
+        });
+        inputEl.appendChild(qr);
+
+    } else if (step.type === 'file') {
+        const zone = document.createElement('div');
+        zone.innerHTML = `
+            <div class="upload-zone-chat" id="uploadZoneChat" onclick="document.getElementById('chatFileInput').click()">
+                <i class="bi bi-cloud-arrow-up"></i>
+                <p><strong>Click to upload</strong> or drag &amp; drop</p>
+                <p>PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+            </div>
+            <div id="filePreviewChat"></div>
+            <div style="margin-top:8px;display:flex;gap:10px;align-items:center;">
+                <button type="button" class="chat-send-btn" id="fileConfirmBtn" onclick="confirmFile(${index})" title="Confirm upload">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+                <button type="button" class="btn-skip" onclick="answerStep(steps[${index}], ${index}, '')">Skip</button>
+            </div>`;
+        inputEl.appendChild(zone);
+
+        // Wire up the hidden file input in the actual form
+        const chatFileInput = document.createElement('input');
+        chatFileInput.type = 'file';
+        chatFileInput.id = 'chatFileInput';
+        chatFileInput.accept = '.pdf,.doc,.docx,.txt,.csv,.json,.md,.xml';
+        chatFileInput.style.display = 'none';
+        chatFileInput.onchange = e => {
+            const f = e.target.files[0];
+            if (f) {
+                document.getElementById('filePreviewChat').innerHTML =
+                    `<i class="bi bi-file-earmark-check" style="color:#1a2a5e;"></i> <strong>${escHtml(f.name)}</strong> — ${(f.size/1024/1024).toFixed(2)} MB`;
+                // Transfer to hidden form input using DataTransfer
+                try {
+                    const dt = new DataTransfer();
+                    dt.items.add(f);
+                    document.getElementById('f_Document').files = dt.files;
+                } catch(ex) {
+                    // DataTransfer not supported — clone input
+                    document.getElementById('f_Document').files = e.target.files;
+                }
+                data.hasFile = true;
+            }
+        };
+        // Drag & drop — use DataTransfer to forward dropped files into the hidden input
+        document.getElementById('uploadZoneChat').addEventListener('dragover', ev => {
+            ev.preventDefault();
+            document.getElementById('uploadZoneChat').style.borderColor = '#1a2a5e';
+        });
+        document.getElementById('uploadZoneChat').addEventListener('drop', ev => {
+            ev.preventDefault();
+            const file = ev.dataTransfer.files[0];
+            if (file) {
+                document.getElementById('filePreviewChat').innerHTML =
+                    `<i class="bi bi-file-earmark-check" style="color:#1a2a5e;"></i> <strong>${escHtml(file.name)}</strong> — ${(file.size/1024/1024).toFixed(2)} MB`;
+                try {
+                    const dt = new DataTransfer();
+                    dt.items.add(file);
+                    document.getElementById('f_Document').files = dt.files;
+                    data.hasFile = true;
+                } catch(ex) {
+                    console.warn('DataTransfer not supported for drag-drop:', ex);
+                }
+            }
+        });
+        inputEl.appendChild(chatFileInput);
+
+    } else if (step.type === 'select') {
+        const sel = document.createElement('select');
+        sel.className = 'chat-text-input';
+        (step.options || []).forEach(([val, label]) => {
+            const opt = document.createElement('option');
+            opt.value = val; opt.textContent = label;
+            sel.appendChild(opt);
+        });
+        const row = document.createElement('div');
+        row.className = 'input-row';
+        row.appendChild(sel);
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'chat-send-btn';
+        sendBtn.innerHTML = '<i class="bi bi-arrow-right"></i>';
+        sendBtn.onclick = () => answerStep(step, index, sel.value);
+        row.appendChild(sendBtn);
+        inputEl.appendChild(row);
+        if (step.skippable) {
+            const skip = document.createElement('button');
+            skip.className = 'btn-skip';
+            skip.textContent = 'Skip';
+            skip.onclick = () => answerStep(step, index, '');
+            inputEl.appendChild(skip);
+        }
+
+    } else if (step.type === 'textarea') {
+        const ta = document.createElement('textarea');
+        ta.className = 'chat-text-input';
+        ta.rows = 3;
+        ta.placeholder = step.placeholder || '';
+        ta.style.borderRadius = '14px';
+        ta.style.padding = '10px 16px';
+        const row = document.createElement('div');
+        row.className = 'input-row';
+        row.style.alignItems = 'flex-end';
+        row.appendChild(ta);
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'chat-send-btn';
+        sendBtn.innerHTML = '<i class="bi bi-arrow-right"></i>';
+        sendBtn.onclick = () => {
+            const err = step.validate ? step.validate(ta.value) : null;
+            if (err) { showInputError(err, ta); return; }
+            answerStep(step, index, ta.value.trim());
+        };
+        row.appendChild(sendBtn);
+        inputEl.appendChild(row);
+        ta.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
+        });
+        ta.focus();
+
+    } else {
+        // text / email / number
+        const inp = document.createElement('input');
+        inp.className = 'chat-text-input';
+        inp.type = step.type || 'text';
+        inp.placeholder = step.placeholder || '';
+        const row = document.createElement('div');
+        row.className = 'input-row';
+        row.appendChild(inp);
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'chat-send-btn';
+        sendBtn.innerHTML = '<i class="bi bi-arrow-right"></i>';
+        sendBtn.onclick = () => {
+            const err = step.validate ? step.validate(inp.value) : null;
+            if (err) { showInputError(err, inp); return; }
+            answerStep(step, index, inp.value.trim());
+        };
+        row.appendChild(sendBtn);
+        inputEl.appendChild(row);
+        if (step.skippable) {
+            const skip = document.createElement('button');
+            skip.className = 'btn-skip';
+            skip.textContent = 'Skip';
+            skip.onclick = () => answerStep(step, index, '');
+            inputEl.appendChild(skip);
+        }
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
+        });
+        inp.focus();
+    }
+    scrollBottom();
+}
+
+function showInputError(msg, el) {
+    el.style.borderColor = '#e31837';
+    let errEl = document.getElementById('inputErrorMsg');
+    if (!errEl) {
+        errEl = document.createElement('div');
+        errEl.id = 'inputErrorMsg';
+        errEl.style.cssText = 'color:#e31837;font-size:0.78rem;margin-top:4px;';
+        inputEl.appendChild(errEl);
+    }
+    errEl.textContent = msg;
+    setTimeout(() => { el.style.borderColor = ''; if(errEl) errEl.remove(); }, 2500);
+}
+
+function confirmFile(index) {
+    answerStep(steps[index], index, data.hasFile ? document.getElementById('f_Document').files[0]?.name || '' : '');
+}
+
+async function answerStep(step, index, value) {
+    inputEl.innerHTML = '';
+    data[step.key] = value;
+
+    const displayVal = value || '(skipped)';
+    addUserMessage(displayVal === '(skipped)' ? '— Skipped' : displayVal);
+
+    await runStep(index + 1);
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Summary & submit
+// ─────────────────────────────────────────────────────────────
+async function showSummary() {
+    setProgress(TOTAL_STEPS);
+    await addBotMessage(`✅ Great — I've captured all the information! Here's a summary before we submit:`);
+
+    const card = document.createElement('div');
+    card.className = 'msg-bot';
+    card.style.maxWidth = '90%';
+
+    const uploadedFileName = data.hasFile ? (document.getElementById('f_Document').files[0]?.name || '') : '';
+    const summaryRows = [
+        ['Process Name', data.ProcessName],
+        ['Description', data.Description.length > SUMMARY_DESC_MAX ? data.Description.substring(0, SUMMARY_DESC_MAX) + '…' : data.Description],
+        ['Business Unit', data.BusinessUnit],
+        ['Department', data.Department || '—'],
+        ['Process Owner', `${data.ProcessOwnerName} (${data.ProcessOwnerEmail})`],
+        ['Process Type', data.ProcessType],
+        ['Volume / Day', data.EstimatedVolumePerDay || '—'],
+        ['Priority', data.Priority],
+        ['Country', data.Country],
+        ['City', data.City || '—'],
+        ['Site', data.SiteLocation || '—'],
+        ['Time Zone', data.TimeZone || '—'],
+        ['Document', uploadedFileName || 'None uploaded']
+    ];
+
+    const rows = summaryRows.map(([k,v]) =>
+        `<div class="summary-row"><span class="s-key">${k}</span><span class="s-val">${escHtml(String(v))}</span></div>`
+    ).join('');
+
+    card.innerHTML = `
+        <div class="bot-avatar"><i class="bi bi-robot"></i></div>
+        <div class="summary-card">
+            <h4><i class="bi bi-clipboard-check me-2" style="color:#e31837;"></i>Intake Summary</h4>
+            ${rows}
+            <button type="button" class="btn-submit-chat" onclick="submitIntake()">
+                <i class="bi bi-send me-2"></i>Submit &amp; Generate AI Analysis
+            </button>
+        </div>`;
+    msgEl.appendChild(card);
+    scrollBottom();
+
+    inputEl.innerHTML = `
+        <div style="text-align:center;padding:8px;">
+            <button type="button" class="btn-skip" onclick="location.href='/Intake/Chat'">Start over</button>
+        </div>`;
+}
+
+function submitIntake() {
+    // Populate hidden form fields
+    document.getElementById('f_ProcessName').value           = data.ProcessName;
+    document.getElementById('f_Description').value           = data.Description;
+    document.getElementById('f_BusinessUnit').value          = data.BusinessUnit;
+    document.getElementById('f_Department').value            = data.Department;
+    document.getElementById('f_ProcessOwnerName').value      = data.ProcessOwnerName;
+    document.getElementById('f_ProcessOwnerEmail').value     = data.ProcessOwnerEmail;
+    document.getElementById('f_ProcessType').value           = data.ProcessType;
+    document.getElementById('f_EstimatedVolumePerDay').value = data.EstimatedVolumePerDay || 0;
+    document.getElementById('f_Priority').value              = data.Priority;
+    document.getElementById('f_Country').value               = data.Country;
+    document.getElementById('f_City').value                  = data.City;
+    document.getElementById('f_SiteLocation').value          = data.SiteLocation;
+    document.getElementById('f_TimeZone').value              = data.TimeZone;
+
+    // Show submitting state
+    const card = document.createElement('div');
+    card.className = 'msg-bot';
+    card.innerHTML = `<div class="bot-avatar"><i class="bi bi-robot"></i></div>
+        <div class="bot-bubble success-anim">
+            <span class="checkmark"><i class="bi bi-check-circle-fill"></i></span>
+            <p style="margin-top:8px;color:#333;font-size:0.9rem;">Submitting your intake and queuing AI analysis… 🚀</p>
+        </div>`;
+    msgEl.appendChild(card);
+    scrollBottom();
+
+    setTimeout(() => {
+        document.getElementById('hiddenForm').submit();
+    }, 800);
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Boot
+// ─────────────────────────────────────────────────────────────
+runStep(0);
+</script>
+}
