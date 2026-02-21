@@ -19,6 +19,7 @@ public class LdapAuthService : ILdapAuthService
             try
             {
                 using var conn = new LdapConnection();
+                conn.SecureSocketLayer = settings.LdapUseSsl;
                 conn.Connect(settings.LdapServer!, settings.LdapPort);
                 conn.Bind(settings.LdapBindDn, settings.LdapBindPassword);
 
@@ -36,6 +37,7 @@ public class LdapAuthService : ILdapAuthService
                 var userDn = entry.Dn;
 
                 using var userConn = new LdapConnection();
+                userConn.SecureSocketLayer = settings.LdapUseSsl;
                 userConn.Connect(settings.LdapServer!, settings.LdapPort);
                 userConn.Bind(userDn, password);
                 return true;

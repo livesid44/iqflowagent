@@ -58,7 +58,7 @@ public class AccountController : Controller
                 user = new ApplicationUser
                 {
                     UserName = model.Username,
-                    Email = $"{model.Username}@ldap",
+                    Email = $"{model.Username}@ldap.local",
                     FullName = model.Username,
                     IsActive = true,
                     EmailConfirmed = true
