@@ -134,6 +134,7 @@
     /* ── Toast alert ──────────────────────────────────────── */
     .toast-msg { padding:10px 16px; border-radius:8px; margin-bottom:16px; font-size:0.87rem; }
     .toast-success { background:#d1fae5; color:#065f46; }
+    .toast-info    { background:#dbeafe; color:#1d4ed8; }
     .toast-error { background:#fde8ec; color:#9b1c1c; }
 </style>
 
@@ -156,6 +157,10 @@
     @if (TempData["Success"] != null)
     {
         <div class="toast-msg toast-success"><i class="bi bi-check-circle-fill me-2"></i>@TempData["Success"]</div>
+    }
+    @if (TempData["Info"] != null)
+    {
+        <div class="toast-msg toast-info"><i class="bi bi-info-circle-fill me-2"></i>@TempData["Info"]</div>
     }
     @if (TempData["Error"] != null)
     {

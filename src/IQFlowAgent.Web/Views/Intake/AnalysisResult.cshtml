@@ -185,6 +185,26 @@
         font-size: 0.9rem; color: #333; line-height: 1.7;
     }
     .summary-box strong { color: #1a2a5e; }
+
+    .alert-tasks-created {
+        background: #d1fae5; border: 1px solid #a7f3d0; border-radius: 9px;
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 16px; margin-bottom: 12px;
+    }
+    .alert-tasks-created a { color: #059669; font-weight: 700; text-decoration: underline; margin-left: 6px; }
+    .alert-tasks-created span { font-size: 0.88rem; color: #065f46; }
+
+    .btn-view-all-tasks {
+        background: #059669; color: #fff; border-radius: 7px;
+        padding: 6px 14px; font-size: 0.78rem;
+        text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .btn-view-all-tasks:hover { background: #047857; color: #fff; }
+
+    .task-created-badge {
+        background: #d1fae5; color: #065f46; border-radius: 6px;
+        padding: 4px 12px; font-size: 0.76rem; font-weight: 600; white-space: nowrap;
+    }
 </style>
 
 @await Html.PartialAsync("_AppShell")
@@ -209,6 +229,27 @@
     @if (TempData["Success"] != null)
     {
         <div class="alert alert-success py-2 small mb-3">@TempData["Success"]</div>
+    }
+    @if (TempData["Info"] != null)
+    {
+        <div class="alert py-2 small mb-3" style="background:#dbeafe;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:8px;">
+            <i class="bi bi-info-circle me-1"></i>@TempData["Info"]
+        </div>
+    }
+
+    @{
+        var existingTitles = (ViewBag.ExistingTaskTitles as List<string>) ?? new List<string>();
+        var taskCount = (int)(ViewBag.TaskCount ?? 0);
+    }
+    @if (taskCount > 0)
+    {
+        <div class="alert-tasks-created">
+            <i class="bi bi-check-circle-fill" style="color:#059669;font-size:1.1rem;"></i>
+            <span>
+                <strong>@taskCount task@(taskCount != 1 ? "s" : "") automatically created</strong> from this analysis.
+                <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id">View Tasks →</a>
+            </span>
+        </div>
     }
 
     <!-- Intake banner -->
@@ -362,6 +403,15 @@
             <div class="analysis-card">
                 <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                     <span><i class="bi bi-list-check"></i> Action Items</span>
+                    @if (taskCount > 0 && taskCount >= actionItems.GetArrayLength())
+                    {
+                        <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
+                           class="btn-view-all-tasks">
+                            <i class="bi bi-kanban"></i> View All Tasks
+                        </a>
+                    }
+                    else
+                    {
                     <form asp-controller="Task" asp-action="CreateFromAction" method="post" id="createAllForm">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="intakeRecordId" value="@Model.Id" />
@@ -374,6 +424,7 @@
                             <i class="bi bi-kanban me-1"></i> Create All as Tasks
                         </button>
                     </form>
+                    }
                 </h3>
                 <div class="action-list">
                     @{ int actionNum = 0; }
@@ -399,6 +450,14 @@
                                     }
                                     <span class="priority-badge @aPriority">@aPriority</span>
                                     <!-- Create single task form -->
+                                    @if (existingTitles.Contains(aTitle))
+                                    {
+                                        <span class="task-created-badge">
+                                            <i class="bi bi-check-circle-fill me-1"></i>Task Created
+                                        </span>
+                                    }
+                                    else
+                                    {
                                     <form asp-controller="Task" asp-action="CreateFromAction" method="post"
                                           style="margin:0;margin-left:auto;">
                                         @Html.AntiForgeryToken()
@@ -412,6 +471,7 @@
                                             <i class="bi bi-plus-circle me-1"></i>Create Task
                                         </button>
                                     </form>
+                                    }
                                 </div>
                             </div>
                         </div>

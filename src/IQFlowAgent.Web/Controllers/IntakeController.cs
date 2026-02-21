@@ -1,3 +1,4 @@
+using System.Text.Json;
 using IQFlowAgent.Web.Data;
 using IQFlowAgent.Web.Models;
 using IQFlowAgent.Web.Services;
@@ -147,6 +148,15 @@ public class IntakeController : Controller
     {
         var record = await _db.IntakeRecords.FindAsync(id);
         if (record == null) return NotFound();
+
+        // Pass existing task titles so the view can show "Already Created" badges
+        var existingTitles = await _db.IntakeTasks
+            .Where(t => t.IntakeRecordId == id)
+            .Select(t => t.Title)
+            .ToListAsync();
+        ViewBag.ExistingTaskTitles = existingTitles;
+        ViewBag.TaskCount = existingTitles.Count;
+
         return View(record);
     }
 
@@ -212,6 +222,9 @@ public class IntakeController : Controller
             record.Status = "Complete";
             record.AnalyzedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+
+            // Auto-create tasks from action items
+            await AutoCreateTasksAsync(db, record, result);
         }
         catch (Exception ex)
         {
@@ -227,6 +240,68 @@ public class IntakeController : Controller
             {
                 _logger.LogError(innerEx, "Failed to update error status for intake id {IntakeId}", intakeId);
             }
+        }
+    }
+
+    private async Task AutoCreateTasksAsync(ApplicationDbContext db, IntakeRecord record, string analysisJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(analysisJson);
+            if (!doc.RootElement.TryGetProperty("actionItems", out var actionItems)) return;
+
+            var now = DateTime.UtcNow;
+            var owner = string.IsNullOrWhiteSpace(record.ProcessOwnerEmail)
+                ? (record.CreatedByUserId ?? "Unassigned")
+                : record.ProcessOwnerEmail;
+
+            foreach (var item in actionItems.EnumerateArray())
+            {
+                var title       = item.TryGetProperty("title",       out var t) ? t.GetString() ?? "" : "";
+                var description = item.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
+                var priority    = item.TryGetProperty("priority",    out var p) ? p.GetString() ?? "Medium" : "Medium";
+
+                if (string.IsNullOrWhiteSpace(title)) continue;
+
+                // Skip if a task with the same title already exists for this intake
+                var exists = await db.IntakeTasks
+                    .AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title);
+                if (exists) continue;
+
+                var task = new IntakeTask
+                {
+                    TaskId          = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
+                    IntakeRecordId  = record.Id,
+                    Title           = title,
+                    Description     = description,
+                    Priority        = priority,
+                    Owner           = owner,
+                    Status          = "Open",
+                    CreatedAt       = now,
+                    DueDate         = now.AddHours(48),
+                    CreatedByUserId = record.CreatedByUserId
+                };
+                db.IntakeTasks.Add(task);
+
+                db.TaskActionLogs.Add(new TaskActionLog
+                {
+                    Task            = task,
+                    ActionType      = "StatusChange",
+                    OldStatus       = null,
+                    NewStatus       = "Open",
+                    Comment         = $"Task automatically created from AI analysis of intake {record.IntakeId}.",
+                    CreatedAt       = now,
+                    CreatedByUserId = record.CreatedByUserId,
+                    CreatedByName   = record.CreatedByUserId
+                });
+            }
+
+            await db.SaveChangesAsync();
+            _logger.LogInformation("Auto-created tasks from analysis for intake {IntakeId}", record.IntakeId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-create tasks from analysis for intake {IntakeId}", record.IntakeId);
         }
     }
 }

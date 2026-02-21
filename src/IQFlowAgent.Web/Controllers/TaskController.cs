@@ -81,6 +81,15 @@ public class TaskController : Controller
         var intake = await _db.IntakeRecords.FindAsync(intakeRecordId);
         if (intake == null) return NotFound();
 
+        // Guard: if a task with the same title already exists, redirect to it
+        var existing = await _db.IntakeTasks
+            .FirstOrDefaultAsync(t => t.IntakeRecordId == intakeRecordId && t.Title == title);
+        if (existing != null)
+        {
+            TempData["Info"] = $"A task for '{title}' already exists.";
+            return RedirectToAction(nameof(Details), new { id = existing.Id });
+        }
+
         var now = DateTime.UtcNow;
         var resolvedOwner = string.IsNullOrWhiteSpace(owner)
             ? (intake.ProcessOwnerEmail ?? User.Identity?.Name ?? "Unassigned")
