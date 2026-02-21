@@ -2,6 +2,7 @@ using Azure;
 using Azure.AI.OpenAI;
 using IQFlowAgent.Web.Models;
 using OpenAI.Chat;
+using System.ClientModel;
 
 namespace IQFlowAgent.Web.Services;
 
@@ -23,19 +24,37 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         var endpoint = _config["AzureOpenAI:Endpoint"];
         var apiKey = _config["AzureOpenAI:ApiKey"];
-        var deployment = _config["AzureOpenAI:DeploymentName"] ?? "gpt-4o";
+        var deployment = _config["AzureOpenAI:DeploymentName"];
         var maxTokens = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
-            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY"))
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogWarning("Azure OpenAI is not configured. Returning mock analysis.");
+            _logger.LogWarning(
+                "Azure OpenAI is not fully configured (endpoint, apiKey, and deploymentName are all required). " +
+                "Set 'AzureOpenAI:Endpoint', 'AzureOpenAI:ApiKey', and 'AzureOpenAI:DeploymentName' via user secrets or environment variables. " +
+                "Returning mock analysis.");
+            return GenerateMockAnalysis(intake);
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
+        {
+            _logger.LogWarning(
+                "Azure OpenAI endpoint '{Endpoint}' is not a valid URI. " +
+                "Expected format: https://YOUR_RESOURCE.openai.azure.com/. Returning mock analysis.",
+                endpoint);
             return GenerateMockAnalysis(intake);
         }
 
         try
         {
-            var client = new AzureOpenAIClient(new Uri(endpoint), new AzureKeyCredential(apiKey));
+            _logger.LogInformation(
+                "Calling Azure OpenAI — endpoint: {Endpoint}, deployment: {Deployment}",
+                endpointUri.Host, deployment);
+
+            var client = new AzureOpenAIClient(endpointUri, new AzureKeyCredential(apiKey));
             var chatClient = client.GetChatClient(deployment);
 
             var systemPrompt = """
@@ -80,6 +99,18 @@ public class AzureOpenAiService : IAzureOpenAiService
             var options = new ChatCompletionOptions { MaxOutputTokenCount = maxTokens };
             var completion = await chatClient.CompleteChatAsync(messages, options);
             return completion.Value.Content[0].Text;
+        }
+        catch (ClientResultException ex) when (ex.Status == 404)
+        {
+            _logger.LogWarning(
+                "Azure OpenAI returned 404 for intake {IntakeId}. " +
+                "The deployment name '{Deployment}' was not found on endpoint '{Endpoint}'. " +
+                "Possible causes: (1) The deployment name does not match — check Azure OpenAI Studio under 'Deployments' and ensure 'AzureOpenAI:DeploymentName' matches exactly (it is case-sensitive). " +
+                "(2) The resource is not yet fully deployed — verify the deployment status in the Azure portal. " +
+                "(3) The API version used by the SDK may be incompatible with your resource SKU — ensure you are using a supported model/version combination. " +
+                "Falling back to mock analysis.",
+                intake.IntakeId, deployment, endpoint);
+            return GenerateMockAnalysis(intake);
         }
         catch (Exception ex)
         {
