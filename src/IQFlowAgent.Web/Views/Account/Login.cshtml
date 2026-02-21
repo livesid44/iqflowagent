@@ -1,0 +1,135 @@
+@model IQFlowAgent.Web.ViewModels.LoginViewModel
+@{
+    Layout = null;
+    ViewData["Title"] = "Login";
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - IQFlowAgent</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <style>
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 40px 35px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .login-logo {
+            font-size: 2rem;
+            font-weight: 900;
+            color: #294993;
+            letter-spacing: 2px;
+        }
+        .login-logo span { color: #e31837; }
+        .login-subtitle {
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .input-icon-wrapper {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+        .input-icon-wrapper .bi {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #999;
+            font-size: 1rem;
+        }
+        .input-icon-wrapper input {
+            padding-left: 36px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            height: 44px;
+            width: 100%;
+        }
+        .input-icon-wrapper input:focus {
+            border-color: #294993;
+            box-shadow: 0 0 0 3px rgba(41,73,147,0.1);
+            outline: none;
+        }
+        .btn-login {
+            background: #fff;
+            border: 1px solid #e31837;
+            color: #e31837;
+            border-radius: 25px;
+            width: 90%;
+            padding: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .btn-login:hover { background: #e31837; color: #fff; }
+        .login-footer-text {
+            border-top: 1px solid #eee;
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            text-align: center;
+            color: #aaa;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+<div class="d-flex align-items-center justify-content-center min-vh-100">
+    <div class="login-card">
+        <div class="text-center mb-3">
+            <div class="login-logo">IQ<span>Flow</span>Agent</div>
+            <div class="login-subtitle">BPO AI Platform</div>
+        </div>
+        <hr />
+
+        @if (!ViewData.ModelState.IsValid && ViewData.ModelState.ContainsKey(string.Empty))
+        {
+            <div class="alert alert-danger py-2 small">
+                @Html.ValidationSummary(true)
+            </div>
+        }
+
+        <form asp-action="Login" asp-controller="Account" method="post">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="returnUrl" value="@ViewData["ReturnUrl"]" />
+
+            <div class="input-icon-wrapper">
+                <i class="bi bi-person"></i>
+                <input asp-for="Username" class="form-control" placeholder="Username" autocomplete="username" />
+            </div>
+            <div class="input-icon-wrapper">
+                <i class="bi bi-lock"></i>
+                <input asp-for="Password" class="form-control" type="password" placeholder="Password" autocomplete="current-password" />
+            </div>
+
+            <div class="text-center mt-3">
+                <button type="submit" class="btn-login">Sign In</button>
+            </div>
+        </form>
+
+        <div class="text-center mt-3">
+            <a href="#" style="color:#e31837;text-decoration:none;font-size:0.9rem;">Forgot Password?</a>
+        </div>
+
+        <div class="login-footer-text">
+            &copy; 2026 IQFlowAgent. Powered by Azure Services.
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
