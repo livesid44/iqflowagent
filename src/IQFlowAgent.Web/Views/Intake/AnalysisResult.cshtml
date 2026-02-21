@@ -127,6 +127,57 @@
     .analyzing-state .spinner { width: 48px; height: 48px; border: 4px solid #e0e7f5; border-top-color: #e31837; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
     @@keyframes spin { to { transform: rotate(360deg); } }
 
+    .action-list { display: flex; flex-direction: column; gap: 10px; }
+    .action-item {
+        display: flex; align-items: flex-start; gap: 14px;
+        background: #f8faff; border-radius: 10px; padding: 14px 16px;
+        border-left: 4px solid #1a2a5e;
+    }
+    .action-item.priority-High  { border-left-color: #e31837; }
+    .action-item.priority-Medium{ border-left-color: #d97706; }
+    .action-item.priority-Low   { border-left-color: #059669; }
+    .action-num {
+        background: #1a2a5e; color: #fff; border-radius: 50%;
+        width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+        font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    }
+    .action-item.priority-High  .action-num { background: #e31837; }
+    .action-item.priority-Medium .action-num { background: #d97706; }
+    .action-item.priority-Low   .action-num { background: #059669; }
+    .action-body { flex: 1; }
+    .action-title { font-weight: 700; color: #1a2a5e; font-size: 0.9rem; margin-bottom: 3px; }
+    .action-desc  { font-size: 0.84rem; color: #555; line-height: 1.5; margin-bottom: 6px; }
+    .action-meta  { display: flex; gap: 10px; flex-wrap: wrap; }
+    .action-owner { font-size: 0.78rem; color: #888; }
+    .action-owner .bi { color: #1a2a5e; margin-right: 3px; }
+    .priority-badge {
+        font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .priority-badge.High   { background: #ffe0e6; color: #c01530; }
+    .priority-badge.Medium { background: #fef3c7; color: #92400e; }
+    .priority-badge.Low    { background: #d1fae5; color: #065f46; }
+
+    .checkpoint-table { width: 100%; border-collapse: collapse; }
+    .checkpoint-table th {
+        background: #f5f6fa; color: #1a2a5e;
+        font-size: 0.8rem; padding: 9px 14px; text-align: left; font-weight: 600;
+    }
+    .checkpoint-table td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 0.86rem; vertical-align: middle; }
+    .checkpoint-table tr:last-child td { border-bottom: none; }
+    .checkpoint-table tr:hover td { background: #fafbff; }
+    .cp-status {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 10px; border-radius: 14px; font-size: 0.75rem; font-weight: 700;
+    }
+    .cp-Pass    { background: #d1fae5; color: #065f46; }
+    .cp-Fail    { background: #ffe0e6; color: #c01530; }
+    .cp-Warning { background: #fef3c7; color: #92400e; }
+    .cp-heading-summary { margin-left: auto; display: flex; gap: 8px; font-size: 0.78rem; font-weight: 500; }
+    .cp-count-pass    { color: #065f46; }
+    .cp-count-warning { color: #92400e; }
+    .cp-count-fail    { color: #c01530; }
+
     .summary-box {
         background: linear-gradient(135deg, #f0f4ff 0%, #fff 100%);
         border: 1px solid #dbe4ff; border-radius: 10px;
@@ -302,6 +353,88 @@
                         </div>
                     }
                 </div>
+            </div>
+        }
+
+        <!-- Action Items -->
+        @if (analysis!.Value.TryGetProperty("actionItems", out var actionItems) && actionItems.GetArrayLength() > 0)
+        {
+            <div class="analysis-card">
+                <h3><i class="bi bi-list-check"></i> Action Items</h3>
+                <div class="action-list">
+                    @{ int actionNum = 0; }
+                    @foreach (var item in actionItems.EnumerateArray())
+                    {
+                        actionNum++;
+                        var aTitle    = item.TryGetProperty("title",       out var at) ? at.GetString() ?? "" : "";
+                        var aDesc     = item.TryGetProperty("description", out var ad) ? ad.GetString() ?? "" : "";
+                        var aOwner    = item.TryGetProperty("owner",       out var ao) ? ao.GetString() ?? "" : "";
+                        var aPriority = item.TryGetProperty("priority",    out var ap) ? ap.GetString() ?? "Medium" : "Medium";
+                        <div class="action-item priority-@aPriority">
+                            <div class="action-num">@actionNum</div>
+                            <div class="action-body">
+                                <div class="action-title">@aTitle</div>
+                                @if (!string.IsNullOrWhiteSpace(aDesc))
+                                {
+                                    <div class="action-desc">@aDesc</div>
+                                }
+                                <div class="action-meta">
+                                    @if (!string.IsNullOrWhiteSpace(aOwner))
+                                    {
+                                        <span class="action-owner"><i class="bi bi-person"></i>@aOwner</span>
+                                    }
+                                    <span class="priority-badge @aPriority">@aPriority</span>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Check Points -->
+        @if (analysis!.Value.TryGetProperty("checkPoints", out var checkPoints) && checkPoints.GetArrayLength() > 0)
+        {
+            var passCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Pass");
+            var failCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Fail");
+            var warningCount = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Warning");
+            <div class="analysis-card">
+                <h3><i class="bi bi-check2-square"></i> Check Points
+                    <span class="cp-heading-summary">
+                        <span class="cp-count-pass"><i class="bi bi-check-circle-fill"></i> @passCount Pass</span>
+                        @if (warningCount > 0)
+                        {<span class="cp-count-warning"><i class="bi bi-exclamation-circle-fill"></i> @warningCount Warning</span>}
+                        @if (failCount > 0)
+                        {<span class="cp-count-fail"><i class="bi bi-x-circle-fill"></i> @failCount Fail</span>}
+                    </span>
+                </h3>
+                <table class="checkpoint-table">
+                    <thead>
+                        <tr>
+                            <th>Check Point</th>
+                            <th style="width:110px;">Status</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cp in checkPoints.EnumerateArray())
+                        {
+                            var cpLabel  = cp.TryGetProperty("label",  out var cl) ? cl.GetString() ?? "" : "";
+                            var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "Warning" : "Warning";
+                            var cpNote   = cp.TryGetProperty("note",   out var cn) ? cn.GetString() ?? "" : "";
+                            var cpIcon   = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
+                            <tr>
+                                <td>@cpLabel</td>
+                                <td>
+                                    <span class="cp-status cp-@cpStatus">
+                                        <i class="bi bi-@cpIcon"></i> @cpStatus
+                                    </span>
+                                </td>
+                                <td style="color:#666;">@cpNote</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
             </div>
         }
 
