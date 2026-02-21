@@ -475,7 +475,25 @@
                 <h3><i class="bi bi-file-earmark-check"></i> Uploaded Document</h3>
                 <div style="font-size:0.88rem;">
                     <i class="bi bi-paperclip me-1" style="color:#e31837;"></i>
-                    <strong>@Model.UploadedFileName</strong>
+                    @{
+                        var isBlobUrl = !string.IsNullOrWhiteSpace(Model.UploadedFilePath)
+                            && Model.UploadedFilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+                    }
+                    @if (isBlobUrl)
+                    {
+                        <a href="@Model.UploadedFilePath" target="_blank" rel="noopener noreferrer"
+                           style="color:#1a2a5e;font-weight:600;text-decoration:none;">
+                            <strong>@Model.UploadedFileName</strong>
+                            <i class="bi bi-box-arrow-up-right ms-1" style="font-size:0.75rem;"></i>
+                        </a>
+                        <span style="color:#4b7bec;font-size:0.78rem;margin-left:8px;">
+                            <i class="bi bi-cloud-check-fill"></i> Azure Blob Storage
+                        </span>
+                    }
+                    else
+                    {
+                        <strong>@Model.UploadedFileName</strong>
+                    }
                     @if (Model.UploadedFileSize.HasValue)
                     {
                         <span style="color:#888;"> — @((Model.UploadedFileSize.Value / 1024.0).ToString("F1")) KB</span>
