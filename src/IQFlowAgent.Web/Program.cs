@@ -6,8 +6,19 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Database provider selection: SQL Server if configured, otherwise SQLite fallback
+var sqlServerCs = builder.Configuration.GetConnectionString("SqlServer") ?? string.Empty;
+var sqliteCs    = builder.Configuration.GetConnectionString("Sqlite") ?? "Data Source=iqflowagent.db";
+var useSqlServer = !string.IsNullOrWhiteSpace(sqlServerCs)
+    && !sqlServerCs.Contains("YOUR_SQL_SERVER", StringComparison.OrdinalIgnoreCase);
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseInMemoryDatabase("IQFlowAgent"));
+{
+    if (useSqlServer)
+        options.UseSqlServer(sqlServerCs);
+    else
+        options.UseSqlite(sqliteCs);
+});
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
@@ -42,6 +53,8 @@ var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    await db.Database.MigrateAsync();
     await DbSeeder.SeedAsync(scope.ServiceProvider);
 }
 
