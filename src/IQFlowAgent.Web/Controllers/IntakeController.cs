@@ -248,52 +248,55 @@ public class IntakeController : Controller
         try
         {
             using var doc = JsonDocument.Parse(analysisJson);
-            if (!doc.RootElement.TryGetProperty("actionItems", out var actionItems)) return;
+            var root = doc.RootElement;
 
             var now = DateTime.UtcNow;
             var owner = string.IsNullOrWhiteSpace(record.ProcessOwnerEmail)
                 ? (record.CreatedByUserId ?? "Unassigned")
                 : record.ProcessOwnerEmail;
 
-            foreach (var item in actionItems.EnumerateArray())
+            // ── Action Items ────────────────────────────────────────────────────
+            if (root.TryGetProperty("actionItems", out var actionItems))
             {
-                var title       = item.TryGetProperty("title",       out var t) ? t.GetString() ?? "" : "";
-                var description = item.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
-                var priority    = item.TryGetProperty("priority",    out var p) ? p.GetString() ?? "Medium" : "Medium";
-
-                if (string.IsNullOrWhiteSpace(title)) continue;
-
-                // Skip if a task with the same title already exists for this intake
-                var exists = await db.IntakeTasks
-                    .AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title);
-                if (exists) continue;
-
-                var task = new IntakeTask
+                foreach (var item in actionItems.EnumerateArray())
                 {
-                    TaskId          = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
-                    IntakeRecordId  = record.Id,
-                    Title           = title,
-                    Description     = description,
-                    Priority        = priority,
-                    Owner           = owner,
-                    Status          = "Open",
-                    CreatedAt       = now,
-                    DueDate         = now.AddHours(48),
-                    CreatedByUserId = record.CreatedByUserId
-                };
-                db.IntakeTasks.Add(task);
+                    var title       = item.TryGetProperty("title",       out var t) ? t.GetString() ?? "" : "";
+                    var description = item.TryGetProperty("description", out var d) ? d.GetString() ?? "" : "";
+                    var priority    = item.TryGetProperty("priority",    out var p) ? p.GetString() ?? "Medium" : "Medium";
 
-                db.TaskActionLogs.Add(new TaskActionLog
+                    if (string.IsNullOrWhiteSpace(title)) continue;
+
+                    if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
+                        continue;
+
+                    AddTask(db, record, title, description, priority, owner, now,
+                        $"Task automatically created from AI analysis of intake {record.IntakeId}.");
+                }
+            }
+
+            // ── Pending Check Points (Fail / Warning) ────────────────────────
+            if (root.TryGetProperty("checkPoints", out var checkPoints))
+            {
+                foreach (var cp in checkPoints.EnumerateArray())
                 {
-                    Task            = task,
-                    ActionType      = "StatusChange",
-                    OldStatus       = null,
-                    NewStatus       = "Open",
-                    Comment         = $"Task automatically created from AI analysis of intake {record.IntakeId}.",
-                    CreatedAt       = now,
-                    CreatedByUserId = record.CreatedByUserId,
-                    CreatedByName   = record.CreatedByUserId
-                });
+                    var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "" : "";
+                    if (cpStatus != "Fail" && cpStatus != "Warning") continue;
+
+                    var cpLabel = cp.TryGetProperty("label", out var cl) ? cl.GetString() ?? "" : "";
+                    var cpNote  = cp.TryGetProperty("note",  out var cn) ? cn.GetString() ?? "" : "";
+
+                    if (string.IsNullOrWhiteSpace(cpLabel)) continue;
+
+                    var title       = $"[Checkpoint] {cpLabel}";
+                    var description = string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote;
+                    var priority    = cpStatus == "Fail" ? "High" : "Medium";
+
+                    if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
+                        continue;
+
+                    AddTask(db, record, title, description, priority, owner, now,
+                        $"Task automatically created from pending checkpoint '{cpLabel}' (status: {cpStatus}) for intake {record.IntakeId}.");
+                }
             }
 
             await db.SaveChangesAsync();
@@ -303,5 +306,37 @@ public class IntakeController : Controller
         {
             _logger.LogWarning(ex, "Failed to auto-create tasks from analysis for intake {IntakeId}", record.IntakeId);
         }
+    }
+
+    private static void AddTask(ApplicationDbContext db, IntakeRecord record,
+        string title, string description, string priority, string owner,
+        DateTime now, string logComment)
+    {
+        var task = new IntakeTask
+        {
+            TaskId          = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
+            IntakeRecordId  = record.Id,
+            Title           = title,
+            Description     = description,
+            Priority        = priority,
+            Owner           = owner,
+            Status          = "Open",
+            CreatedAt       = now,
+            DueDate         = now.AddHours(48),
+            CreatedByUserId = record.CreatedByUserId
+        };
+        db.IntakeTasks.Add(task);
+
+        db.TaskActionLogs.Add(new TaskActionLog
+        {
+            Task            = task,
+            ActionType      = "StatusChange",
+            OldStatus       = null,
+            NewStatus       = "Open",
+            Comment         = logComment,
+            CreatedAt       = now,
+            CreatedByUserId = record.CreatedByUserId,
+            CreatedByName   = record.CreatedByUserId
+        });
     }
 }

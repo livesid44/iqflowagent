@@ -486,15 +486,47 @@
             var passCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Pass");
             var failCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Fail");
             var warningCount = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Warning");
+            var pendingCount = failCount + warningCount;
             <div class="analysis-card">
-                <h3><i class="bi bi-check2-square"></i> Check Points
-                    <span class="cp-heading-summary">
-                        <span class="cp-count-pass"><i class="bi bi-check-circle-fill"></i> @passCount Pass</span>
-                        @if (warningCount > 0)
-                        {<span class="cp-count-warning"><i class="bi bi-exclamation-circle-fill"></i> @warningCount Warning</span>}
-                        @if (failCount > 0)
-                        {<span class="cp-count-fail"><i class="bi bi-x-circle-fill"></i> @failCount Fail</span>}
+                <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <span><i class="bi bi-check2-square"></i> Check Points
+                        <span class="cp-heading-summary">
+                            <span class="cp-count-pass"><i class="bi bi-check-circle-fill"></i> @passCount Pass</span>
+                            @if (warningCount > 0)
+                            {<span class="cp-count-warning"><i class="bi bi-exclamation-circle-fill"></i> @warningCount Warning</span>}
+                            @if (failCount > 0)
+                            {<span class="cp-count-fail"><i class="bi bi-x-circle-fill"></i> @failCount Fail</span>}
+                        </span>
                     </span>
+                    @if (pendingCount > 0)
+                    {
+                        @* Check whether all pending checkpoints already have tasks *@
+                        var allCpTasksExist = checkPoints.EnumerateArray()
+                            .Where(c => { var st = c.TryGetProperty("status", out var sv) ? sv.GetString() : ""; return st == "Fail" || st == "Warning"; })
+                            .All(c => { var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : ""; return existingTitles.Contains($"[Checkpoint] {lbl}"); });
+                        if (allCpTasksExist)
+                        {
+                            <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
+                               class="btn-view-all-tasks">
+                                <i class="bi bi-kanban"></i> View Checkpoint Tasks
+                            </a>
+                        }
+                        else
+                        {
+                            <form asp-controller="Task" asp-action="CreateFromAction" method="post" id="createAllCpForm">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                                <input type="hidden" name="title"       value="[BATCH-CP]" />
+                                <input type="hidden" name="description" value="" />
+                                <input type="hidden" name="priority"    value="High" />
+                                <input type="hidden" name="owner"       value="@Model.ProcessOwnerEmail" />
+                                <button type="button" onclick="createAllCheckpointTasks()"
+                                    style="background:#e31837;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:0.78rem;cursor:pointer;font-weight:600;">
+                                    <i class="bi bi-plus-circle me-1"></i> Create All Pending as Tasks
+                                </button>
+                            </form>
+                        }
+                    }
                 </h3>
                 <table class="checkpoint-table">
                     <thead>
@@ -502,6 +534,7 @@
                             <th>Check Point</th>
                             <th style="width:110px;">Status</th>
                             <th>Notes</th>
+                            <th style="width:140px;">Task</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -511,6 +544,9 @@
                             var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "Warning" : "Warning";
                             var cpNote   = cp.TryGetProperty("note",   out var cn) ? cn.GetString() ?? "" : "";
                             var cpIcon   = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
+                            var cpTaskTitle = $"[Checkpoint] {cpLabel}";
+                            var cpPriority  = cpStatus == "Fail" ? "High" : "Medium";
+                            var cpIsPending = cpStatus == "Fail" || cpStatus == "Warning";
                             <tr>
                                 <td>@cpLabel</td>
                                 <td>
@@ -519,6 +555,33 @@
                                     </span>
                                 </td>
                                 <td style="color:#666;">@cpNote</td>
+                                <td>
+                                    @if (cpIsPending)
+                                    {
+                                        @if (existingTitles.Contains(cpTaskTitle))
+                                        {
+                                            <span class="task-created-badge">
+                                                <i class="bi bi-check-circle-fill me-1"></i>Task Created
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <form asp-controller="Task" asp-action="CreateFromAction" method="post"
+                                                  class="cp-task-form" style="margin:0;">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                                                <input type="hidden" name="title"       value="@cpTaskTitle" />
+                                                <input type="hidden" name="description" value="@(string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote)" />
+                                                <input type="hidden" name="priority"    value="@cpPriority" />
+                                                <input type="hidden" name="owner"       value="@Model.ProcessOwnerEmail" />
+                                                <button type="submit"
+                                                    style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                                    <i class="bi bi-plus-circle me-1"></i>Create Task
+                                                </button>
+                                            </form>
+                                        }
+                                    }
+                                </td>
                             </tr>
                         }
                     </tbody>
@@ -628,6 +691,27 @@
             .filter(f => f.id !== 'createAllForm');
         if (!forms.length) return;
 
+        let idx = 0;
+        function submitNext() {
+            if (idx >= forms.length) {
+                window.location.href = '@Url.Action("Index", "Task", new { intakeRecordId = Model.Id })';
+                return;
+            }
+            const data = new FormData(forms[idx]);
+            fetch(forms[idx].action, { method: 'POST', body: data })
+                .then(() => { idx++; submitNext(); })
+                .catch(() => { idx++; submitNext(); });
+        }
+        submitNext();
+    }
+
+    // Collect all pending checkpoint forms and submit them one by one via fetch
+    function createAllCheckpointTasks() {
+        const forms = Array.from(document.querySelectorAll('form.cp-task-form'));
+        if (!forms.length) {
+            window.location.href = '@Url.Action("Index", "Task", new { intakeRecordId = Model.Id })';
+            return;
+        }
         let idx = 0;
         function submitNext() {
             if (idx >= forms.length) {
