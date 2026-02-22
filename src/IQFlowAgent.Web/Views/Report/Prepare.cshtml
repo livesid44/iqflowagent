@@ -21,6 +21,16 @@
 @await Html.PartialAsync("_AppShell", "Report")
 
 <style>
+    /* ── Empty-state (no intake selected) ─────────────────────────────── */
+    .empty-state-box {
+        text-align: center; padding: 64px 32px;
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    }
+    .empty-state-box .es-icon { font-size: 3rem; margin-bottom: 16px; }
+    .empty-state-box h3 { font-size: 1.1rem; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+    .empty-state-box p  { font-size: 0.88rem; color: #6b7280; }
+
     .report-page { padding: 24px 32px; }
     .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
     .page-title { font-size: 1.4rem; font-weight: 700; color: #1a1a2e; }
@@ -88,11 +98,25 @@
 </style>
 
 <div class="report-page">
+
+    @* ── Intake Picker (always visible) ──────────────────────────────────── *@
+    @await Html.PartialAsync("_IntakePicker")
+
+    @if (intake == null)
+    {
+        <div class="empty-state-box">
+            <div class="es-icon">📋</div>
+            <h3>Select an Intake to Prepare the BARTOK DD Report</h3>
+            <p>Choose an intake from the picker above to view or generate the final report for that process.</p>
+        </div>
+    }
+    else
+    {
     <div class="page-header">
         <div>
             <div class="page-title">📋 BARTOK DD Report Preparation</div>
             <div class="page-subtitle">
-                Intake: <strong>@intake?.IntakeId</strong> — @intake?.ProcessName
+                Intake: <strong>@intake.IntakeId</strong> — @intake.ProcessName
             </div>
         </div>
         <a href="/Task/Index?selectedId=@intakeId" class="btn-back">← Task Board</a>
@@ -295,4 +319,5 @@
             </div>
         }
     }
+    } @* end else (intake selected) *@
 </div>

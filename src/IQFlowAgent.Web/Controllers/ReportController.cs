@@ -40,33 +40,73 @@ public class ReportController : Controller
         _env = env;
     }
 
-    // ── GET /Report/Prepare/{intakeId} ───────────────────────────────────────
-    public async Task<IActionResult> Prepare(int intakeId)
+    // ── GET /Report/Prepare?selectedId=&search=&country=&businessUnit=&processType= ─
+    public async Task<IActionResult> Prepare(
+        int? selectedId,
+        string? search, string? country, string? businessUnit, string? processType)
     {
-        var intake = await _db.IntakeRecords.FindAsync(intakeId);
+        var allIntakes = await _db.IntakeRecords
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+
+        // ── Populate picker ViewBag ─────────────────────────────────────────
+        var filtered = allIntakes.Where(x =>
+            (string.IsNullOrWhiteSpace(search) ||
+             x.IntakeId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             x.ProcessName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             x.BusinessUnit.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+             x.Department.Contains(search, StringComparison.OrdinalIgnoreCase))
+            && (string.IsNullOrWhiteSpace(country)      || x.Country      == country)
+            && (string.IsNullOrWhiteSpace(businessUnit) || x.BusinessUnit == businessUnit)
+            && (string.IsNullOrWhiteSpace(processType)  || x.ProcessType  == processType)
+        ).ToList();
+
+        ViewBag.IntakePickerIntakes      = filtered;
+        ViewBag.IntakePickerSelected     = selectedId;
+        ViewBag.IntakePickerSearch       = search;
+        ViewBag.IntakePickerCountry      = country;
+        ViewBag.IntakePickerBusinessUnit = businessUnit;
+        ViewBag.IntakePickerProcessType  = processType;
+        ViewBag.IntakePickerController   = "Report";
+        ViewBag.IntakePickerAction       = "Prepare";
+        ViewBag.Countries     = allIntakes.Select(x => x.Country)
+            .Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        ViewBag.BusinessUnits = allIntakes.Select(x => x.BusinessUnit)
+            .Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+        ViewBag.ProcessTypes  = allIntakes.Select(x => x.ProcessType)
+            .Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x).ToList();
+
+        // ── No intake selected: show picker only ───────────────────────────
+        if (!selectedId.HasValue)
+        {
+            ViewBag.Intake = null;
+            return View(new List<ReportFieldStatus>());
+        }
+
+        var intake = allIntakes.FirstOrDefault(x => x.Id == selectedId.Value);
         if (intake == null) return NotFound();
 
-        // Load or create field statuses
+        // ── Load field statuses, tasks and existing report ──────────────────
         var fieldStatuses = await _db.ReportFieldStatuses
-            .Where(r => r.IntakeRecordId == intakeId)
+            .Where(r => r.IntakeRecordId == selectedId.Value)
             .OrderBy(r => r.Id)
             .ToListAsync();
 
         var tasks = await _db.IntakeTasks
-            .Where(t => t.IntakeRecordId == intakeId)
+            .Where(t => t.IntakeRecordId == selectedId.Value)
             .Include(t => t.ActionLogs)
             .Include(t => t.Documents)
             .ToListAsync();
 
         var existingReport = await _db.FinalReports
-            .Where(r => r.IntakeRecordId == intakeId)
+            .Where(r => r.IntakeRecordId == selectedId.Value)
             .OrderByDescending(r => r.GeneratedAt)
             .FirstOrDefaultAsync();
 
-        ViewBag.Intake = intake;
+        ViewBag.Intake         = intake;
         ViewBag.ExistingReport = existingReport;
-        ViewBag.TaskCount = tasks.Count;
-        ViewBag.OpenTaskCount = tasks.Count(t => t.Status is "Open" or "In Progress");
+        ViewBag.TaskCount      = tasks.Count;
+        ViewBag.OpenTaskCount  = tasks.Count(t => t.Status is "Open" or "In Progress");
 
         return View(fieldStatuses);
     }
@@ -165,7 +205,7 @@ public class ReportController : Controller
             TempData["Error"] = "AI analysis returned an unexpected response. Please try again.";
         }
 
-        return RedirectToAction(nameof(Prepare), new { intakeId });
+        return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
     }
 
     // ── POST /Report/MarkNA ──────────────────────────────────────────────────
@@ -181,7 +221,7 @@ public class ReportController : Controller
         field.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        return RedirectToAction(nameof(Prepare), new { intakeId = field.IntakeRecordId });
+        return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
     }
 
     // ── POST /Report/SetValue ────────────────────────────────────────────────
@@ -198,7 +238,7 @@ public class ReportController : Controller
         field.UpdatedAt  = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        return RedirectToAction(nameof(Prepare), new { intakeId = field.IntakeRecordId });
+        return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
     }
 
     // ── POST /Report/CreateTaskForField ─────────────────────────────────────
@@ -260,7 +300,7 @@ public class ReportController : Controller
         await _db.SaveChangesAsync();
 
         TempData["Success"] = $"Task created for field '{field.FieldLabel}'.";
-        return RedirectToAction(nameof(Prepare), new { intakeId = field.IntakeRecordId });
+        return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
     }
 
     // ── POST /Report/Generate ────────────────────────────────────────────────
@@ -280,7 +320,7 @@ public class ReportController : Controller
         if (blocking.Count > 0)
         {
             TempData["Error"] = $"{blocking.Count} field(s) are not yet resolved. Please address them before generating the report.";
-            return RedirectToAction(nameof(Prepare), new { intakeId });
+            return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
         }
 
         // Locate the template
@@ -288,7 +328,7 @@ public class ReportController : Controller
         if (!System.IO.File.Exists(templatePath))
         {
             TempData["Error"] = "Report template file not found on the server.";
-            return RedirectToAction(nameof(Prepare), new { intakeId });
+            return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
         }
 
         try
@@ -344,7 +384,7 @@ public class ReportController : Controller
         {
             _logger.LogError(ex, "Failed to generate report for intake {IntakeId}", intake.IntakeId);
             TempData["Error"] = "Report generation failed. Please check the server logs and try again.";
-            return RedirectToAction(nameof(Prepare), new { intakeId });
+            return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
         }
 
         return RedirectToAction(nameof(Generated), new { intakeId });
