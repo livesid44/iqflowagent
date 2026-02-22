@@ -152,6 +152,224 @@ public class AzureOpenAiService : IAzureOpenAiService
         }
     }
 
+    // ── Verify Intake Closure ────────────────────────────────────────────────
+    public async Task<string> VerifyIntakeClosureAsync(
+        IntakeRecord intake, IList<IntakeTask> tasks, string? aggregatedArtifactText)
+    {
+        var endpoint   = _config["AzureOpenAI:Endpoint"];
+        var apiKey     = _config["AzureOpenAI:ApiKey"];
+        var deployment = _config["AzureOpenAI:DeploymentName"];
+        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
+        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Azure OpenAI not configured — returning mock closure verification for intake {IntakeId}.",
+                intake.IntakeId);
+            return GenerateMockVerification(intake, tasks);
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+        {
+            _logger.LogWarning("Azure OpenAI endpoint '{Endpoint}' is invalid. Returning mock closure verification.", endpoint);
+            return GenerateMockVerification(intake, tasks);
+        }
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+        _logger.LogInformation("Calling Azure OpenAI for closure verification — url: {RequestUrl}", requestUrl);
+
+        try
+        {
+            var systemPrompt = """
+                You are an expert business process quality auditor.
+                You will be given information about a business process intake and its associated tasks.
+                Your job is to verify whether each task has sufficient closure evidence to be considered truly completed,
+                or whether it should be reopened for additional work.
+
+                For each task examine:
+                - The task title and description (what was required)
+                - The comments / action log (what was actually done)
+                - The artifact file names (what documents were produced)
+
+                Respond ONLY with a valid JSON object matching exactly this structure (no markdown fences):
+                {
+                  "canCloseIntake": true,
+                  "summary": "Overall verification summary...",
+                  "taskVerifications": [
+                    {
+                      "taskId": "TSK-...",
+                      "title": "...",
+                      "canClose": true,
+                      "reason": "Explanation of verdict",
+                      "missingEvidence": []
+                    }
+                  ]
+                }
+                canCloseIntake must be true ONLY if every task's canClose is true.
+                missingEvidence is an array of strings describing what specific evidence is absent (empty array if canClose is true).
+                """;
+
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = BuildVerificationMessage(intake, tasks, aggregatedArtifactText) }
+                },
+                max_tokens  = maxTokens,
+                temperature = 0.3,
+                top_p       = 1.0,
+                model       = deployment
+            };
+
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Azure OpenAI returned HTTP {StatusCode} for closure verification of intake {IntakeId}. " +
+                    "Response: {ErrorBody}. Falling back to mock.",
+                    (int)response.StatusCode, intake.IntakeId, errorBody);
+                return GenerateMockVerification(intake, tasks);
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(responseText);
+            var content = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            return string.IsNullOrWhiteSpace(content)
+                ? GenerateMockVerification(intake, tasks)
+                : content;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Azure OpenAI closure verification failed for intake {IntakeId}", intake.IntakeId);
+            return GenerateMockVerification(intake, tasks);
+        }
+    }
+
+    private static string BuildVerificationMessage(
+        IntakeRecord intake, IList<IntakeTask> tasks, string? aggregatedArtifactText)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"INTAKE: {intake.IntakeId}");
+        sb.AppendLine($"Process: {intake.ProcessName}");
+        sb.AppendLine($"Description: {intake.Description}");
+        sb.AppendLine();
+        sb.AppendLine("TASKS TO VERIFY:");
+        foreach (var t in tasks)
+        {
+            sb.AppendLine($"---");
+            sb.AppendLine($"TaskId: {t.TaskId}");
+            sb.AppendLine($"Title: {t.Title}");
+            sb.AppendLine($"Description: {t.Description}");
+            sb.AppendLine($"Priority: {t.Priority}");
+            sb.AppendLine($"Status: {t.Status}");
+
+            var comments = t.ActionLogs
+                .Where(l => l.ActionType == "Comment" && !string.IsNullOrWhiteSpace(l.Comment))
+                .OrderBy(l => l.CreatedAt)
+                .ToList();
+            if (comments.Count > 0)
+            {
+                sb.AppendLine("Comments:");
+                foreach (var c in comments)
+                    sb.AppendLine($"  - [{c.CreatedAt:yyyy-MM-dd HH:mm}] {c.Comment}");
+            }
+            else
+            {
+                sb.AppendLine("Comments: (none)");
+            }
+
+            var artifacts = t.Documents.Where(d => d.DocumentType == "TaskArtifact").ToList();
+            if (artifacts.Count > 0)
+            {
+                sb.AppendLine("Artifacts uploaded:");
+                foreach (var a in artifacts)
+                    sb.AppendLine($"  - {a.FileName}");
+            }
+            else
+            {
+                sb.AppendLine("Artifacts: (none uploaded)");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(aggregatedArtifactText))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== ARTIFACT CONTENT EXCERPTS ===");
+            var truncated = aggregatedArtifactText.Length > MaxDocumentChars
+                ? aggregatedArtifactText[..MaxDocumentChars] + "\n[...truncated]"
+                : aggregatedArtifactText;
+            sb.AppendLine(truncated);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string GenerateMockVerification(IntakeRecord intake, IList<IntakeTask> tasks)
+    {
+        var taskVerifications = tasks.Select(t =>
+        {
+            // Tasks with no action log comments AND no artifacts are flagged for missing evidence
+            var hasComments  = t.ActionLogs.Any(l => l.ActionType == "Comment" && !string.IsNullOrWhiteSpace(l.Comment));
+            var hasArtifacts = t.Documents.Any(d => d.DocumentType == "TaskArtifact");
+            var canClose     = t.Status == "Completed" && (hasComments || hasArtifacts);
+            var missing      = new List<string>();
+            if (!hasComments && !hasArtifacts)
+            {
+                missing.Add("No comments or artifacts provided as closure evidence");
+                missing.Add("Add a comment describing what was done, or upload a completion artifact");
+            }
+            return new
+            {
+                taskId   = t.TaskId,
+                title    = t.Title,
+                canClose,
+                reason   = canClose
+                    ? "Task has sufficient closure evidence (comments or artifacts present)."
+                    : (t.Status == "Cancelled"
+                        ? "Task was cancelled — accepted as closure."
+                        : "Task is marked complete but lacks closure evidence (no comments or artifacts)."),
+                missingEvidence = missing
+            };
+        }).ToList();
+
+        // Cancelled tasks always pass
+        var verifications = tasks.Zip(taskVerifications, (t, v) =>
+        {
+            if (t.Status == "Cancelled")
+                return new { taskId = t.TaskId, title = t.Title, canClose = true,
+                             reason = "Task was cancelled — accepted as closed.",
+                             missingEvidence = new List<string>() };
+            return new { taskId = v.taskId, title = v.title, canClose = v.canClose,
+                         reason = v.reason, missingEvidence = v.missingEvidence };
+        }).ToList();
+
+        var allPass = verifications.All(v => v.canClose);
+        return JsonSerializer.Serialize(new
+        {
+            canCloseIntake     = allPass,
+            summary            = allPass
+                ? $"All {tasks.Count} tasks for intake {intake.IntakeId} have sufficient closure evidence. Intake can be closed."
+                : $"{verifications.Count(v => !v.canClose)} of {tasks.Count} tasks lack closure evidence and have been reopened. Please address the missing items before closing.",
+            taskVerifications  = verifications
+        });
+    }
+
     private static string BuildUserMessage(IntakeRecord intake, string? documentText)
     {
         var sb = new System.Text.StringBuilder();

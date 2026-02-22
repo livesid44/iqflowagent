@@ -16,6 +16,9 @@
     int? selId = ViewBag.IntakePickerSelected is int sv ? (int?)sv : null;
     Func<IntakeTask, bool> IsOverdue = t =>
         t.DueDate < DateTime.UtcNow && (t.Status == "Open" || t.Status == "In Progress");
+
+    // Verify & Close button: visible only when all tasks are Completed/Cancelled and there is at least one task
+    bool allTasksClosed = tasks.Count > 0 && tasks.All(t => t.Status is "Completed" or "Cancelled");
 }
 
 <style>
@@ -100,6 +103,18 @@
 
     .empty-state { text-align:center; padding:60px 20px; color:#aaa; }
     .empty-state i { font-size:3rem; display:block; margin-bottom:12px; }
+
+    .btn-verify-close {
+        background: linear-gradient(135deg, #059669, #047857);
+        color: #fff; border: none; border-radius: 8px;
+        padding: 9px 20px; font-size: 0.85rem; font-weight: 700;
+        cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+        box-shadow: 0 2px 8px rgba(5,150,105,0.25);
+    }
+    .btn-verify-close:hover { background: linear-gradient(135deg, #047857, #065f46); color:#fff; }
+    .btn-verify-close:disabled {
+        background: #d1fae5; color: #6b7280; cursor: not-allowed; box-shadow: none;
+    }
 </style>
 
 @await Html.PartialAsync("_AppShell")
@@ -120,6 +135,12 @@
     {
         <div style="background:#d1fae5;color:#065f46;padding:10px 16px;border-radius:8px;margin-bottom:18px;font-size:0.88rem;">
             <i class="bi bi-check-circle-fill me-2"></i>@TempData["Success"]
+        </div>
+    }
+    @if (TempData["Error"] != null)
+    {
+        <div style="background:#fde8ec;color:#9b1c1c;padding:10px 16px;border-radius:8px;margin-bottom:18px;font-size:0.88rem;">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@TempData["Error"]
         </div>
     }
 
@@ -163,8 +184,50 @@
                     <i class="bi bi-table"></i>
                 </button>
             </div>
+            @if (allTasksClosed)
+            {
+                <button type="button" class="btn-verify-close ms-auto"
+                        onclick="document.getElementById('verifyModal').style.display='flex'"
+                        title="All tasks are closed — click to run AI closure verification">
+                    <i class="bi bi-shield-check"></i> Verify &amp; Close Intake
+                </button>
+            }
         </div>
     </form>
+
+    @* ── Verify & Close confirmation modal ──────────────────────────────── *@
+    @if (allTasksClosed)
+    {
+    <div id="verifyModal"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;
+                align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:16px;padding:32px 36px;max-width:460px;width:90%;
+                    box-shadow:0 10px 40px rgba(0,0,0,0.25);text-align:center;">
+            <i class="bi bi-shield-check" style="font-size:2.4rem;color:#059669;"></i>
+            <h5 style="margin:16px 0 10px;color:#1a2a5e;font-weight:700;">AI Closure Verification</h5>
+            <p style="font-size:0.9rem;color:#555;line-height:1.6;margin-bottom:24px;">
+                All <strong>@tasks.Count task@(tasks.Count == 1 ? "" : "s")</strong> for this intake are closed.
+                The AI will review each task's comments and artifacts to verify sufficient closure evidence.<br /><br />
+                Tasks that lack evidence will be <strong>automatically reopened</strong>.
+                The intake will be marked <em>Closed</em> only if all tasks pass.
+            </p>
+            <form method="post" asp-action="VerifyAndClose" asp-route-intakeId="@selId">
+                @Html.AntiForgeryToken()
+                <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+                    <button type="submit" class="btn-verify-close" style="font-size:0.9rem;padding:10px 26px;">
+                        <i class="bi bi-robot"></i> Run AI Verification
+                    </button>
+                    <button type="button"
+                            onclick="document.getElementById('verifyModal').style.display='none'"
+                            style="background:#f5f6fa;color:#555;border:1px solid #e0e0e0;border-radius:8px;
+                                   padding:10px 22px;font-size:0.88rem;cursor:pointer;">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    }
 
     <!-- ── Board view ───────────────────────────────────────────── -->
     <div id="boardView">

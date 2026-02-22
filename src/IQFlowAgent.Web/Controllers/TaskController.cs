@@ -4,6 +4,7 @@ using IQFlowAgent.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace IQFlowAgent.Web.Controllers;
 
@@ -12,14 +13,17 @@ public class TaskController : Controller
 {
     private readonly ApplicationDbContext _db;
     private readonly IBlobStorageService _blobService;
+    private readonly IAzureOpenAiService _aiService;
     private readonly ILogger<TaskController> _logger;
     private readonly IWebHostEnvironment _env;
 
     public TaskController(ApplicationDbContext db, IBlobStorageService blobService,
+        IAzureOpenAiService aiService,
         ILogger<TaskController> logger, IWebHostEnvironment env)
     {
         _db = db;
         _blobService = blobService;
+        _aiService = aiService;
         _logger = logger;
         _env = env;
     }
@@ -289,5 +293,170 @@ public class TaskController : Controller
 
         TempData["Success"] = $"Artifact '{artifact.FileName}' uploaded successfully.";
         return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // ── POST /Task/VerifyAndClose/{intakeId} ─────────────────────────────────
+    // Only callable when all tasks are Completed or Cancelled.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> VerifyAndClose(int intakeId)
+    {
+        var intake = await _db.IntakeRecords.FindAsync(intakeId);
+        if (intake == null) return NotFound();
+
+        // Load all tasks with action logs and documents
+        var tasks = await _db.IntakeTasks
+            .Include(t => t.ActionLogs)
+            .Include(t => t.Documents)
+            .Where(t => t.IntakeRecordId == intakeId)
+            .ToListAsync();
+
+        if (tasks.Count == 0)
+        {
+            TempData["Error"] = "No tasks found for this intake.";
+            return RedirectToAction(nameof(Index), new { selectedId = intakeId });
+        }
+
+        // Guard: all tasks must be Completed or Cancelled
+        var openTasks = tasks.Where(t => t.Status is "Open" or "In Progress").ToList();
+        if (openTasks.Count > 0)
+        {
+            TempData["Error"] = $"{openTasks.Count} task(s) are still open. Close all tasks before verifying intake closure.";
+            return RedirectToAction(nameof(Index), new { selectedId = intakeId });
+        }
+
+        // Aggregate text from text-based task artifacts for AI context
+        var artifactText = await AggregateArtifactTextAsync(tasks);
+
+        // Call AI to verify closure
+        var verificationJson = await _aiService.VerifyIntakeClosureAsync(intake, tasks, artifactText);
+
+        // Parse result and act on it
+        var now = DateTime.UtcNow;
+        var reopened = new List<IntakeTask>();
+        bool canClose = false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(verificationJson);
+            var root = doc.RootElement;
+            canClose = root.TryGetProperty("canCloseIntake", out var cc) && cc.GetBoolean();
+
+            if (root.TryGetProperty("taskVerifications", out var tvs))
+            {
+                foreach (var tv in tvs.EnumerateArray())
+                {
+                    var tvTaskId   = tv.TryGetProperty("taskId",   out var tid) ? tid.GetString() : null;
+                    var tvCanClose = tv.TryGetProperty("canClose",  out var tc)  && tc.GetBoolean();
+                    var tvReason   = tv.TryGetProperty("reason",    out var tr)  ? tr.GetString() : "";
+                    var tvMissing  = tv.TryGetProperty("missingEvidence", out var tm)
+                        ? tm.EnumerateArray().Select(m => m.GetString()).Where(m => m != null).ToList()
+                        : new List<string?>();
+
+                    if (tvCanClose || string.IsNullOrWhiteSpace(tvTaskId)) continue;
+
+                    // Reopen this task
+                    var task = tasks.FirstOrDefault(t => t.TaskId == tvTaskId);
+                    if (task == null) continue;
+
+                    var oldStatus = task.Status;
+                    task.Status = "Open";
+                    task.CompletedAt = null;
+                    reopened.Add(task);
+
+                    var missingList = string.Join("; ", tvMissing);
+                    var commentPrefix = $"Task reopened by AI closure verification: {tvReason}";
+                    var comment = string.IsNullOrWhiteSpace(missingList)
+                        ? commentPrefix
+                        : $"{commentPrefix} Missing: {missingList}";
+
+                    _db.TaskActionLogs.Add(new TaskActionLog
+                    {
+                        IntakeTaskId    = task.Id,
+                        ActionType      = "StatusChange",
+                        OldStatus       = oldStatus,
+                        NewStatus       = "Open",
+                        Comment         = comment,
+                        CreatedAt       = now,
+                        CreatedByUserId = User.Identity?.Name,
+                        CreatedByName   = User.Identity?.Name
+                    });
+                }
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to parse closure verification JSON for intake {IntakeId}", intake.IntakeId);
+            TempData["Error"] = "AI verification returned an unexpected response. Please try again.";
+            return RedirectToAction(nameof(Index), new { selectedId = intakeId });
+        }
+
+        // Update intake status
+        if (canClose && reopened.Count == 0)
+        {
+            intake.Status = "Closed";
+            _logger.LogInformation("Intake {IntakeId} verified and closed.", intake.IntakeId);
+        }
+
+        await _db.SaveChangesAsync();
+
+        // Pass verification result to the result view via TempData
+        TempData["VerificationJson"] = verificationJson;
+        TempData["ReopenedCount"]    = reopened.Count;
+        TempData["CanClose"]         = canClose && reopened.Count == 0;
+
+        return RedirectToAction(nameof(VerificationResult), new { intakeId });
+    }
+
+    // ── GET /Task/VerificationResult ─────────────────────────────────────────
+    public IActionResult VerificationResult(int intakeId)
+    {
+        ViewBag.IntakeId         = intakeId;
+        ViewBag.VerificationJson = TempData["VerificationJson"] as string;
+        ViewBag.ReopenedCount    = TempData["ReopenedCount"] is int rc ? rc : 0;
+        ViewBag.CanClose         = TempData["CanClose"] is bool cc && cc;
+        return View();
+    }
+
+    // ── Helper: aggregate readable text from task artifacts ──────────────────
+    private async Task<string?> AggregateArtifactTextAsync(List<IntakeTask> tasks)
+    {
+        var sb = new System.Text.StringBuilder();
+        var textExtensions = new[] { ".txt", ".csv", ".json", ".xml", ".md" };
+
+        foreach (var task in tasks)
+        {
+            foreach (var doc in task.Documents.Where(d => d.DocumentType == "TaskArtifact"))
+            {
+                var ext = Path.GetExtension(doc.FileName ?? "").ToLowerInvariant();
+                if (!textExtensions.Contains(ext)) continue;
+
+                try
+                {
+                    string? content = null;
+                    if (_blobService.IsConfigured && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        content = await _blobService.DownloadTextAsync(doc.FilePath);
+                    else
+                    {
+                        var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
+                        if (System.IO.File.Exists(fullPath))
+                            content = await System.IO.File.ReadAllTextAsync(fullPath);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        sb.AppendLine($"--- Artifact: {doc.FileName} (Task: {task.TaskId}) ---");
+                        sb.AppendLine(content.Length > 2000 ? content[..2000] + "[...truncated]" : content);
+                        sb.AppendLine();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not read artifact {FileName} for task {TaskId}", doc.FileName, task.TaskId);
+                }
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString() : null;
     }
 }
