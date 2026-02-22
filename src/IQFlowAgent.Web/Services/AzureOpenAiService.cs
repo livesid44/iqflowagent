@@ -8,6 +8,8 @@ public class AzureOpenAiService : IAzureOpenAiService
 {
     private const int MaxDocumentChars = 8000;
     private const int DefaultMaxOutputTokens = 2000;
+    private const int MaxAnalysisJsonChars = 3000;  // max chars from AI analysis sent in field-analysis prompt
+    private const int MaxArtifactCharsPerReport = 8000;  // aggregate artifact chars for report field analysis
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
@@ -369,6 +371,257 @@ public class AzureOpenAiService : IAzureOpenAiService
             taskVerifications  = verifications
         });
     }
+
+    // ── Analyze Report Fields ────────────────────────────────────────────────
+    public async Task<string> AnalyzeReportFieldsAsync(
+        IntakeRecord intake,
+        string fieldDefinitionsJson,
+        string? analysisJson,
+        string? artifactText)
+    {
+        var endpoint   = _config["AzureOpenAI:Endpoint"];
+        var apiKey     = _config["AzureOpenAI:ApiKey"];
+        var deployment = _config["AzureOpenAI:DeploymentName"];
+        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
+        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Azure OpenAI not configured — returning mock report field analysis for intake {IntakeId}.",
+                intake.IntakeId);
+            return GenerateMockFieldAnalysis(intake, fieldDefinitionsJson, analysisJson);
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+        {
+            _logger.LogWarning("Azure OpenAI endpoint is invalid. Returning mock report field analysis.");
+            return GenerateMockFieldAnalysis(intake, fieldDefinitionsJson, analysisJson);
+        }
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+        _logger.LogInformation("Calling Azure OpenAI for report field analysis — url: {RequestUrl}", requestUrl);
+
+        var systemPrompt = """
+            You are an expert business process documentation specialist.
+            You will be given:
+            1. Information about a business process intake
+            2. An AI analysis of that process (JSON)
+            3. A list of template fields from the BARTOK Due Diligence document
+            4. Optionally, text excerpts from task artifacts
+
+            For each template field, determine:
+            - Whether the field can be filled from the available information (status: "Available" or "Missing")
+            - The exact value to use if Available (fillValue)
+            - A brief note explaining your determination (notes)
+
+            Respond ONLY with valid JSON matching this structure (no markdown fences):
+            {
+              "fields": [
+                {
+                  "key": "field_key",
+                  "status": "Available",
+                  "fillValue": "the value to insert",
+                  "notes": "Source: intake process name"
+                }
+              ]
+            }
+
+            Be specific and use actual data from the intake/analysis. For narrative fields, write complete professional sentences.
+            For "Missing" fields, explain concisely what additional information is needed.
+            """;
+
+        var userMessage = BuildFieldAnalysisMessage(intake, fieldDefinitionsJson, analysisJson, artifactText);
+
+        var requestBody = new
+        {
+            messages = new object[]
+            {
+                new { role = "system", content = systemPrompt },
+                new { role = "user",   content = userMessage }
+            },
+            max_tokens  = maxTokens,
+            temperature = 0.3,
+            top_p       = 1.0,
+            model       = deployment
+        };
+
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Azure OpenAI returned HTTP {StatusCode} for report field analysis of intake {IntakeId}. " +
+                    "Response: {ErrorBody}. Falling back to mock.",
+                    (int)response.StatusCode, intake.IntakeId, errorBody);
+                return GenerateMockFieldAnalysis(intake, fieldDefinitionsJson, analysisJson);
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(responseText);
+            var content = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            return string.IsNullOrWhiteSpace(content)
+                ? GenerateMockFieldAnalysis(intake, fieldDefinitionsJson, analysisJson)
+                : content;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Azure OpenAI report field analysis failed for intake {IntakeId}", intake.IntakeId);
+            return GenerateMockFieldAnalysis(intake, fieldDefinitionsJson, analysisJson);
+        }
+    }
+
+    private static string BuildFieldAnalysisMessage(
+        IntakeRecord intake, string fieldDefinitionsJson,
+        string? analysisJson, string? artifactText)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("=== INTAKE INFORMATION ===");
+        sb.AppendLine($"Intake ID: {intake.IntakeId}");
+        sb.AppendLine($"Process Name: {intake.ProcessName}");
+        sb.AppendLine($"Description: {intake.Description}");
+        sb.AppendLine($"Business Unit: {intake.BusinessUnit}");
+        sb.AppendLine($"Department: {intake.Department}");
+        sb.AppendLine($"Process Owner: {intake.ProcessOwnerName} ({intake.ProcessOwnerEmail})");
+        sb.AppendLine($"Process Type: {intake.ProcessType}");
+        sb.AppendLine($"Volume/Day: {intake.EstimatedVolumePerDay}");
+        sb.AppendLine($"Location: {intake.City}, {intake.Country} ({intake.SiteLocation})");
+        sb.AppendLine($"Time Zone: {intake.TimeZone}");
+        sb.AppendLine($"Uploaded Document: {intake.UploadedFileName ?? "(none)"}");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(analysisJson))
+        {
+            sb.AppendLine("=== AI ANALYSIS RESULT ===");
+            var truncated = analysisJson.Length > MaxAnalysisJsonChars
+                ? analysisJson[..MaxAnalysisJsonChars] + "\n[...truncated]"
+                : analysisJson;
+            sb.AppendLine(truncated);
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("=== TEMPLATE FIELDS TO ANALYZE ===");
+        sb.AppendLine(fieldDefinitionsJson);
+
+        if (!string.IsNullOrWhiteSpace(artifactText))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== TASK ARTIFACT TEXT EXCERPTS ===");
+            var truncated = artifactText.Length > MaxArtifactCharsPerReport
+                ? artifactText[..MaxArtifactCharsPerReport] + "\n[...truncated]"
+                : artifactText;
+            sb.AppendLine(truncated);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string GenerateMockFieldAnalysis(
+        IntakeRecord intake, string fieldDefinitionsJson, string? analysisJson)
+    {
+        // Parse field keys from the definitions JSON
+        var fields = new List<object>();
+        try
+        {
+            using var doc = JsonDocument.Parse(fieldDefinitionsJson);
+            foreach (var fd in doc.RootElement.EnumerateArray())
+            {
+                var key    = fd.TryGetProperty("key",   out var k) ? k.GetString() ?? "" : "";
+                var label  = fd.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "";
+                var source = fd.TryGetProperty("autoSource", out var s) ? s.GetString() ?? "" : "";
+
+                // Resolve value from intake or analysis JSON
+                var (status, fillValue, notes) = ResolveMockField(key, label, source, intake, analysisJson);
+                fields.Add(new { key, status, fillValue, notes });
+            }
+        }
+        catch
+        {
+            // If parse fails, return a minimal valid response
+        }
+
+        return JsonSerializer.Serialize(new { fields });
+    }
+
+    private static (string status, string fillValue, string notes) ResolveMockField(
+        string key, string label, string source, IntakeRecord intake, string? analysisJson)
+    {
+        // Auto-resolve from intake properties
+        var intakeValue = source switch
+        {
+            "ProcessName"     => intake.ProcessName,
+            "BusinessUnit"    => intake.BusinessUnit,
+            "Department"      => intake.Department,
+            "ProcessOwnerName" => intake.ProcessOwnerName,
+            "ProcessType"     => intake.ProcessType,
+            "TimeZone"        => intake.TimeZone,
+            "Description"     => intake.Description,
+            "UploadedFileName" => intake.UploadedFileName ?? "",
+            "GeoLocation"     => FormatGeoLocation(intake),
+            "TODAY"           => DateTime.UtcNow.ToString("dd MMM yyyy"),
+            _                 => null
+        };
+
+        if (intakeValue != null)
+        {
+            return string.IsNullOrWhiteSpace(intakeValue)
+                ? ("Missing", "", $"'{label}' could not be resolved from intake — value is empty.")
+                : ("Available", intakeValue, $"Auto-resolved from intake: {source}");
+        }
+
+        // Resolve from AI analysis JSON
+        if (source.StartsWith("AI:", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(analysisJson))
+        {
+            var aiProp = source["AI:".Length..];
+            try
+            {
+                using var doc = JsonDocument.Parse(analysisJson);
+                var root = doc.RootElement;
+                if (aiProp == "summary" && root.TryGetProperty("summary", out var sum))
+                    return ("Available", sum.GetString() ?? "", "Sourced from AI process analysis summary.");
+                if (aiProp == "confidenceScore" && root.TryGetProperty("confidenceScore", out var cs))
+                    return ("Available", cs.GetRawText(), "Sourced from AI confidence score.");
+                if (aiProp == "flowSummary" && root.TryGetProperty("summary", out var fs))
+                    return ("Available",
+                        $"{fs.GetString()} Process type: {intake.ProcessType}. " +
+                        $"Volume: {intake.EstimatedVolumePerDay} transactions/day.",
+                        "Sourced from AI analysis summary.");
+                if (aiProp == "operatingModel")
+                    return ("Available",
+                        $"The process '{intake.ProcessName}' is operated by the {intake.BusinessUnit} " +
+                        $"team in {FormatGeoLocation(intake)} under {intake.ProcessOwnerName}. " +
+                        $"The team follows a {intake.ProcessType} model with an estimated volume of " +
+                        $"{intake.EstimatedVolumePerDay} transactions per day.",
+                        "Auto-generated from intake metadata.");
+            }
+            catch { /* ignore */ }
+        }
+
+        // Fields with no source — mark as Missing
+        return ("Missing", "", $"No automatic source available for '{label}'. Please provide this information manually or create a task to gather it.");
+    }
+
+    // ── End of AnalyzeReportFieldsAsync ─────────────────────────────────────
+
+    /// <summary>Formats city, country and optional site into a single location string.</summary>
+    private static string FormatGeoLocation(IntakeRecord intake) =>
+        $"{intake.City}, {intake.Country}" +
+        (string.IsNullOrWhiteSpace(intake.SiteLocation) ? "" : $" ({intake.SiteLocation})");
 
     private static string BuildUserMessage(IntakeRecord intake, string? documentText)
     {

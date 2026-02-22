@@ -34,6 +34,7 @@ builder.Services.AddScoped<ILdapAuthService, LdapAuthService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IAzureOpenAiService, AzureOpenAiService>();
 builder.Services.AddScoped<IBlobStorageService, BlobStorageService>();
+builder.Services.AddScoped<IDocxReportService, DocxReportService>();
 
 builder.Services.AddControllersWithViews();
 

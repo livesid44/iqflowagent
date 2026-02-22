@@ -13,6 +13,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<IntakeTask> IntakeTasks => Set<IntakeTask>();
     public DbSet<TaskActionLog> TaskActionLogs => Set<TaskActionLog>();
     public DbSet<IntakeDocument> IntakeDocuments => Set<IntakeDocument>();
+    public DbSet<ReportFieldStatus> ReportFieldStatuses => Set<ReportFieldStatus>();
+    public DbSet<FinalReport> FinalReports => Set<FinalReport>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -42,5 +44,17 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .HasForeignKey(d => d.IntakeTaskId)
             .IsRequired(false)
             .OnDelete(DeleteBehavior.NoAction);
+
+        builder.Entity<ReportFieldStatus>()
+            .HasOne(r => r.IntakeRecord)
+            .WithMany()
+            .HasForeignKey(r => r.IntakeRecordId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<FinalReport>()
+            .HasOne(r => r.IntakeRecord)
+            .WithMany()
+            .HasForeignKey(r => r.IntakeRecordId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
