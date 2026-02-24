@@ -85,20 +85,19 @@
     }
     .app-sidebar.open .sidebar-section-title { display: block; }
 
-    /* Nav links */
+    /* Nav links — flex layout so icon always visible in collapsed state */
     .sidebar-link {
-        display: block;
+        display: flex;
+        align-items: center;
+        gap: 10px;
         color: rgba(255,255,255,0.9);
         text-decoration: none;
         font-size: 0.88rem;
-        padding: 9px 15px;
-        position: relative;
-        min-height: 42px;
+        padding: 11px 0 11px 15px;
         transition: background 0.2s, border-left 0.2s;
         border-left: 3px solid transparent;
-        white-space: nowrap;
+        overflow: hidden;
     }
-    .app-sidebar.open .sidebar-link { padding: 9px 15px 9px 46px; }
     .sidebar-link:hover,
     .sidebar-link.active {
         background: rgba(255,255,255,0.18);
@@ -106,12 +105,9 @@
         color: #fff;
     }
 
-    /* Icon inside link (always visible, absolutely positioned in collapsed state) */
+    /* Icon — flex item, always visible (collapsed + expanded) */
     .sidebar-icon {
-        position: absolute;
-        left: 14px;
-        top: 50%;
-        transform: translateY(-50%);
+        flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -120,23 +116,32 @@
     .sidebar-icon svg {
         width: 18px; height: 18px;
         stroke: rgba(255,255,255,0.88);
-        color: rgba(255,255,255,0.88);
         flex-shrink: 0;
+        display: block;
     }
-    .sidebar-link.active .sidebar-icon svg { stroke: #fff; opacity: 1; }
-    .sidebar-link:hover .sidebar-icon svg  { stroke: #fff; }
+    .sidebar-link.active .sidebar-icon svg { stroke: #fff; }
+    .sidebar-link:hover  .sidebar-icon svg { stroke: #fff; }
 
-    /* Text label — hidden when collapsed */
-    .sidebar-label { display: none; vertical-align: middle; }
-    .app-sidebar.open .sidebar-label { display: inline; }
+    /* Text label — hidden (zero width) when collapsed, slides in when expanded */
+    .sidebar-label {
+        overflow: hidden;
+        max-width: 0;
+        opacity: 0;
+        white-space: nowrap;
+        transition: max-width 0.35s ease, opacity 0.25s ease;
+    }
+    .app-sidebar.open .sidebar-label { max-width: 200px; opacity: 1; }
 
     /* ── Main content ─────────────────────────────────────────────── */
     .app-main {
         flex: 1;
         min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
         padding: 28px 32px;
         margin-left: 50px;   /* compensates for fixed sidebar */
         transition: margin-left 0.35s ease;
+        overflow-x: hidden;
     }
     .app-layout.sidebar-open .app-main { margin-left: 265px; }
 
