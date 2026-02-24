@@ -1,31 +1,144 @@
-html {
-  font-size: 14px;
+/* =========================================================
+   IQFlowAgent – site-wide styles
+   (loaded in <head> before Bootstrap resolves; no conflicts)
+   ========================================================= */
+
+html { font-size: 14px; position: relative; min-height: 100%; }
+@media (min-width: 768px) { html { font-size: 16px; } }
+
+body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
+
+/* ── Header ─────────────────────────────────────────── */
+.app-header {
+    background: #fff;
+    border-bottom: 2px solid #e0e0e0;
+    padding: 0 20px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.header-left  { display: flex; align-items: center; gap: 14px; }
+.header-right { display: flex; align-items: center; gap: 14px; }
+.app-logo-primary a { display: flex; align-items: center; text-decoration: none; }
+.app-logo-primary img { height: 40px; width: auto; }
+.app-username { font-size: 0.88rem; color: #555; white-space: nowrap; }
+.btn-logout {
+    background: #e31837; border: none; color: #fff;
+    border-radius: 6px; padding: 6px 16px; font-size: 0.82rem; cursor: pointer;
+}
+.btn-logout:hover { background: #c01530; }
+
+/* ── Layout wrapper ──────────────────────────────────── */
+.app-layout {
+    display: flex;
+    margin-top: 60px;
+    min-height: calc(100vh - 60px);
 }
 
-@media (min-width: 768px) {
-  html {
-    font-size: 16px;
-  }
+/* ── Sidebar ─────────────────────────────────────────
+   Default: collapsed (50px, icons only). Toggle adds .open → 265px.
+────────────────────────────────────────────────────── */
+.app-sidebar {
+    width: 50px;
+    background: #e31837;
+    padding: 8px 0 25px;
+    position: fixed;
+    top: 60px; left: 0; bottom: 0;
+    z-index: 99;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: width 0.35s ease;
+    flex-shrink: 0;
+}
+.app-sidebar.open { width: 265px; }
+
+/* Toggle arrow button */
+.sidebar-toggle {
+    cursor: pointer;
+    padding: 10px 15px;
+    color: #fff;
+    text-align: right;
+    display: flex;
+    justify-content: flex-end;
+}
+.sidebar-toggle .toggle-arrow { transition: transform 0.35s ease; }
+.app-sidebar.open .sidebar-toggle .toggle-arrow { transform: rotate(180deg); }
+
+/* Section headings */
+.sidebar-section-title {
+    padding: 8px 18px 4px;
+    color: rgba(255,255,255,0.65);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: none;
+}
+.app-sidebar.open .sidebar-section-title { display: block; }
+
+/* Nav links – flex layout so icon always visible in collapsed state */
+.sidebar-link {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px;
+    color: rgba(255,255,255,0.9);
+    text-decoration: none;
+    font-size: 0.88rem;
+    padding: 11px 0 11px 15px;
+    transition: background 0.2s, border-left 0.2s;
+    border-left: 3px solid transparent;
+    overflow: hidden;
+}
+.sidebar-link:hover,
+.sidebar-link.active {
+    background: rgba(255,255,255,0.18);
+    border-left-color: #fff;
+    color: #fff;
 }
 
-.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+/* Icon – always visible (collapsed + expanded) */
+.sidebar-icon {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+}
+.sidebar-icon svg { opacity: 0.85; display: block !important; }
+.sidebar-link.active .sidebar-icon svg { opacity: 1; }
+.sidebar-link:hover  .sidebar-icon svg { opacity: 1; }
+
+/* Text label – hidden when collapsed, slides in when expanded */
+.sidebar-label {
+    overflow: hidden;
+    max-width: 0;
+    opacity: 0;
+    white-space: nowrap;
+    transition: max-width 0.35s ease, opacity 0.25s ease;
+    display: block !important;
+}
+.app-sidebar.open .sidebar-label { max-width: 200px; opacity: 1; }
+
+/* ── Main content ────────────────────────────────────── */
+.app-main {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    max-width: calc(100% - 50px);
+    padding: 28px 32px;
+    margin-left: 50px;
+    transition: margin-left 0.35s ease, max-width 0.35s ease;
+}
+.app-layout.sidebar-open .app-main {
+    margin-left: 265px;
+    max-width: calc(100% - 265px);
 }
 
-html {
-  position: relative;
-  min-height: 100%;
-}
-
-body {
-  margin-bottom: 60px;
-}
-
-.form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
-  color: var(--bs-secondary-color);
-  text-align: end;
-}
-
-.form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
-  text-align: start;
-}
+.page-title { font-size: 1.45rem; font-weight: 700; color: #1a2a5e; margin-bottom: 4px; }
+.page-sub   { color: #888; font-size: 0.88rem; margin-bottom: 22px; }
