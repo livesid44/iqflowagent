@@ -92,6 +92,29 @@ dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
 | Azure Blob Storage | Empty `ConnectionString` | Files stored in `wwwroot/uploads/` |
 | SQL Server | Empty `SqlServer` connection string | SQLite (`iqflowagent.db` auto-created) |
 
+## Troubleshooting Build Errors
+
+### `CS1061: 'DbContextOptionsBuilder' does not contain a definition for 'UseSqlServer'` or `UseSqlite`  
+### `CS0246: The type or namespace name 'DocumentFormat' could not be found`
+
+These errors mean NuGet packages have not been restored on your machine.
+
+**Fix – run one of these from the repo root:**
+
+```bash
+# Option 1 – command line (recommended)
+dotnet restore src/IQFlowAgent.Web/IQFlowAgent.Web.csproj
+
+# Option 2 – Visual Studio
+# Right-click the Solution in Solution Explorer → "Restore NuGet Packages"
+```
+
+If restore fails due to a package-source issue, a `NuGet.Config` is now included at the repository root that explicitly points to `https://api.nuget.org/v3/index.json`.
+
+> **Tip for corporate environments:** If nuget.org is blocked by a proxy, ask your IT team for the internal NuGet feed URL and add it to your local `%AppData%\NuGet\NuGet.Config`.
+
+---
+
 ## Roles
 
 | Role       | Permissions                                      |
