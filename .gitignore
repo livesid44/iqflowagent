@@ -8,3 +8,7 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+
+# Local config overrides — may contain real credentials, never commit
+appsettings.Development.json
+appsettings.Local.json

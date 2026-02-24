@@ -11,9 +11,55 @@ dotnet run
 
 Default login: **admin** / **Admin@123!** (SuperAdmin)
 
-## Configuration – User Secrets (Development)
+---
 
-Set credentials via .NET User Secrets so real keys are never committed to source control.  
+## ⚠️ Important: Never edit `appsettings.json` directly
+
+`appsettings.json` is committed to source control with **placeholder values only**.  
+Editing it directly to add real credentials will cause a `System.IO.InvalidDataException` on startup
+if you accidentally introduce a JSON syntax error (e.g. an unescaped backslash in a connection string).
+
+**Always configure credentials using one of the two safe methods below.**
+
+---
+
+## Configuration – Option A: appsettings.Development.json (Recommended for local dev)
+
+`appsettings.Development.json` is in `.gitignore` — it will never be committed.  
+Copy the example and fill in your values:
+
+```bash
+cd src/IQFlowAgent.Web
+# The file already exists with empty values — just open it and fill in your credentials:
+# appsettings.Development.json
+```
+
+The file contains empty strings for all keys. Simply replace the empty strings:
+
+```json
+{
+  "ConnectionStrings": {
+    "SqlServer": "Server=YOUR_SERVER;Database=IQFlowAgent;User Id=sa;Password=YOUR_PASS;TrustServerCertificate=True;"
+  },
+  "AzureOpenAI": {
+    "Endpoint": "https://YOUR_RESOURCE.cognitiveservices.azure.com/",
+    "ApiKey": "YOUR_API_KEY",
+    "DeploymentName": "gpt-4o",
+    "ApiVersion": "2025-01-01-preview"
+  },
+  "AzureStorage": {
+    "ConnectionString": "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net",
+    "ContainerName": "intakes"
+  }
+}
+```
+
+See `appsettings.Local.json.example` for a complete reference with example values.
+
+---
+
+## Configuration – Option B: dotnet user-secrets
+
 Run these commands from inside the `src/IQFlowAgent.Web` directory:
 
 ```bash
@@ -25,6 +71,9 @@ dotnet user-secrets set "AzureOpenAI:ApiKey"           "YOUR_API_KEY"
 dotnet user-secrets set "AzureOpenAI:DeploymentName"   "gpt-4o"
 dotnet user-secrets set "AzureOpenAI:ApiVersion"       "2025-01-01-preview"
 
+# SQL Server (optional – falls back to SQLite if not set)
+dotnet user-secrets set "ConnectionStrings:SqlServer"  "Server=YOUR_SERVER;Database=IQFlowAgent;User Id=sa;Password=YOUR_PASS;TrustServerCertificate=True;"
+
 # Azure Blob Storage (optional – falls back to local disk if not set)
 dotnet user-secrets set "AzureStorage:ConnectionString" "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net"
 dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
@@ -33,8 +82,15 @@ dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
 > **Tip:** If you see *"Could not find a valid 'UserSecretsId'"* make sure you are running
 > the commands from the `src/IQFlowAgent.Web` directory where the `.csproj` lives.
 
-Without Azure OpenAI configured the application runs with mock analysis results.  
-Without Azure Blob Storage configured uploaded documents are stored in `wwwroot/uploads/`.
+---
+
+## Fallback behaviour
+
+| Service | When NOT configured | Behaviour |
+|---------|---------------------|-----------|
+| Azure OpenAI | Empty `ApiKey` or `DeploymentName` | Mock analysis results (all features work) |
+| Azure Blob Storage | Empty `ConnectionString` | Files stored in `wwwroot/uploads/` |
+| SQL Server | Empty `SqlServer` connection string | SQLite (`iqflowagent.db` auto-created) |
 
 ## Roles
 

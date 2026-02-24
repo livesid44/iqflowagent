@@ -1,0 +1,17 @@
+{
+  "ConnectionStrings": {
+    "SqlServer": "Server=YOUR_SERVER\\SQLEXPRESS;Database=IQFlowAgent;User Id=sa;Password=YOUR_PASS;TrustServerCertificate=True;",
+    "Sqlite": "Data Source=iqflowagent.db"
+  },
+  "AzureOpenAI": {
+    "Endpoint": "https://YOUR_RESOURCE.cognitiveservices.azure.com/",
+    "ApiKey": "YOUR_API_KEY",
+    "DeploymentName": "gpt-4o",
+    "ApiVersion": "2025-01-01-preview",
+    "MaxTokens": "2000"
+  },
+  "AzureStorage": {
+    "ConnectionString": "DefaultEndpointsProtocol=https;AccountName=YOUR_ACCOUNT;AccountKey=YOUR_KEY;EndpointSuffix=core.windows.net",
+    "ContainerName": "intakes"
+  }
+}
