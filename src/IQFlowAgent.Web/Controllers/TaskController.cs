@@ -295,8 +295,64 @@ public class TaskController : Controller
         return RedirectToAction(nameof(Details), new { id });
     }
 
+    // ── POST /Task/MarkNotApplicable/{id} ────────────────────────────────────
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> MarkNotApplicable(int id, string? naReason)
+    {
+        var task = await _db.IntakeTasks.FindAsync(id);
+        if (task == null) return NotFound();
+
+        task.IsNotApplicable = true;
+        task.NaReason = naReason?.Trim();
+
+        _db.TaskActionLogs.Add(new TaskActionLog
+        {
+            IntakeTaskId    = task.Id,
+            ActionType      = "StatusChange",
+            OldStatus       = task.Status,
+            NewStatus       = task.Status,
+            Comment         = $"Task marked as Not Applicable. Reason: {(string.IsNullOrWhiteSpace(naReason) ? "Not provided" : naReason.Trim())}",
+            CreatedAt       = DateTime.UtcNow,
+            CreatedByUserId = User.Identity?.Name,
+            CreatedByName   = User.Identity?.Name
+        });
+
+        await _db.SaveChangesAsync();
+        TempData["Success"] = "Task marked as Not Applicable — it will be bypassed in AI closure verification.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // ── POST /Task/UndoNotApplicable/{id} ─────────────────────────────────────
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> UndoNotApplicable(int id)
+    {
+        var task = await _db.IntakeTasks.FindAsync(id);
+        if (task == null) return NotFound();
+
+        task.IsNotApplicable = false;
+        task.NaReason = null;
+
+        _db.TaskActionLogs.Add(new TaskActionLog
+        {
+            IntakeTaskId    = task.Id,
+            ActionType      = "StatusChange",
+            OldStatus       = task.Status,
+            NewStatus       = task.Status,
+            Comment         = "Not Applicable flag removed — task will be included in AI closure verification.",
+            CreatedAt       = DateTime.UtcNow,
+            CreatedByUserId = User.Identity?.Name,
+            CreatedByName   = User.Identity?.Name
+        });
+
+        await _db.SaveChangesAsync();
+        TempData["Success"] = "Not Applicable flag removed.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
     // ── POST /Task/VerifyAndClose/{intakeId} ─────────────────────────────────
-    // Only callable when all tasks are Completed or Cancelled.
+    // Only callable when all tasks are Completed, Cancelled, or Not Applicable.
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> VerifyAndClose(int intakeId)
@@ -317,19 +373,26 @@ public class TaskController : Controller
             return RedirectToAction(nameof(Index), new { selectedId = intakeId });
         }
 
-        // Guard: all tasks must be Completed or Cancelled
-        var openTasks = tasks.Where(t => t.Status is "Open" or "In Progress").ToList();
+        // Guard: all tasks must be Completed, Cancelled, or Not Applicable
+        var openTasks = tasks.Where(t => t.Status is "Open" or "In Progress" && !t.IsNotApplicable).ToList();
         if (openTasks.Count > 0)
         {
-            TempData["Error"] = $"{openTasks.Count} task(s) are still open. Close all tasks before verifying intake closure.";
+            TempData["Error"] = $"{openTasks.Count} task(s) are still open. Close or mark as N/A before verifying intake closure.";
             return RedirectToAction(nameof(Index), new { selectedId = intakeId });
         }
 
-        // Aggregate text from text-based task artifacts for AI context
-        var artifactText = await AggregateArtifactTextAsync(tasks);
+        // Separate N/A tasks (they are automatically verified/bypassed)
+        var naTasks     = tasks.Where(t => t.IsNotApplicable).ToList();
+        var activeTasks = tasks.Where(t => !t.IsNotApplicable).ToList();
 
-        // Call AI to verify closure
-        var verificationJson = await _aiService.VerifyIntakeClosureAsync(intake, tasks, artifactText);
+        // Aggregate text from text-based task artifacts for AI context
+        var artifactText = await AggregateArtifactTextAsync(activeTasks);
+
+        // Call AI to verify closure (only active tasks, not NA ones)
+        var verificationJson = await _aiService.VerifyIntakeClosureAsync(intake, activeTasks, artifactText);
+
+        // Inject NA tasks into the JSON as auto-passed before saving/displaying
+        verificationJson = InjectNaTasksIntoJson(verificationJson, naTasks);
 
         // Parse result and act on it
         var now = DateTime.UtcNow;
@@ -458,5 +521,52 @@ public class TaskController : Controller
         }
 
         return sb.Length > 0 ? sb.ToString() : null;
+    }
+
+    // ── Helper: inject N/A tasks into verification JSON as auto-passed ─────────
+    private static string InjectNaTasksIntoJson(string verificationJson, List<IntakeTask> naTasks)
+    {
+        if (naTasks.Count == 0) return verificationJson;
+
+        try
+        {
+            using var doc  = JsonDocument.Parse(verificationJson);
+            var root       = doc.RootElement;
+            var writer     = new System.Text.StringBuilder();
+            writer.Append("{");
+            writer.Append($"\"canCloseIntake\":{(root.TryGetProperty("canCloseIntake", out var cc) ? cc.GetRawText() : "true")},");
+            writer.Append($"\"summary\":{(root.TryGetProperty("summary", out var s) ? s.GetRawText() : "\"All tasks verified or marked as Not Applicable.\"")},");
+            writer.Append("\"taskVerifications\":[");
+
+            // existing verifications
+            var existing = new List<string>();
+            if (root.TryGetProperty("taskVerifications", out var tvs))
+                foreach (var tv in tvs.EnumerateArray())
+                    existing.Add(tv.GetRawText());
+
+            // append N/A entries (always canClose=true, isNotApplicable=true)
+            foreach (var t in naTasks)
+            {
+                var reason = string.IsNullOrWhiteSpace(t.NaReason)
+                    ? "Marked as Not Applicable — bypassed from AI verification."
+                    : $"N/A — {t.NaReason.Trim()}";
+                existing.Add(
+                    $"{{\"taskId\":{JsonSerializer.Serialize(t.TaskId)}," +
+                    $"\"title\":{JsonSerializer.Serialize(t.Title)}," +
+                    $"\"canClose\":true," +
+                    $"\"isNotApplicable\":true," +
+                    $"\"reason\":{JsonSerializer.Serialize(reason)}," +
+                    $"\"missingEvidence\":[]}}");
+            }
+
+            writer.Append(string.Join(",", existing));
+            writer.Append("]}");
+            return writer.ToString();
+        }
+        catch
+        {
+            // If JSON manipulation fails, return original
+            return verificationJson;
+        }
     }
 }

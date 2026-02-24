@@ -22,6 +22,10 @@ public class IntakeTask
 
     public string? CreatedByUserId { get; set; }
 
+    // Not-Applicable flag — task is exempt from AI closure verification
+    public bool IsNotApplicable { get; set; } = false;
+    public string? NaReason { get; set; }
+
     // Navigation
     public ICollection<TaskActionLog> ActionLogs { get; set; } = [];
     public ICollection<IntakeDocument> Documents { get; set; } = [];

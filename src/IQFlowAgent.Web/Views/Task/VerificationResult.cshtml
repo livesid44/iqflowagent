@@ -11,7 +11,7 @@
 
     // Parse verification JSON
     string overallSummary = "";
-    var taskResults = new List<(string TaskId, string Title, bool CanClose, string Reason, List<string> Missing)>();
+    var taskResults = new List<(string TaskId, string Title, bool CanClose, bool IsNA, string Reason, List<string> Missing)>();
 
     bool parseError = false;
     if (!string.IsNullOrWhiteSpace(jsonStr))
@@ -28,11 +28,12 @@
                     var tid     = tv.TryGetProperty("taskId",   out var tidEl)  ? (tidEl.GetString()  ?? "") : "";
                     var title   = tv.TryGetProperty("title",    out var titEl)  ? (titEl.GetString()  ?? "") : "";
                     var pass    = tv.TryGetProperty("canClose", out var ccEl)   && ccEl.GetBoolean();
+                    var isNA    = tv.TryGetProperty("isNotApplicable", out var naEl) && naEl.GetBoolean();
                     var reason  = tv.TryGetProperty("reason",   out var rEl)    ? (rEl.GetString()    ?? "") : "";
                     var missing = tv.TryGetProperty("missingEvidence", out var mEl)
                         ? mEl.EnumerateArray().Select(m => m.GetString() ?? "").Where(m => m.Length > 0).ToList()
                         : new List<string>();
-                    taskResults.Add((tid, title, pass, reason, missing));
+                    taskResults.Add((tid, title, pass, isNA, reason, missing));
                 }
             }
         }
@@ -43,7 +44,8 @@
         }
     }
 
-    int passCount = taskResults.Count(t => t.CanClose);
+    int passCount = taskResults.Count(t => t.CanClose && !t.IsNA);
+    int naCount   = taskResults.Count(t => t.IsNA);
     int failCount = taskResults.Count(t => !t.CanClose);
 }
 
@@ -72,7 +74,9 @@
     .vr-stat-label { font-size:0.78rem; color:#888; margin-top:4px; }
     .vr-stat-pass .vr-stat-num { color:#059669; }
     .vr-stat-fail .vr-stat-num { color:#e31837; }
+    .vr-stat-na .vr-stat-num { color:#15803d; }
     .vr-stat-total .vr-stat-num { color:#1a2a5e; }
+    .vr-verdict-na { background:#f0fdf4; color:#15803d; }
 
     .vr-tasks-header {
         font-size:1rem; font-weight:700; color:#1a2a5e;
@@ -168,6 +172,10 @@
             <div class="vr-stat-num">@passCount</div>
             <div class="vr-stat-label">Verified Closed</div>
         </div>
+        <div class="vr-stat-card vr-stat-na">
+            <div class="vr-stat-num">@naCount</div>
+            <div class="vr-stat-label">Not Applicable</div>
+        </div>
         <div class="vr-stat-card vr-stat-fail">
             <div class="vr-stat-num">@failCount</div>
             <div class="vr-stat-label">Reopened</div>
@@ -187,7 +195,13 @@
                 <div class="vr-task-header">
                     <span class="vr-task-id">@t.TaskId</span>
                     <span class="vr-task-title">@t.Title</span>
-                    @if (t.CanClose)
+                    @if (t.IsNA)
+                    {
+                        <span class="vr-verdict-chip vr-verdict-na">
+                            ⊘ N/A — Bypassed
+                        </span>
+                    }
+                    else if (t.CanClose)
                     {
                         <span class="vr-verdict-chip vr-verdict-pass">
                             <i class="bi bi-check-circle-fill"></i> Verified

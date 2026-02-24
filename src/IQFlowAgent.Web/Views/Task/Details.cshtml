@@ -29,6 +29,8 @@
     .status-InProgress { background:#fef3c7; color:#d97706; }
     .status-Completed { background:#d1fae5; color:#059669; }
     .status-Cancelled { background:#f3f4f6; color:#6b7280; }
+    .badge-na { background:#f0fdf4; color:#15803d; border:1.5px solid #86efac; padding:4px 12px; border-radius:20px; font-size:0.78rem; font-weight:700; }
+    .na-reason-box { background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:10px 14px; font-size:0.84rem; color:#166534; margin-top:8px; }
 
     .badge-priority { padding:5px 12px; border-radius:20px; font-size:0.75rem; font-weight:700; text-transform:uppercase; }
     .badge-priority.High { background:#fde8ec; color:#e31837; }
@@ -177,6 +179,10 @@
             <div style="display:flex;gap:8px;align-items:center;">
                 <span class="badge-priority @Model.Priority">@Model.Priority</span>
                 <span class="badge-status status-@Model.Status.Replace(" ","")">@Model.Status</span>
+                @if (Model.IsNotApplicable)
+                {
+                    <span class="badge-na" title="Bypassed from AI closure verification">⊘ Not Applicable</span>
+                }
             </div>
         </div>
         <div class="task-meta-row">
@@ -199,6 +205,10 @@
                 Created @Model.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm") by @(Model.CreatedByUserId ?? "system")
             </span>
         </div>
+        @if (Model.IsNotApplicable && !string.IsNullOrWhiteSpace(Model.NaReason))
+        {
+            <div class="na-reason-box">⊘ N/A Reason: @Model.NaReason</div>
+        }
     </div>
 
     <!-- ── Two-column body ─────────────────────────────────────── -->
@@ -380,6 +390,42 @@
                     </button>
                 </form>
             </div>
+
+            <!-- Mark as Not Applicable -->
+            @if (!Model.IsNotApplicable)
+            {
+                <div class="action-panel">
+                    <h5 style="color:#15803d;">⊘ Mark as Not Applicable</h5>
+                    <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">
+                        NA tasks are bypassed from AI closure verification and treated as closed.
+                    </p>
+                    <form asp-action="MarkNotApplicable" asp-route-id="@Model.Id" method="post">
+                        @Html.AntiForgeryToken()
+                        <textarea name="naReason" placeholder="Reason (optional)…"
+                                  style="margin-bottom:0;"></textarea>
+                        <button type="submit" class="btn-action"
+                                style="background:#15803d;"
+                                onclick="return confirm('Mark this task as Not Applicable? It will be excluded from AI closure verification.')">
+                            ⊘ Mark as N/A
+                        </button>
+                    </form>
+                </div>
+            }
+            else
+            {
+                <div class="action-panel" style="border-left:3px solid #86efac;">
+                    <h5 style="color:#15803d;">⊘ Not Applicable</h5>
+                    <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">
+                        This task is excluded from AI closure verification.
+                    </p>
+                    <form asp-action="UndoNotApplicable" asp-route-id="@Model.Id" method="post">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn-action" style="background:#6b7280;">
+                            ↩ Undo N/A
+                        </button>
+                    </form>
+                </div>
+            }
 
             <!-- Task info summary -->
             <div class="action-panel" style="font-size:0.82rem;color:#555;background:#f8f9fc;">

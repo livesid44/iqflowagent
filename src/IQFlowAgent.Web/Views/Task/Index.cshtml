@@ -17,8 +17,8 @@
     Func<IntakeTask, bool> IsOverdue = t =>
         t.DueDate < DateTime.UtcNow && (t.Status == "Open" || t.Status == "In Progress");
 
-    // Verify & Close button: visible only when all tasks are Completed/Cancelled and there is at least one task
-    bool allTasksClosed = tasks.Count > 0 && tasks.All(t => t.Status is "Completed" or "Cancelled");
+    // Verify & Close button: visible only when all tasks are Completed/Cancelled/NA and there is at least one task
+    bool allTasksClosed = tasks.Count > 0 && tasks.All(t => t.Status is "Completed" or "Cancelled" || t.IsNotApplicable);
 }
 
 <style>
@@ -97,6 +97,7 @@
     .status-InProgress { background:#fef3c7; color:#d97706; }
     .status-Completed { background:#d1fae5; color:#059669; }
     .status-Cancelled { background:#f3f4f6; color:#6b7280; }
+    .badge-na-small { font-size:0.68rem; font-weight:700; background:#f0fdf4; color:#15803d; border:1px solid #86efac; border-radius:10px; padding:1px 7px; }
 
     .intake-chip { font-size:0.72rem; color:#1a2a5e; background:#eef0f9;
         padding:2px 8px; border-radius:4px; font-family:monospace; }
@@ -272,6 +273,7 @@
                                 <div class="task-card-title">@t.Title</div>
                                 <div class="task-card-meta">
                                     <span class="badge-priority @t.Priority">@t.Priority</span>
+                                    @if (t.IsNotApplicable) { <span class="badge-na-small">⊘ N/A</span> }
                                     <span class="task-due @(isOverdue ? "overdue" : "")">
                                         <i class="bi bi-clock"></i>
                                         @(isOverdue ? "Overdue · " : "Due ")@t.DueDate.ToLocalTime().ToString("MMM d, HH:mm")
@@ -334,7 +336,10 @@
                                        class="intake-chip">@t.IntakeRecord.IntakeId</a>
                                 </td>
                                 <td><span class="badge-priority @t.Priority">@t.Priority</span></td>
-                                <td><span class="status-badge @statusClass">@t.Status</span></td>
+                                <td>
+                                    <span class="status-badge @statusClass">@t.Status</span>
+                                    @if (t.IsNotApplicable) { <span class="badge-na-small" style="margin-left:4px;">⊘ N/A</span> }
+                                </td>
                                 <td style="font-size:0.82rem;color:#555;">@t.Owner</td>
                                 <td class="@(isOverdue ? "task-due overdue" : "task-due")"
                                     style="font-size:0.82rem;">
