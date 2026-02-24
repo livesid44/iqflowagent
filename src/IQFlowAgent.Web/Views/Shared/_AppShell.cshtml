@@ -1,6 +1,6 @@
 @* Shared App Shell: Header + Sidebar (matching the FlowIQ wireframe theme)
    Usage: @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "intake" } })
-   ActivePage values: intake, analysis, usermgmt, authsettings
+   ActivePage values: intake, analysis, tasks, report, usermgmt, authsettings
 *@
 @{
     var activePage = (string?)ViewData["ActivePage"] ?? "";
@@ -8,9 +8,9 @@
 }
 
 <style>
-    body { background: #f5f6fa; margin: 0; font-family: 'Segoe UI', sans-serif; }
+    body { background: #eeeeee; margin: 0; font-family: 'Segoe UI', sans-serif; }
 
-    /* ── Header ────────────────────────────────────────────── */
+    /* ── Header ────────────────────────────────────────────────────── */
     .app-header {
         background: #fff;
         border-bottom: 2px solid #e0e0e0;
@@ -20,34 +20,63 @@
         align-items: center;
         justify-content: space-between;
         position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .app-logo img { height: 36px; width: auto; }
-    .app-user { display: flex; align-items: center; gap: 12px; }
-    .app-username { font-size: 0.88rem; color: #555; }
+    .header-left  { display: flex; align-items: center; gap: 14px; }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .app-logo-primary img  { height: 35px; width: auto; }
+    .app-logo-secondary img {
+        height: 30px; width: auto; opacity: 0.85;
+        border-left: 1px solid #e0e0e0; padding-left: 14px;
+    }
+    .app-username { font-size: 0.88rem; color: #555; white-space: nowrap; }
     .btn-logout {
         background: #e31837; border: none; color: #fff;
         border-radius: 6px; padding: 6px 16px; font-size: 0.82rem; cursor: pointer;
     }
     .btn-logout:hover { background: #c01530; }
 
-    /* ── Layout wrapper ─────────────────────────────────────── */
+    /* ── Layout wrapper ─────────────────────────────────────────────── */
     .app-layout {
         display: flex;
         margin-top: 60px;
         min-height: calc(100vh - 60px);
     }
 
-    /* ── Sidebar ────────────────────────────────────────────── */
+    /* ── Sidebar ─────────────────────────────────────────────────────
+       Default: collapsed (50px, icons only). Toggle adds .open → 265px.
+    ──────────────────────────────────────────────────────────────── */
     .app-sidebar {
-        width: 210px;
-        min-width: 210px;
+        width: 50px;
         background: #e31837;
-        padding: 16px 0 20px;
-        min-height: calc(100vh - 60px);
-        position: sticky; top: 60px;
-        align-self: flex-start;
+        padding: 8px 0 25px;
+        position: fixed;
+        top: 60px; left: 0; bottom: 0;
+        z-index: 99;
+        overflow-y: auto;
+        overflow-x: hidden;
+        transition: width 0.35s ease;
+        flex-shrink: 0;
     }
+    .app-sidebar.open { width: 265px; }
+
+    /* Toggle arrow button */
+    .sidebar-toggle {
+        cursor: pointer;
+        padding: 10px 15px;
+        color: #fff;
+        text-align: right;
+        display: flex;
+        justify-content: flex-end;
+    }
+    .sidebar-toggle img {
+        width: 16px; height: 16px;
+        filter: brightness(0) invert(1);
+        transition: transform 0.35s ease;
+    }
+    .app-sidebar.open .sidebar-toggle img { transform: rotate(180deg); }
+
+    /* "Quick Links" section heading */
     .sidebar-section-title {
         padding: 8px 18px 4px;
         color: rgba(255,255,255,0.65);
@@ -55,45 +84,79 @@
         text-transform: uppercase;
         letter-spacing: 1.2px;
         font-weight: 600;
-        margin-top: 8px;
+        white-space: nowrap;
+        display: none;
     }
+    .app-sidebar.open .sidebar-section-title { display: block; }
+
+    /* Nav links */
     .sidebar-link {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 11px 18px;
-        color: rgba(255,255,255,0.88);
+        display: block;
+        color: rgba(255,255,255,0.9);
         text-decoration: none;
         font-size: 0.88rem;
-        transition: all 0.18s;
+        padding: 9px 15px;
+        position: relative;
+        min-height: 42px;
+        transition: background 0.2s, border-left 0.2s;
         border-left: 3px solid transparent;
+        white-space: nowrap;
     }
-    .sidebar-link:hover {
-        background: rgba(0,0,0,0.12);
-        color: #fff;
-        border-left-color: #fff;
-    }
+    .app-sidebar.open .sidebar-link { padding: 9px 15px 9px 46px; }
+    .sidebar-link:hover,
     .sidebar-link.active {
-        background: rgba(0,0,0,0.18);
-        color: #fff;
+        background: rgba(255,255,255,0.18);
         border-left-color: #fff;
-        font-weight: 600;
+        color: #fff;
     }
-    .sidebar-link .bi { font-size: 1rem; opacity: 0.9; }
-    .sidebar-link img { width: 18px; height: 18px; filter: brightness(0) invert(1); opacity: 0.88; }
-    .sidebar-link.active img { opacity: 1; }
 
-    /* ── Main content ────────────────────────────────────────── */
-    .app-main { flex: 1; padding: 28px 32px; min-width: 0; }
+    /* Icon inside link (always visible, absolutely positioned in collapsed state) */
+    .sidebar-icon {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px; height: 20px;
+    }
+    .sidebar-icon img {
+        width: 18px; height: 18px;
+        filter: brightness(0) invert(1);
+        opacity: 0.88;
+    }
+    .sidebar-icon .bi { font-size: 1rem; color: rgba(255,255,255,0.88); }
+    .sidebar-link.active .sidebar-icon img { opacity: 1; }
+
+    /* Text label — hidden when collapsed */
+    .sidebar-label { display: none; vertical-align: middle; }
+    .app-sidebar.open .sidebar-label { display: inline; }
+
+    /* ── Main content ─────────────────────────────────────────────── */
+    .app-main {
+        flex: 1;
+        min-width: 0;
+        padding: 28px 32px;
+        margin-left: 50px;   /* compensates for fixed sidebar */
+        transition: margin-left 0.35s ease;
+    }
+    .app-layout.sidebar-open .app-main { margin-left: 265px; }
+
     .page-title { font-size: 1.45rem; font-weight: 700; color: #1a2a5e; margin-bottom: 4px; }
-    .page-sub { color: #888; font-size: 0.88rem; margin-bottom: 22px; }
+    .page-sub   { color: #888; font-size: 0.88rem; margin-bottom: 22px; }
 </style>
 
 <header class="app-header">
-    <div class="app-logo">
-        <img src="~/images/aura.png" alt="AURA IQFlowAgent" />
+    <div class="header-left">
+        <div class="app-logo-primary">
+            <img src="~/images/aura.png" alt="AURA IQFlowAgent" />
+        </div>
+        <div class="app-logo-secondary">
+            <img src="~/images/logo-login.png" alt="IQFlowAgent" />
+        </div>
     </div>
-    <div class="app-user">
+    <div class="header-right">
         <span class="app-username"><i class="bi bi-person-circle me-1"></i>@User.Identity?.Name</span>
         <form asp-action="Logout" asp-controller="Account" method="post" style="margin:0;">
             @Html.AntiForgeryToken()
@@ -102,27 +165,54 @@
     </div>
 </header>
 
-<div class="app-layout">
-    <aside class="app-sidebar">
+<div class="app-layout" id="appLayout">
+    <aside class="app-sidebar" id="appSidebar">
+        <div class="sidebar-toggle" onclick="toggleAppSidebar()" title="Toggle navigation">
+            <img src="~/images/menuIcons/arrow.png" alt="toggle" />
+        </div>
         <div class="sidebar-section-title">Process</div>
         <a asp-controller="Intake" asp-action="Index" class="@Nav("intake")">
-            <i class="bi bi-inbox"></i> <span>Intake</span>
+            <span class="sidebar-icon"><img src="~/images/menuIcons/icon5.png" alt="" /></span>
+            <span class="sidebar-label">Intake</span>
         </a>
         <a asp-controller="Analysis" asp-action="Index" class="@Nav("analysis")">
-            <img src="~/images/AiAnalysis.svg" alt="" /> <span>AI Analysis</span>
+            <span class="sidebar-icon"><img src="~/images/AiAnalysis.svg" alt="" /></span>
+            <span class="sidebar-label">AI Analysis</span>
         </a>
         <a asp-controller="Task" asp-action="Index" class="@Nav("tasks")">
-            <i class="bi bi-kanban"></i> <span>Tasks</span>
+            <span class="sidebar-icon"><img src="~/images/KanbanBoard.svg" alt="" /></span>
+            <span class="sidebar-label">Tasks</span>
         </a>
         <a asp-controller="Report" asp-action="Prepare" class="@Nav("report")">
-            <i class="bi bi-file-earmark-word"></i> <span>DD Report</span>
+            <span class="sidebar-icon"><i class="bi bi-file-earmark-word"></i></span>
+            <span class="sidebar-label">DD Report</span>
         </a>
         <div class="sidebar-section-title">Admin</div>
         <a asp-controller="UserManagement" asp-action="Index" class="@Nav("usermgmt")">
-            <i class="bi bi-people"></i> <span>User Management</span>
+            <span class="sidebar-icon"><img src="~/images/Adminconfig.svg" alt="" /></span>
+            <span class="sidebar-label">User Management</span>
         </a>
         <a asp-controller="AuthSettings" asp-action="Index" class="@Nav("authsettings")">
-            <i class="bi bi-shield-lock"></i> <span>Auth Settings</span>
+            <span class="sidebar-icon"><i class="bi bi-shield-lock"></i></span>
+            <span class="sidebar-label">Auth Settings</span>
         </a>
     </aside>
+
+    <script>
+        (function () {
+            // Restore sidebar state from localStorage
+            var open = localStorage.getItem('sidebarOpen') === '1';
+            if (open) {
+                document.getElementById('appSidebar').classList.add('open');
+                document.getElementById('appLayout').classList.add('sidebar-open');
+            }
+        })();
+        function toggleAppSidebar() {
+            var sidebar = document.getElementById('appSidebar');
+            var layout  = document.getElementById('appLayout');
+            var isOpen  = sidebar.classList.toggle('open');
+            layout.classList.toggle('sidebar-open', isOpen);
+            localStorage.setItem('sidebarOpen', isOpen ? '1' : '0');
+        }
+    </script>
     @* Main content injected by each page *@
