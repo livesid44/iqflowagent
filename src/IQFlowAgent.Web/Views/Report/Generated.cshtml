@@ -6,7 +6,7 @@
     string? sizeKb   = ViewBag.ReportSizeKb as string;
 }
 
-@await Html.PartialAsync("_AppShell", "Report")
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "report" } })
 
 <style>
     .gen-page { padding: 60px 32px; max-width: 680px; margin: 0 auto; text-align: center; }
@@ -23,6 +23,7 @@
     .closed-badge { display: inline-block; background: #d1fae5; color: #065f46; padding: 4px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; margin-top: 8px; }
 </style>
 
+<main class="app-main">
 <div class="gen-page">
     <div class="gen-icon">🎉</div>
     <div class="gen-title">Final Report Generated!</div>
@@ -71,3 +72,5 @@
     <br/>
     <a href="/Intake/Index" class="btn-intakes">← Back to Intakes</a>
 </div>
+</main>
+</div>@* close app-layout *@

@@ -18,7 +18,7 @@
     var sections = Model.GroupBy(f => f.Section).OrderBy(g => g.Key);
 }
 
-@await Html.PartialAsync("_AppShell", "Report")
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "report" } })
 
 <style>
     /* ── Empty-state (no intake selected) ─────────────────────────────── */
@@ -30,8 +30,6 @@
     .empty-state-box .es-icon { font-size: 3rem; margin-bottom: 16px; }
     .empty-state-box h3 { font-size: 1.1rem; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
     .empty-state-box p  { font-size: 0.88rem; color: #6b7280; }
-
-    .report-page { padding: 24px 32px; }
     .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
     .page-title { font-size: 1.4rem; font-weight: 700; color: #1a1a2e; }
     .page-subtitle { font-size: 0.85rem; color: #6b7280; margin-top: 2px; }
@@ -97,7 +95,7 @@
     }
 </style>
 
-<div class="report-page">
+<main class="app-main">
 
     @* ── Intake Picker (always visible) ──────────────────────────────────── *@
     @await Html.PartialAsync("_IntakePicker")
@@ -320,4 +318,5 @@
         }
     }
     } @* end else (intake selected) *@
-</div>
+</main>
+</div>@* close app-layout *@
