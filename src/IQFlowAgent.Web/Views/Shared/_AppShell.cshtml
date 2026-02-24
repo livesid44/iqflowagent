@@ -26,7 +26,7 @@
     .header-left  { display: flex; align-items: center; gap: 14px; }
     .header-right { display: flex; align-items: center; gap: 14px; }
     .app-logo-primary a { display: flex; align-items: center; }
-    .app-logo-primary svg { height: 36px; width: auto; }
+    .app-logo-primary img { height: 40px; width: auto; }
     .app-username { font-size: 0.88rem; color: #555; white-space: nowrap; }
     .btn-logout {
         background: #e31837; border: none; color: #fff;
@@ -148,17 +148,7 @@
     <div class="header-left">
         <div class="app-logo-primary">
             <a asp-controller="Dashboard" asp-action="Index" style="text-decoration:none;">
-                <svg width="160" height="36" viewBox="0 0 160 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="IQ Flow Agent">
-                    <!-- Lightning bolt icon -->
-                    <rect width="36" height="36" rx="8" fill="#e31837"/>
-                    <polygon points="21,4 11,20 18,20 15,32 25,16 18,16" fill="#ffffff"/>
-                    <!-- Wordmark -->
-                    <text x="44" y="14" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" fill="#e31837" letter-spacing="1">IQ</text>
-                    <text x="44" y="27" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" fill="#1a2a5e" letter-spacing="0.5">FLOW</text>
-                    <text x="80" y="14" font-family="'Segoe UI',Arial,sans-serif" font-size="8" font-weight="400" fill="#888">AGENT</text>
-                    <line x1="77" y1="4" x2="77" y2="32" stroke="#e0e0e0" stroke-width="1"/>
-                    <text x="82" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="9" font-weight="600" fill="#555">Process Intelligence</text>
-                </svg>
+                <img src="~/images/aura.png" alt="IQFlowAgent" />
             </a>
         </div>
     </div>
