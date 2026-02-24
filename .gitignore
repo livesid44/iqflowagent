@@ -5,3 +5,6 @@ obj/
 .idea/
 *.suo
 .DS_Store
+*.db
+*.db-shm
+*.db-wal
