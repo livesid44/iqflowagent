@@ -5,6 +5,7 @@
 @{
     var activePage = (string?)ViewData["ActivePage"] ?? "";
     string Nav(string page) => activePage.Equals(page, StringComparison.OrdinalIgnoreCase) ? "sidebar-link active" : "sidebar-link";
+    // ActivePage values: dashboard, intake, analysis, tasks, report, usermgmt, authsettings
 }
 
 <style>
@@ -171,6 +172,10 @@
             <img src="~/images/menuIcons/arrow.png" alt="toggle" />
         </div>
         <div class="sidebar-section-title">Process</div>
+        <a asp-controller="Dashboard" asp-action="Index" class="@Nav("dashboard")">
+            <span class="sidebar-icon"><i class="bi bi-speedometer2"></i></span>
+            <span class="sidebar-label">Dashboard</span>
+        </a>
         <a asp-controller="Intake" asp-action="Index" class="@Nav("intake")">
             <span class="sidebar-icon"><img src="~/images/menuIcons/icon5.png" alt="" /></span>
             <span class="sidebar-label">Intake</span>
