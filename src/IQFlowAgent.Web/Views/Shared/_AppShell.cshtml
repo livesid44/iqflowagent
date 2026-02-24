@@ -25,11 +25,8 @@
     }
     .header-left  { display: flex; align-items: center; gap: 14px; }
     .header-right { display: flex; align-items: center; gap: 14px; }
-    .app-logo-primary img  { height: 35px; width: auto; }
-    .app-logo-secondary img {
-        height: 30px; width: auto; opacity: 0.85;
-        border-left: 1px solid #e0e0e0; padding-left: 14px;
-    }
+    .app-logo-primary a { display: flex; align-items: center; }
+    .app-logo-primary svg { height: 36px; width: auto; }
     .app-username { font-size: 0.88rem; color: #555; white-space: nowrap; }
     .btn-logout {
         background: #e31837; border: none; color: #fff;
@@ -70,12 +67,10 @@
         display: flex;
         justify-content: flex-end;
     }
-    .sidebar-toggle img {
-        width: 16px; height: 16px;
-        filter: brightness(0) invert(1);
+    .sidebar-toggle .toggle-arrow {
         transition: transform 0.35s ease;
     }
-    .app-sidebar.open .sidebar-toggle img { transform: rotate(180deg); }
+    .app-sidebar.open .sidebar-toggle .toggle-arrow { transform: rotate(180deg); }
 
     /* "Quick Links" section heading */
     .sidebar-section-title {
@@ -122,13 +117,14 @@
         justify-content: center;
         width: 20px; height: 20px;
     }
-    .sidebar-icon img {
+    .sidebar-icon svg {
         width: 18px; height: 18px;
-        filter: brightness(0) invert(1);
-        opacity: 0.88;
+        stroke: rgba(255,255,255,0.88);
+        color: rgba(255,255,255,0.88);
+        flex-shrink: 0;
     }
-    .sidebar-icon .bi { font-size: 1rem; color: rgba(255,255,255,0.88); }
-    .sidebar-link.active .sidebar-icon img { opacity: 1; }
+    .sidebar-link.active .sidebar-icon svg { stroke: #fff; opacity: 1; }
+    .sidebar-link:hover .sidebar-icon svg  { stroke: #fff; }
 
     /* Text label — hidden when collapsed */
     .sidebar-label { display: none; vertical-align: middle; }
@@ -151,14 +147,26 @@
 <header class="app-header">
     <div class="header-left">
         <div class="app-logo-primary">
-            <img src="~/images/aura.png" alt="AURA IQFlowAgent" />
-        </div>
-        <div class="app-logo-secondary">
-            <img src="~/images/logo-login.png" alt="IQFlowAgent" />
+            <a asp-controller="Dashboard" asp-action="Index" style="text-decoration:none;">
+                <svg width="160" height="36" viewBox="0 0 160 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="IQ Flow Agent">
+                    <!-- Lightning bolt icon -->
+                    <rect width="36" height="36" rx="8" fill="#e31837"/>
+                    <polygon points="21,4 11,20 18,20 15,32 25,16 18,16" fill="#ffffff"/>
+                    <!-- Wordmark -->
+                    <text x="44" y="14" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" fill="#e31837" letter-spacing="1">IQ</text>
+                    <text x="44" y="27" font-family="'Segoe UI',Arial,sans-serif" font-size="11" font-weight="700" fill="#1a2a5e" letter-spacing="0.5">FLOW</text>
+                    <text x="80" y="14" font-family="'Segoe UI',Arial,sans-serif" font-size="8" font-weight="400" fill="#888">AGENT</text>
+                    <line x1="77" y1="4" x2="77" y2="32" stroke="#e0e0e0" stroke-width="1"/>
+                    <text x="82" y="22" font-family="'Segoe UI',Arial,sans-serif" font-size="9" font-weight="600" fill="#555">Process Intelligence</text>
+                </svg>
+            </a>
         </div>
     </div>
     <div class="header-right">
-        <span class="app-username"><i class="bi bi-person-circle me-1"></i>@User.Identity?.Name</span>
+        <span class="app-username">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" style="vertical-align:middle;margin-right:4px" aria-label="User profile icon"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            @User.Identity?.Name
+        </span>
         <form asp-action="Logout" asp-controller="Account" method="post" style="margin:0;">
             @Html.AntiForgeryToken()
             <button type="submit" class="btn-logout">Logout</button>
@@ -169,36 +177,50 @@
 <div class="app-layout" id="appLayout">
     <aside class="app-sidebar" id="appSidebar">
         <div class="sidebar-toggle" onclick="toggleAppSidebar()" title="Toggle navigation">
-            <img src="~/images/menuIcons/arrow.png" alt="toggle" />
+            <svg class="toggle-arrow" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" width="16" height="16" aria-label="Toggle sidebar navigation"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="sidebar-section-title">Process</div>
         <a asp-controller="Dashboard" asp-action="Index" class="@Nav("dashboard")">
-            <span class="sidebar-icon"><i class="bi bi-speedometer2"></i></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </span>
             <span class="sidebar-label">Dashboard</span>
         </a>
         <a asp-controller="Intake" asp-action="Index" class="@Nav("intake")">
-            <span class="sidebar-icon"><img src="~/images/menuIcons/icon5.png" alt="" /></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4z"/><path d="M4 12h16v4H4z"/><path d="M4 20h10"/><circle cx="19" cy="20" r="2"/><path d="M19 16v2"/></svg>
+            </span>
             <span class="sidebar-label">Intake</span>
         </a>
         <a asp-controller="Analysis" asp-action="Index" class="@Nav("analysis")">
-            <span class="sidebar-icon"><img src="~/images/AiAnalysis.svg" alt="" /></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9c0-1.7 1.3-3 3-3s3 1.3 3 3c0 2-3 2-3 4"/><circle cx="12" cy="19" r="0.5" fill="currentColor"/></svg>
+            </span>
             <span class="sidebar-label">AI Analysis</span>
         </a>
         <a asp-controller="Task" asp-action="Index" class="@Nav("tasks")">
-            <span class="sidebar-icon"><img src="~/images/KanbanBoard.svg" alt="" /></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="11" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg>
+            </span>
             <span class="sidebar-label">Tasks</span>
         </a>
         <a asp-controller="Report" asp-action="Prepare" class="@Nav("report")">
-            <span class="sidebar-icon"><i class="bi bi-file-earmark-word"></i></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+            </span>
             <span class="sidebar-label">DD Report</span>
         </a>
         <div class="sidebar-section-title">Admin</div>
         <a asp-controller="UserManagement" asp-action="Index" class="@Nav("usermgmt")">
-            <span class="sidebar-icon"><img src="~/images/Adminconfig.svg" alt="" /></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.85"/></svg>
+            </span>
             <span class="sidebar-label">User Management</span>
         </a>
         <a asp-controller="AuthSettings" asp-action="Index" class="@Nav("authsettings")">
-            <span class="sidebar-icon"><i class="bi bi-shield-lock"></i></span>
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="15" r="1" fill="currentColor"/></svg>
+            </span>
             <span class="sidebar-label">Auth Settings</span>
         </a>
     </aside>
