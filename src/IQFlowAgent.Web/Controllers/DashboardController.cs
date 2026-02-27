@@ -37,9 +37,10 @@ public class DashboardController : Controller
             .ToDictionaryAsync(g => g.IntakeRecordId);
 
         // ── 3. Which intakes have a generated final report ───────────────
-        var reportIntakeIds = await _db.FinalReports
+        var reportIntakeIdsList = await _db.FinalReports
             .Select(r => r.IntakeRecordId)
-            .ToHashSetAsync();
+            .ToListAsync();
+        var reportIntakeIds = reportIntakeIdsList.ToHashSet();
 
         // ── 4. Apply filters for the table rows ──────────────────────────
         var filtered = allIntakes.Where(x =>
