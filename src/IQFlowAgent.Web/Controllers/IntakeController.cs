@@ -160,6 +160,175 @@ public class IntakeController : Controller
         return View(record);
     }
 
+    // GET /Intake/Edit/5 — load intake for editing (blocked when Closed)
+    public async Task<IActionResult> Edit(int id)
+    {
+        var record = await _db.IntakeRecords.FindAsync(id);
+        if (record == null) return NotFound();
+
+        if (record.Status == "Closed")
+        {
+            TempData["Error"] = "Closed intakes cannot be edited.";
+            return RedirectToAction(nameof(AnalysisResult), new { id });
+        }
+
+        // Only the creator or an Admin/SuperAdmin may edit
+        if (!User.IsInRole("Admin") && !User.IsInRole("SuperAdmin") &&
+            User.Identity?.Name != record.CreatedByUserId)
+        {
+            return Forbid();
+        }
+
+        var model = new EditIntakeViewModel
+        {
+            ProcessName          = record.ProcessName,
+            Description          = record.Description,
+            BusinessUnit         = record.BusinessUnit,
+            Department           = record.Department,
+            ProcessOwnerName     = record.ProcessOwnerName,
+            ProcessOwnerEmail    = record.ProcessOwnerEmail,
+            ProcessType          = record.ProcessType,
+            EstimatedVolumePerDay = record.EstimatedVolumePerDay,
+            Priority             = record.Priority,
+            Country              = record.Country,
+            City                 = record.City,
+            SiteLocation         = record.SiteLocation,
+            TimeZone             = record.TimeZone,
+            CurrentDocumentName  = record.UploadedFileName,
+            CurrentDocumentPath  = record.UploadedFilePath,
+        };
+
+        ViewBag.IntakeId     = record.IntakeId;
+        ViewBag.IntakeStatus = record.Status;
+        return View(model);
+    }
+
+    // POST /Intake/Edit/5 — save edits; optionally replace document; optionally re-run analysis
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Edit(int id, EditIntakeViewModel model)
+    {
+        var record = await _db.IntakeRecords.FindAsync(id);
+        if (record == null) return NotFound();
+
+        if (record.Status == "Closed")
+        {
+            TempData["Error"] = "Closed intakes cannot be edited.";
+            return RedirectToAction(nameof(AnalysisResult), new { id });
+        }
+
+        if (!User.IsInRole("Admin") && !User.IsInRole("SuperAdmin") &&
+            User.Identity?.Name != record.CreatedByUserId)
+        {
+            return Forbid();
+        }
+
+        if (!ModelState.IsValid)
+        {
+            ViewBag.IntakeId     = record.IntakeId;
+            ViewBag.IntakeStatus = record.Status;
+            return View(model);
+        }
+
+        // ── Meta fields ──────────────────────────────────────────────────────
+        record.ProcessName          = model.ProcessName;
+        record.Description          = model.Description;
+        record.BusinessUnit         = model.BusinessUnit;
+        record.Department           = model.Department;
+        record.ProcessOwnerName     = model.ProcessOwnerName;
+        record.ProcessOwnerEmail    = model.ProcessOwnerEmail;
+        record.ProcessType          = model.ProcessType;
+        record.EstimatedVolumePerDay = model.EstimatedVolumePerDay;
+        record.Priority             = model.Priority;
+        record.Country              = model.Country;
+        record.City                 = model.City;
+        record.SiteLocation         = model.SiteLocation;
+        record.TimeZone             = model.TimeZone;
+
+        // ── Document handling ────────────────────────────────────────────────
+        bool documentReplaced = false;
+
+        // Delete existing document if requested or if a new file is being uploaded
+        bool shouldDeleteExisting = model.DeleteDocument ||
+                                    (model.Document != null && model.Document.Length > 0);
+        if (shouldDeleteExisting && !string.IsNullOrWhiteSpace(record.UploadedFilePath))
+        {
+            if (_blobService.IsConfigured &&
+                record.UploadedFilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                await _blobService.DeleteAsync(record.UploadedFilePath);
+            }
+            else
+            {
+                var oldFullPath = Path.Combine(_env.WebRootPath,
+                    record.UploadedFilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+                if (System.IO.File.Exists(oldFullPath))
+                    System.IO.File.Delete(oldFullPath);
+            }
+
+            record.UploadedFilePath        = null;
+            record.UploadedFileName        = null;
+            record.UploadedFileContentType = null;
+            record.UploadedFileSize        = null;
+            documentReplaced = true;
+        }
+
+        // Upload new document
+        if (model.Document != null && model.Document.Length > 0)
+        {
+            var ext = Path.GetExtension(model.Document.FileName);
+
+            if (_blobService.IsConfigured)
+            {
+                var blobName = $"{record.IntakeId}{ext}";
+                using var stream = model.Document.OpenReadStream();
+                record.UploadedFilePath = await _blobService.UploadAsync(
+                    stream, blobName, model.Document.ContentType);
+            }
+            else
+            {
+                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
+                Directory.CreateDirectory(uploadsDir);
+                var safeFileName = $"{record.IntakeId}{ext}";
+                var fullPath = Path.Combine(uploadsDir, safeFileName);
+                using var stream = new FileStream(fullPath, FileMode.Create);
+                await model.Document.CopyToAsync(stream);
+                record.UploadedFilePath = $"/uploads/{safeFileName}";
+            }
+
+            record.UploadedFileName        = model.Document.FileName;
+            record.UploadedFileContentType = model.Document.ContentType;
+            record.UploadedFileSize        = model.Document.Length;
+            documentReplaced = true;
+        }
+
+        // ── Re-trigger analysis if requested or document was replaced ────────
+        bool rerun = model.RerunAnalysis || documentReplaced;
+        if (rerun)
+        {
+            record.Status         = "Submitted";
+            record.AnalysisResult = null;
+            record.AnalyzedAt     = null;
+        }
+
+        await _db.SaveChangesAsync();
+
+        if (rerun)
+        {
+            var webRootPath      = _env.WebRootPath;
+            var uploadedFilePath = record.UploadedFilePath;
+            var recordId         = record.Id;
+            _ = Task.Run(async () => await RunAnalysisInBackgroundAsync(recordId, uploadedFilePath, webRootPath));
+            TempData["Success"] = $"Intake {record.IntakeId} updated. AI Analysis is re-running…";
+        }
+        else
+        {
+            TempData["Success"] = $"Intake {record.IntakeId} updated successfully.";
+        }
+
+        return RedirectToAction(nameof(AnalysisResult), new { id });
+    }
+
     // POST /Intake/Reanalyze/5 — re-trigger analysis
     [HttpPost]
     [ValidateAntiForgeryToken]

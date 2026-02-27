@@ -64,6 +64,8 @@
     .status-error     { background: #ffe0e6; color: #c01530; }
     .btn-view { background: #1a2a5e; border: none; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 0.78rem; cursor: pointer; text-decoration: none; }
     .btn-view:hover { background: #294993; color: #fff; }
+    .btn-edit { background: #f59e0b; border: none; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 0.78rem; cursor: pointer; text-decoration: none; margin-left: 6px; }
+    .btn-edit:hover { background: #d97706; color: #fff; }
     .empty-state { text-align: center; padding: 40px; color: #aaa; font-size: 0.9rem; }
 </style>
 
@@ -129,10 +131,16 @@
                                 </span>
                             </td>
                             <td style="white-space:nowrap;">@item.CreatedAt.ToString("MMM dd, yyyy")</td>
-                            <td>
+                            <td style="white-space:nowrap;">
                                 <a asp-action="AnalysisResult" asp-route-id="@item.Id" class="btn-view">
                                     <i class="bi bi-eye"></i> View
                                 </a>
+                                @if (item.Status != "Closed")
+                                {
+                                    <a asp-action="Edit" asp-route-id="@item.Id" class="btn-edit" aria-label="Edit intake @item.IntakeId">
+                                        <i class="bi bi-pencil"></i> Edit
+                                    </a>
+                                }
                             </td>
                         </tr>
                     }
