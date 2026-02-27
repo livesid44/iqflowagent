@@ -121,11 +121,9 @@
     }
     .btn-reanalyze:hover { background: #294993; }
     .btn-edit-intake {
-        background: #f59e0b; border: none; color: #fff;
-        border-radius: 8px; padding: 9px 16px; font-size: 0.88rem; cursor: pointer;
-        text-decoration: none; display: inline-block; transition: background 0.2s;
+        display: inline-flex; align-items: center; gap: 4px;
+        text-decoration: none;
     }
-    .btn-edit-intake:hover { background: #d97706; color: #fff; }
     .btn-back { color: #888; text-decoration: none; font-size: 0.85rem; }
 
     /* Spinner for "Analyzing" state */
@@ -216,13 +214,14 @@
 @await Html.PartialAsync("_AppShell")
 
 <main class="app-main">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:8px;">
         <a asp-action="Index" class="btn-back"><i class="bi bi-arrow-left"></i> All Intakes</a>
-        <div style="display:flex; gap:10px; align-items:center;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
             @if (Model.Status != "Closed")
             {
-                <a asp-action="Edit" asp-route-id="@Model.Id" class="btn-edit-intake" aria-label="Edit intake @Model.IntakeId">
-                    <i class="bi bi-pencil"></i> Edit Intake
+                <a asp-action="Edit" asp-route-id="@Model.Id"
+                   class="btn-reanalyze btn-edit-intake">
+                    ✏ Edit Intake
                 </a>
             }
             @if (Model.Status == "Complete" || Model.Status == "Error")
