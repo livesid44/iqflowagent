@@ -120,6 +120,10 @@
         transition: background 0.2s;
     }
     .btn-reanalyze:hover { background: #294993; }
+    .btn-edit-intake {
+        display: inline-flex; align-items: center; gap: 4px;
+        text-decoration: none;
+    }
     .btn-back { color: #888; text-decoration: none; font-size: 0.85rem; }
 
     /* Spinner for "Analyzing" state */
@@ -210,17 +214,26 @@
 @await Html.PartialAsync("_AppShell")
 
 <main class="app-main">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:8px;">
         <a asp-action="Index" class="btn-back"><i class="bi bi-arrow-left"></i> All Intakes</a>
-        @if (Model.Status == "Complete" || Model.Status == "Error")
-        {
-            <form asp-action="Reanalyze" asp-route-id="@Model.Id" method="post" style="margin:0;">
-                @Html.AntiForgeryToken()
-                <button type="submit" class="btn-reanalyze">
-                    <i class="bi bi-arrow-clockwise me-1"></i> Re-analyse
-                </button>
-            </form>
-        }
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            @if (Model.Status != "Closed")
+            {
+                <a asp-action="Edit" asp-route-id="@Model.Id"
+                   class="btn-reanalyze btn-edit-intake">
+                    ✏ Edit Intake
+                </a>
+            }
+            @if (Model.Status == "Complete" || Model.Status == "Error")
+            {
+                <form asp-action="Reanalyze" asp-route-id="@Model.Id" method="post" style="margin:0;">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn-reanalyze">
+                        <i class="bi bi-arrow-clockwise me-1"></i> Re-analyse
+                    </button>
+                </form>
+            }
+        </div>
     </div>
 
     <div class="page-title">AI Analysis</div>

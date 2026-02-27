@@ -1,0 +1,382 @@
+@model IQFlowAgent.Web.ViewModels.IntakeEditViewModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Edit Intake";
+    ViewData["ActivePage"] = "intake";
+}
+
+<style>
+    .form-card {
+        background: #fff; border-radius: 12px; padding: 32px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.07); margin-bottom: 24px;
+    }
+    .form-section-title {
+        font-size: 0.95rem; font-weight: 700; color: #1a2a5e;
+        padding-bottom: 10px; border-bottom: 2px solid #e31837;
+        margin-bottom: 20px;
+    }
+    .form-row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .form-group { flex: 1; min-width: 200px; margin-bottom: 16px; }
+    .form-group.full { flex: 100%; min-width: 100%; }
+    .form-group label {
+        display: block; font-size: 0.82rem; color: #444;
+        margin-bottom: 5px; font-weight: 600;
+    }
+    .form-group label .required { color: #e31837; margin-left: 2px; }
+    .form-control {
+        width: 100%; border: 1px solid #ddd; border-radius: 7px;
+        padding: 9px 12px; font-size: 0.9rem; color: #333;
+        transition: border-color 0.2s; box-sizing: border-box;
+    }
+    .form-control:focus { border-color: #1a2a5e; outline: none; box-shadow: 0 0 0 3px rgba(26,42,94,0.08); }
+    select.form-control {
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z' fill='%23666'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 10px center; padding-right: 30px;
+    }
+    textarea.form-control { resize: vertical; min-height: 90px; }
+    .text-danger { font-size: 0.78rem; color: #e31837; margin-top: 3px; }
+
+    .alert-warning-tasks {
+        background: #fef9ec; border: 1px solid #f6c23e; border-radius: 8px;
+        padding: 12px 16px; font-size: 0.85rem; color: #856404;
+        margin-bottom: 24px; display: flex; align-items: center; gap: 10px;
+    }
+    .alert-warning-tasks svg { flex-shrink: 0; }
+
+    /* Current document panel */
+    .doc-panel {
+        background: #f8faff; border: 1px solid #d0dcf5; border-radius: 8px;
+        padding: 14px 18px; margin-bottom: 16px;
+        display: flex; align-items: center; gap: 12px;
+    }
+    .doc-panel-info { flex: 1; font-size: 0.85rem; }
+    .doc-panel-info strong { color: #1a2a5e; }
+    .doc-panel-info small { color: #888; display: block; margin-top: 2px; }
+    .btn-replace-toggle {
+        background: #ffe0e6; color: #c01530; border: none; border-radius: 6px;
+        padding: 6px 14px; font-size: 0.8rem; cursor: pointer; font-weight: 600;
+    }
+    .btn-replace-toggle:hover { background: #ffc9d2; }
+
+    /* Upload zone (only shown when replacing) */
+    .upload-zone {
+        border: 2px dashed #c8d5f0; border-radius: 10px;
+        padding: 28px 20px; text-align: center;
+        background: #f8faff; cursor: pointer; transition: all 0.2s;
+    }
+    .upload-zone:hover, .upload-zone.drag-over { border-color: #1a2a5e; background: #eef2ff; }
+    .upload-zone p { color: #888; font-size: 0.85rem; margin: 0; }
+    .upload-zone strong { color: #1a2a5e; }
+    #fileInput { display: none; }
+    #filePreview { margin-top: 10px; font-size: 0.82rem; color: #1a2a5e; }
+
+    /* Reanalysis checkbox */
+    .reanalyze-row {
+        background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 8px;
+        padding: 14px 18px; display: flex; align-items: center; gap: 12px;
+        margin-bottom: 16px; font-size: 0.87rem; color: #333;
+    }
+    .reanalyze-row input[type=checkbox] { width: 18px; height: 18px; accent-color: #1a2a5e; cursor: pointer; }
+    .reanalyze-row label { cursor: pointer; font-weight: 600; color: #1a2a5e; margin: 0; }
+    .reanalyze-row small { display: block; color: #666; font-weight: 400; margin-top: 2px; }
+
+    /* Action buttons */
+    .form-actions { display: flex; gap: 12px; margin-top: 8px; }
+    .btn-submit {
+        background: #e31837; border: none; color: #fff; border-radius: 8px;
+        padding: 11px 32px; font-size: 0.95rem; font-weight: 600;
+        cursor: pointer; transition: background 0.2s;
+    }
+    .btn-submit:hover { background: #c01530; }
+    .btn-cancel {
+        background: #f1f5f9; border: 1px solid #ddd; color: #555;
+        border-radius: 8px; padding: 11px 24px; font-size: 0.95rem;
+        cursor: pointer; text-decoration: none; display: inline-block;
+    }
+    .btn-cancel:hover { background: #e2e8f0; color: #333; }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+        <a asp-action="AnalysisResult" asp-route-id="@Model.Id"
+           style="color:#888;text-decoration:none;font-size:0.85rem;">← Back to Analysis</a>
+    </div>
+    <div class="page-title">Edit Intake</div>
+    <div class="page-sub">
+        <code style="font-size:0.9rem;background:#f1f5f9;padding:2px 8px;border-radius:4px;">@Model.IntakeId</code>
+        &nbsp;— Update process meta information, location, or replace the uploaded document
+    </div>
+
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-danger py-2 small mb-3">@TempData["Error"]</div>
+    }
+
+    @if (Model.TaskCount > 0)
+    {
+        <div class="alert-warning-tasks">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#856404" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="1" fill="#856404"/>
+            </svg>
+            This intake has <strong>@Model.TaskCount task@(Model.TaskCount == 1 ? "" : "s")</strong>.
+            Editing meta information will not affect existing tasks. If you replace the document and re-run analysis,
+            new tasks may be generated — existing tasks are preserved.
+        </div>
+    }
+
+    <form asp-action="Edit" asp-route-id="@Model.Id" method="post" enctype="multipart/form-data">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="Id" />
+        <input type="hidden" asp-for="IntakeId" />
+
+        <!-- ── SECTION 1: Process Information ───────────────────────── -->
+        <div class="form-card">
+            <div class="form-section-title">Process Information</div>
+            <div class="form-row">
+                <div class="form-group full">
+                    <label asp-for="ProcessName">Process Name <span class="required">*</span></label>
+                    <input asp-for="ProcessName" class="form-control" placeholder="e.g. Customer Service Call Handling" />
+                    <span asp-validation-for="ProcessName" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full">
+                    <label asp-for="Description">Description <span class="required">*</span></label>
+                    <textarea asp-for="Description" class="form-control"
+                              placeholder="Describe the business process in detail…"></textarea>
+                    <span asp-validation-for="Description" class="text-danger"></span>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="ProcessType">Process Type</label>
+                    <select asp-for="ProcessType" class="form-control">
+                        <option value="Manual">Manual</option>
+                        <option value="Semi-Automated">Semi-Automated</option>
+                        <option value="Automated">Automated</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label asp-for="Priority">Priority</label>
+                    <select asp-for="Priority" class="form-control">
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label asp-for="EstimatedVolumePerDay">Est. Volume / Day</label>
+                    <input asp-for="EstimatedVolumePerDay" class="form-control" type="number" min="0" placeholder="e.g. 500" />
+                    <span asp-validation-for="EstimatedVolumePerDay" class="text-danger"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── SECTION 2: Ownership ──────────────────────────────────── -->
+        <div class="form-card">
+            <div class="form-section-title">Ownership &amp; Organisation</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="BusinessUnit">Business Unit <span class="required">*</span></label>
+                    <input asp-for="BusinessUnit" class="form-control" placeholder="e.g. Operations" />
+                    <span asp-validation-for="BusinessUnit" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="Department">Department</label>
+                    <input asp-for="Department" class="form-control" placeholder="e.g. Customer Care" />
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="ProcessOwnerName">Process Owner Name <span class="required">*</span></label>
+                    <input asp-for="ProcessOwnerName" class="form-control" placeholder="Full name" />
+                    <span asp-validation-for="ProcessOwnerName" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="ProcessOwnerEmail">Process Owner Email <span class="required">*</span></label>
+                    <input asp-for="ProcessOwnerEmail" class="form-control" type="email" placeholder="owner@company.com" />
+                    <span asp-validation-for="ProcessOwnerEmail" class="text-danger"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── SECTION 3: Location ───────────────────────────────────── -->
+        <div class="form-card">
+            <div class="form-section-title">Location</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="Country">Country <span class="required">*</span></label>
+                    <input asp-for="Country" class="form-control" placeholder="e.g. United States" />
+                    <span asp-validation-for="Country" class="text-danger"></span>
+                </div>
+                <div class="form-group">
+                    <label asp-for="City">City</label>
+                    <input asp-for="City" class="form-control" placeholder="e.g. New York" />
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label asp-for="SiteLocation">Site / Office Location</label>
+                    <input asp-for="SiteLocation" class="form-control" placeholder="Building / floor / campus" />
+                </div>
+                <div class="form-group">
+                    <label asp-for="TimeZone">Time Zone</label>
+                    <select asp-for="TimeZone" class="form-control">
+                        <option value="">— Select —</option>
+                        <option value="UTC-12:00">UTC-12:00 (Baker Island)</option>
+                        <option value="UTC-11:00">UTC-11:00 (Samoa)</option>
+                        <option value="UTC-10:00">UTC-10:00 (Hawaii)</option>
+                        <option value="UTC-08:00">UTC-08:00 (Pacific Time)</option>
+                        <option value="UTC-07:00">UTC-07:00 (Mountain Time)</option>
+                        <option value="UTC-06:00">UTC-06:00 (Central Time)</option>
+                        <option value="UTC-05:00">UTC-05:00 (Eastern Time)</option>
+                        <option value="UTC-04:00">UTC-04:00 (Atlantic Time)</option>
+                        <option value="UTC-03:00">UTC-03:00 (Brasília)</option>
+                        <option value="UTC+00:00">UTC+00:00 (London / GMT)</option>
+                        <option value="UTC+01:00">UTC+01:00 (Paris / Berlin)</option>
+                        <option value="UTC+02:00">UTC+02:00 (Cairo / Helsinki)</option>
+                        <option value="UTC+03:00">UTC+03:00 (Moscow / Riyadh)</option>
+                        <option value="UTC+04:00">UTC+04:00 (Dubai)</option>
+                        <option value="UTC+05:00">UTC+05:00 (Karachi)</option>
+                        <option value="UTC+05:30">UTC+05:30 (India / IST)</option>
+                        <option value="UTC+06:00">UTC+06:00 (Dhaka)</option>
+                        <option value="UTC+07:00">UTC+07:00 (Bangkok / Jakarta)</option>
+                        <option value="UTC+08:00">UTC+08:00 (Singapore / Beijing)</option>
+                        <option value="UTC+09:00">UTC+09:00 (Tokyo / Seoul)</option>
+                        <option value="UTC+10:00">UTC+10:00 (Sydney)</option>
+                        <option value="UTC+12:00">UTC+12:00 (Auckland)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── SECTION 4: Document ───────────────────────────────────── -->
+        <div class="form-card">
+            <div class="form-section-title">
+                Document
+                <span style="font-weight:400;color:#999;font-size:0.8rem;">(optional)</span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(Model.CurrentFileName))
+            {
+                <!-- Current document panel -->
+                <div class="doc-panel" id="currentDocPanel">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1a2a5e" stroke-width="1.5">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    <div class="doc-panel-info">
+                        <strong>@Model.CurrentFileName</strong>
+                        <small>Currently stored document</small>
+                    </div>
+                    <button type="button" class="btn-replace-toggle" onclick="toggleReplace()">
+                        Replace Document
+                    </button>
+                </div>
+
+                <!-- Hidden: ReplaceDocument flag -->
+                <input type="hidden" asp-for="ReplaceDocument" id="replaceFlag" value="false" />
+
+                <div id="uploadSection" style="display:none;">
+                    <div style="font-size:0.82rem;color:#c01530;margin-bottom:10px;font-weight:600;">
+                        ⚠ The current document will be deleted when you save.
+                    </div>
+                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                        <p><strong>Click to upload</strong> or drag and drop</p>
+                        <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+                    </div>
+                    <input type="file" id="fileInput" asp-for="NewDocument"
+                           accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
+                           onchange="previewFile(this)" />
+                    <div id="filePreview"></div>
+                    <button type="button" class="btn-cancel" style="margin-top:10px;font-size:0.8rem;"
+                            onclick="cancelReplace()">Cancel replacement</button>
+                </div>
+            }
+            else
+            {
+                <!-- No document — show upload zone directly -->
+                <input type="hidden" asp-for="ReplaceDocument" id="replaceFlag" value="true" />
+                <p style="font-size:0.85rem;color:#777;margin-bottom:14px;">
+                    No document is currently attached. Upload one to include it in the AI analysis.
+                </p>
+                <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                    <p><strong>Click to upload</strong> or drag and drop</p>
+                    <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+                </div>
+                <input type="file" id="fileInput" asp-for="NewDocument"
+                       accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
+                       onchange="previewFile(this)" />
+                <div id="filePreview"></div>
+            }
+        </div>
+
+        <!-- ── Re-run analysis checkbox ──────────────────────────────── -->
+        <div class="reanalyze-row">
+            <input type="checkbox" asp-for="RerunAnalysis" id="rerunChk" />
+            <div>
+                <label for="rerunChk">Re-run AI Analysis after saving</label>
+                <small>Recommended when you change the process description or replace the document.
+                       Existing tasks are preserved; new ones may be added from updated insights.</small>
+            </div>
+        </div>
+
+        <!-- ── Actions ───────────────────────────────────────────────── -->
+        <div class="form-actions">
+            <button type="submit" class="btn-submit">Save Changes</button>
+            <a asp-action="AnalysisResult" asp-route-id="@Model.Id" class="btn-cancel">Cancel</a>
+        </div>
+    </form>
+</main>
+</div><!-- close app-layout -->
+
+@section Scripts {
+<partial name="_ValidationScriptsPartial" />
+<script>
+    function toggleReplace() {
+        document.getElementById('replaceFlag').value = 'true';
+        document.getElementById('currentDocPanel').style.display = 'none';
+        document.getElementById('uploadSection').style.display = 'block';
+    }
+
+    function cancelReplace() {
+        document.getElementById('replaceFlag').value = 'false';
+        document.getElementById('currentDocPanel').style.display = 'flex';
+        document.getElementById('uploadSection').style.display = 'none';
+        document.getElementById('filePreview').innerHTML = '';
+    }
+
+    function previewFile(input) {
+        const preview = document.getElementById('filePreview');
+        if (input.files && input.files[0]) {
+            const f = input.files[0];
+            const size = (f.size / 1024 / 1024).toFixed(2);
+            preview.innerHTML = `<strong style="color:#1a2a5e">${f.name}</strong> — ${size} MB`;
+        }
+    }
+
+    // Drag & drop
+    const zone = document.getElementById('uploadZone');
+    if (zone) {
+        zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+        zone.addEventListener('drop', e => {
+            e.preventDefault();
+            zone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const input = document.getElementById('fileInput');
+                const dt = new DataTransfer();
+                dt.items.add(files[0]);
+                input.files = dt.files;
+                previewFile(input);
+            }
+        });
+    }
+</script>
+}
