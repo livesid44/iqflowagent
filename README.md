@@ -1,6 +1,6 @@
 # IQFlowAgent
 
-A .NET 9 ASP.NET Core MVC BPO AI Platform.
+A .NET 8 ASP.NET Core MVC BPO AI Platform.
 
 ## Getting Started
 
@@ -94,20 +94,40 @@ dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
 
 ## Troubleshooting Build Errors
 
+### `NETSDK1005: Assets file doesn't have a target for 'net8.0'`
+
+This error means `obj/project.assets.json` was generated when the project targeted a **different framework** (e.g. `net9.0`). Even though the project now targets `net8.0`, the stale assets file is used instead of being regenerated.
+
+**Fix — run these commands from `src/IQFlowAgent.Web`:**
+
+```bat
+rmdir /s /q bin obj
+dotnet restore
+dotnet build
+```
+
+**PowerShell one-liner:**
+```powershell
+cd src\IQFlowAgent.Web; Remove-Item -Recurse -Force bin,obj -ErrorAction SilentlyContinue; dotnet restore; dotnet build
+```
+
+**Alternative fix in Visual Studio:**
+1. Close Visual Studio
+2. Delete `src/IQFlowAgent.Web/bin/` and `src/IQFlowAgent.Web/obj/` in Windows Explorer
+3. Re-open the solution → Build
+
+---
+
 ### `CS1061: 'DbContextOptionsBuilder' does not contain a definition for 'UseSqlServer'` or `UseSqlite`  
 ### `CS0246: The type or namespace name 'DocumentFormat' could not be found`
 
 These errors mean Visual Studio's cached type information (`obj/project.assets.json`) is stale and does not yet know about the newly added packages. This happens even when NuGet says **"All packages are already installed"** — the packages are in the cache but the assets file has not been regenerated.
 
-**Definitive fix — run these commands from the repo root:**
+**Definitive fix — same as NETSDK1005 above:**
 
-```bash
-# Step 1: delete stale build artifacts (forces full regeneration)
-cd src/IQFlowAgent.Web
-rmdir /s /q bin obj          # Windows
-# rm -rf bin obj             # macOS/Linux
-
-# Step 2: restore + build
+```bat
+cd src\IQFlowAgent.Web
+rmdir /s /q bin obj
 dotnet restore
 dotnet build
 ```
@@ -117,9 +137,7 @@ dotnet build
 2. Delete the `src/IQFlowAgent.Web/bin/` and `src/IQFlowAgent.Web/obj/` folders in Explorer  
 3. Re-open the solution and build
 
-> **Why this happens:** A `packages.lock.json` is now committed to the repository. When you pull, its updated timestamp triggers NuGet to regenerate `project.assets.json` on the next `dotnet restore`, ensuring the correct DLL paths are recorded.
-
-If restore fails due to a package-source issue, a `NuGet.Config` is now included at the repository root that explicitly points to `https://api.nuget.org/v3/index.json`.
+If restore fails due to a package-source issue, a `NuGet.Config` is included at the repository root that explicitly points to `https://api.nuget.org/v3/index.json`.
 
 > **Tip for corporate environments:** If nuget.org is blocked by a proxy, ask your IT team for the internal NuGet feed URL and add it to your local `%AppData%\NuGet\NuGet.Config`.
 
