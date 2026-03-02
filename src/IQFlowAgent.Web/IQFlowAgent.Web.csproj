@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>iqflowagent-web-a3f2c1d4-8e7b-4a9f-b5c6-d1e2f3a4b5c6</UserSecretsId>
+    <!-- Ensure restore pre-generates assets for common publish RIDs (fixes NETSDK1005 on VS Publish) -->
+    <RuntimeIdentifiers>win-x86;win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
