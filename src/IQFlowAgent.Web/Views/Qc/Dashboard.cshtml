@@ -1,0 +1,157 @@
+@model IEnumerable<IQFlowAgent.Web.Models.QcCheck>
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "QC Dashboard";
+    ViewData["ActivePage"] = "qc";
+    int totalChecked   = ViewBag.TotalChecked ?? 0;
+    int avgScore       = ViewBag.AvgScore     ?? 0;
+    int highScoreCount = ViewBag.HighScoreCount ?? 0;
+    int lowScoreCount  = ViewBag.LowScoreCount  ?? 0;
+    var allQcs         = ViewBag.AllQcs as List<IQFlowAgent.Web.Models.QcCheck> ?? new();
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
+
+<main class="app-main">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px">
+        <div>
+            <div class="page-title">QC Dashboard</div>
+            <div class="page-sub">Quality check scores across all closed intakes</div>
+        </div>
+        <a asp-action="Index" style="background:#f1f5f9;border:1px solid #ddd;color:#555;border-radius:8px;padding:9px 20px;font-size:0.88rem;text-decoration:none">← QC Check List</a>
+    </div>
+
+    <style>
+        .kpi-row        { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+        .kpi-box        { background:#fff; border-radius:12px; padding:20px 22px; box-shadow:0 2px 12px rgba(0,0,0,0.07); }
+        .kpi-box-label  { font-size:0.75rem; color:#888; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+        .kpi-box-value  { font-size:2rem; font-weight:800; color:#1a2a5e; }
+        .kpi-box-sub    { font-size:0.78rem; color:#aaa; margin-top:4px; }
+        .kpi-avg        { border-top:4px solid #1a2a5e; }
+        .kpi-high       { border-top:4px solid #10b981; }
+        .kpi-low        { border-top:4px solid #ef4444; }
+        .kpi-total      { border-top:4px solid #e31837; }
+        .dash-card      { background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.07); overflow:hidden; }
+        .dash-table     { width:100%; border-collapse:collapse; }
+        .dash-table th  { background:#f8faff; font-size:0.78rem; color:#666; text-transform:uppercase; letter-spacing:.05em; padding:12px 16px; text-align:left; border-bottom:1px solid #e9ecf5; }
+        .dash-table td  { padding:13px 16px; font-size:0.87rem; color:#333; border-bottom:1px solid #f0f3f9; vertical-align:middle; }
+        .dash-table tr:last-child td { border-bottom:none; }
+        .dash-table tr:hover td { background:#fafbff; }
+        .score-pill      { display:inline-block; padding:4px 12px; border-radius:20px; font-size:0.82rem; font-weight:700; }
+        .score-high     { background:#d1fae5; color:#065f46; }
+        .score-mid      { background:#fef9c3; color:#854d0e; }
+        .score-low      { background:#fee2e2; color:#991b1b; }
+        .intake-id      { font-family:monospace; font-size:0.8rem; background:#f0f4ff; color:#1a2a5e; padding:3px 8px; border-radius:5px; }
+        .mini-bar-wrap  { width:80px; background:#e9ecf5; border-radius:4px; height:7px; display:inline-block; vertical-align:middle; }
+        .mini-bar-fill  { height:7px; border-radius:4px; }
+        .empty-state    { text-align:center; padding:48px 24px; color:#aaa; }
+    </style>
+
+    <!-- KPI Cards -->
+    <div class="kpi-row">
+        <div class="kpi-box kpi-total">
+            <div class="kpi-box-label">Intakes QC'd</div>
+            <div class="kpi-box-value">@totalChecked</div>
+            <div class="kpi-box-sub">closed intakes with QC results</div>
+        </div>
+        <div class="kpi-box kpi-avg">
+            <div class="kpi-box-label">Average Score</div>
+            <div class="kpi-box-value">@avgScore</div>
+            <div class="kpi-box-sub">out of 100 across all QC'd intakes</div>
+        </div>
+        <div class="kpi-box kpi-high">
+            <div class="kpi-box-label">High Quality (≥80)</div>
+            <div class="kpi-box-value" style="color:#10b981">@highScoreCount</div>
+            <div class="kpi-box-sub">intakes meeting quality standards</div>
+        </div>
+        <div class="kpi-box kpi-low">
+            <div class="kpi-box-label">Needs Improvement (&lt;60)</div>
+            <div class="kpi-box-value" style="color:#ef4444">@lowScoreCount</div>
+            <div class="kpi-box-sub">intakes requiring re-work</div>
+        </div>
+    </div>
+
+    <!-- Score Table (latest per intake) -->
+    <div style="font-size:0.88rem;font-weight:600;color:#1a2a5e;margin-bottom:10px">Latest QC Score per Intake</div>
+    <div class="dash-card" style="margin-bottom:24px">
+        <table class="dash-table">
+            <thead>
+                <tr>
+                    <th>Intake ID</th>
+                    <th>Process Name</th>
+                    <th>Business Unit</th>
+                    <th>Overall Score</th>
+                    <th>Score Bar</th>
+                    <th>QC Date</th>
+                    <th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var qc in Model)
+                {
+                    var sc = qc.OverallScore >= 80 ? "score-high" : qc.OverallScore >= 60 ? "score-mid" : "score-low";
+                    var bc = qc.OverallScore >= 80 ? "#10b981"    : qc.OverallScore >= 60 ? "#f59e0b"   : "#ef4444";
+                    <tr>
+                        <td><span class="intake-id">@qc.IntakeRecord.IntakeId</span></td>
+                        <td><strong>@qc.IntakeRecord.ProcessName</strong></td>
+                        <td>@qc.IntakeRecord.BusinessUnit</td>
+                        <td><span class="score-pill @sc">@qc.OverallScore / 100</span></td>
+                        <td>
+                            <span class="mini-bar-wrap">
+                                <span class="mini-bar-fill" style="width:@(qc.OverallScore)%;background:@bc"></span>
+                            </span>
+                        </td>
+                        <td style="color:#888">@qc.CompletedAt?.ToString("dd MMM yyyy")</td>
+                        <td>
+                            <a asp-controller="Qc" asp-action="Result" asp-route-id="@qc.Id"
+                               style="color:#1a2a5e;font-size:0.82rem;text-decoration:none">View →</a>
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Any())
+                {
+                    <tr>
+                        <td colspan="7">
+                            <div class="empty-state">
+                                <div style="font-size:2rem;margin-bottom:10px">📊</div>
+                                <div style="font-weight:600;color:#666">No QC Results Yet</div>
+                                <div style="font-size:0.85rem;margin-top:6px">Run QC checks on closed intakes to see scores here.</div>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (allQcs.Count > Model.Count())
+    {
+        <!-- Recent QC Runs (includes re-runs) -->
+        <div style="font-size:0.88rem;font-weight:600;color:#1a2a5e;margin-bottom:10px">Recent QC Runs (all history)</div>
+        <div class="dash-card">
+            <table class="dash-table">
+                <thead>
+                    <tr>
+                        <th>Intake ID</th>
+                        <th>Process Name</th>
+                        <th>Score</th>
+                        <th>Run At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var qc in allQcs.Take(20))
+                    {
+                        var sc = qc.OverallScore >= 80 ? "score-high" : qc.OverallScore >= 60 ? "score-mid" : "score-low";
+                        <tr>
+                            <td><span class="intake-id">@qc.IntakeRecord.IntakeId</span></td>
+                            <td>@qc.IntakeRecord.ProcessName</td>
+                            <td><span class="score-pill @sc">@qc.OverallScore</span></td>
+                            <td style="color:#888">@qc.CompletedAt?.ToString("dd MMM yyyy HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</main>
+</div>

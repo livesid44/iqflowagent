@@ -702,4 +702,196 @@ public class AzureOpenAiService : IAzureOpenAiService
                       "Recommend a detailed process walk-through to validate identified steps and capture exception flows."
         });
     }
+
+    // ── RunQcCheckAsync ───────────────────────────────────────────────────────
+
+    public async Task<string> RunQcCheckAsync(
+        IntakeRecord intake, string? analysisJson, string? tasksSummary, string? documentText)
+    {
+        var endpoint   = _config["AzureOpenAI:Endpoint"];
+        var apiKey     = _config["AzureOpenAI:ApiKey"];
+        var deployment = _config["AzureOpenAI:DeploymentName"];
+        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
+        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Azure OpenAI not configured — returning mock QC result for {IntakeId}.", intake.IntakeId);
+            return GenerateMockQcResult(intake);
+        }
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+        _logger.LogInformation("Running QC check for {IntakeId} via {Url}", intake.IntakeId, requestUrl);
+
+        const string systemPrompt = """
+            You are a quality assurance expert for business process automation.
+            Evaluate the provided intake record, its AI analysis, task completion evidence, and any uploaded documents.
+            Score the intake on each of the following QC parameters on a scale of 0-100:
+            1. completeness       - are all required fields, documents, and information present?
+            2. accuracy           - does the information appear consistent, correct, and free of contradictions?
+            3. processClarity     - is the process clearly described with identifiable steps and outcomes?
+            4. documentationQuality - are the supporting documents sufficient and well-structured?
+            5. taskCompletion     - were all tasks completed with adequate evidence?
+            6. complianceReadiness - does the intake satisfy compliance and governance requirements?
+            7. automationReadiness - is the process ready for automation assessment?
+
+            Return ONLY a JSON object (no markdown fences) with this exact structure:
+            {
+              "overallScore": 85,
+              "summary": "Brief overall assessment...",
+              "parameters": [
+                { "name": "completeness",      "score": 90, "label": "Completeness",          "comment": "..." },
+                { "name": "accuracy",           "score": 85, "label": "Accuracy",               "comment": "..." },
+                { "name": "processClarity",     "score": 80, "label": "Process Clarity",        "comment": "..." },
+                { "name": "documentationQuality","score":75, "label": "Documentation Quality",  "comment": "..." },
+                { "name": "taskCompletion",     "score": 90, "label": "Task Completion",        "comment": "..." },
+                { "name": "complianceReadiness","score": 80, "label": "Compliance Readiness",   "comment": "..." },
+                { "name": "automationReadiness","score": 70, "label": "Automation Readiness",   "comment": "..." }
+              ],
+              "strengths": ["strength 1", "strength 2"],
+              "improvements": ["improvement 1", "improvement 2"]
+            }
+            """;
+
+        var userMessage = BuildQcUserMessage(intake, analysisJson, tasksSummary, documentText);
+
+        try
+        {
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = userMessage }
+                },
+                max_tokens  = maxTokens,
+                temperature = 0.3
+            };
+
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            client.DefaultRequestHeaders.Accept.Add(
+                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+            var json     = JsonSerializer.Serialize(requestBody);
+            var payload  = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PostAsync(requestUrl, payload);
+            var body     = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Azure OpenAI QC check failed ({Status}) for {IntakeId}: {Body}",
+                    (int)response.StatusCode, intake.IntakeId, body);
+                return GenerateMockQcResult(intake);
+            }
+
+            using var doc2     = JsonDocument.Parse(body);
+            var msgContent = doc2.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString() ?? "{}";
+
+            return msgContent;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Azure OpenAI QC check threw for {IntakeId}", intake.IntakeId);
+            return GenerateMockQcResult(intake);
+        }
+    }
+
+    private static string BuildQcUserMessage(
+        IntakeRecord intake, string? analysisJson, string? tasksSummary, string? documentText)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("=== INTAKE RECORD ===");
+        sb.AppendLine($"Intake ID: {intake.IntakeId}");
+        sb.AppendLine($"Process: {intake.ProcessName}");
+        sb.AppendLine($"Description: {intake.Description}");
+        sb.AppendLine($"Business Unit: {intake.BusinessUnit}");
+        sb.AppendLine($"Department: {intake.Department}");
+        sb.AppendLine($"Process Owner: {intake.ProcessOwnerName} ({intake.ProcessOwnerEmail})");
+        sb.AppendLine($"Type: {intake.ProcessType} | Priority: {intake.Priority}");
+        sb.AppendLine($"Volume/Day: {intake.EstimatedVolumePerDay}");
+        sb.AppendLine($"Location: {FormatGeoLocation(intake)}");
+        sb.AppendLine($"Document Uploaded: {(string.IsNullOrWhiteSpace(intake.UploadedFileName) ? "No" : intake.UploadedFileName)}");
+
+        if (!string.IsNullOrWhiteSpace(analysisJson))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== AI ANALYSIS RESULT ===");
+            sb.AppendLine(analysisJson.Length > MaxAnalysisJsonChars
+                ? analysisJson[..MaxAnalysisJsonChars] + "\n[...truncated]"
+                : analysisJson);
+        }
+
+        if (!string.IsNullOrWhiteSpace(tasksSummary))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== TASK COMPLETION SUMMARY ===");
+            sb.AppendLine(tasksSummary);
+        }
+
+        if (!string.IsNullOrWhiteSpace(documentText))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== DOCUMENT CONTENT ===");
+            sb.AppendLine(documentText.Length > MaxDocumentChars
+                ? documentText[..MaxDocumentChars] + "\n[...truncated]"
+                : documentText);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string GenerateMockQcResult(IntakeRecord intake)
+    {
+        var hasDoc    = !string.IsNullOrWhiteSpace(intake.UploadedFileName);
+        var hasOwner  = !string.IsNullOrWhiteSpace(intake.ProcessOwnerName);
+        var hasDesc   = !string.IsNullOrWhiteSpace(intake.Description);
+        var hasVolume = intake.EstimatedVolumePerDay > 0;
+
+        int completeness   = (hasDoc ? 25 : 0) + (hasOwner ? 20 : 0) + (hasDesc ? 25 : 0) + (hasVolume ? 15 : 0) + 15;
+        int accuracy       = hasDesc ? 80 : 55;
+        int processClarity = hasDesc ? 75 : 50;
+        int docQuality     = hasDoc  ? 78 : 45;
+        int taskComp       = 85;
+        int compliance     = 80;
+        int automation     = intake.ProcessType == "Automated" ? 90 : intake.ProcessType == "Semi-Automated" ? 75 : 60;
+        int overall        = (completeness + accuracy + processClarity + docQuality + taskComp + compliance + automation) / 7;
+
+        return JsonSerializer.Serialize(new
+        {
+            overallScore = overall,
+            summary = $"QC evaluation of '{intake.ProcessName}' yields an overall score of {overall}/100. " +
+                      (overall >= 80 ? "The intake meets quality standards for closure." :
+                       overall >= 60 ? "The intake partially meets quality standards — some improvements recommended." :
+                                       "The intake requires significant improvements before it can be considered complete."),
+            parameters = new[]
+            {
+                new { name = "completeness",       score = completeness,   label = "Completeness",          comment = hasDoc && hasOwner && hasDesc ? "All key fields and document are present." : "Some required information is missing." },
+                new { name = "accuracy",            score = accuracy,       label = "Accuracy",               comment = hasDesc ? "Information appears consistent and well-defined." : "Process description is insufficient to assess accuracy." },
+                new { name = "processClarity",      score = processClarity, label = "Process Clarity",        comment = hasDesc ? "Process steps and objectives are reasonably clear." : "Process description needs more detail." },
+                new { name = "documentationQuality",score = docQuality,     label = "Documentation Quality",  comment = hasDoc  ? "Supporting document is attached and appears adequate." : "No supporting document uploaded." },
+                new { name = "taskCompletion",      score = taskComp,       label = "Task Completion",        comment = "All assigned tasks have been completed or marked N/A." },
+                new { name = "complianceReadiness", score = compliance,     label = "Compliance Readiness",   comment = "No compliance blockers identified based on available information." },
+                new { name = "automationReadiness", score = automation,     label = "Automation Readiness",   comment = $"Process type is '{intake.ProcessType}' — assessed accordingly." }
+            },
+            strengths = new[]
+            {
+                hasOwner ? $"Process owner ({intake.ProcessOwnerName}) clearly assigned" : "Process is categorised and prioritised",
+                hasDoc   ? "Supporting documentation provided" : $"Business unit ({intake.BusinessUnit}) identified"
+            },
+            improvements = new[]
+            {
+                !hasDoc  ? "Upload a detailed process documentation or SOP" : "Ensure document covers all exception handling scenarios",
+                !hasDesc ? "Provide a comprehensive process description" : "Define measurable KPIs and SLA targets"
+            }
+        });
+    }
 }

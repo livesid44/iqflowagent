@@ -1,0 +1,154 @@
+@model IQFlowAgent.Web.Models.QcCheck
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "QC Result";
+    ViewData["ActivePage"] = "qc";
+
+    // Parse the score breakdown JSON
+    JsonElement? root = null;
+    try
+    {
+        if (!string.IsNullOrWhiteSpace(Model.ScoreBreakdownJson))
+        {
+            var doc = JsonDocument.Parse(Model.ScoreBreakdownJson);
+            root = doc.RootElement;
+        }
+    }
+    catch { }
+
+    var summary      = root?.TryGetProperty("summary",      out var s)  == true ? s.GetString()  : null;
+    var strengths    = root?.TryGetProperty("strengths",    out var st) == true ? st  : (JsonElement?)null;
+    var improvements = root?.TryGetProperty("improvements", out var im) == true ? im  : (JsonElement?)null;
+    var parameters   = root?.TryGetProperty("parameters",  out var pr) == true ? pr  : (JsonElement?)null;
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
+
+<main class="app-main">
+    <style>
+        .qr-back        { display:inline-flex; align-items:center; gap:6px; color:#666; text-decoration:none; font-size:0.85rem; margin-bottom:16px; }
+        .qr-back:hover  { color:#1a2a5e; }
+        .qr-header      { background:#fff; border-radius:12px; padding:24px 28px; box-shadow:0 2px 12px rgba(0,0,0,0.07); margin-bottom:20px; display:flex; align-items:flex-start; gap:24px; }
+        .qr-score-circle{ width:90px; height:90px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:1.7rem; font-weight:800; }
+        .qr-intake-info h2 { font-size:1.1rem; font-weight:700; color:#1a2a5e; margin:0 0 4px; }
+        .qr-intake-info p  { color:#666; font-size:0.85rem; margin:2px 0; }
+        .qr-summary-text   { color:#444; font-size:0.9rem; margin-top:10px; line-height:1.6; }
+        .qr-grid        { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+        .qr-panel       { background:#fff; border-radius:12px; padding:22px 24px; box-shadow:0 2px 12px rgba(0,0,0,0.07); }
+        .qr-panel-title { font-size:0.88rem; font-weight:700; color:#1a2a5e; margin-bottom:16px; text-transform:uppercase; letter-spacing:.04em; }
+        .param-row      { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+        .param-label    { flex:0 0 170px; font-size:0.85rem; color:#444; }
+        .param-bar-wrap { flex:1; background:#e9ecf5; border-radius:6px; height:10px; }
+        .param-bar-fill { height:10px; border-radius:6px; }
+        .param-score    { flex:0 0 46px; text-align:right; font-size:0.85rem; font-weight:700; }
+        .param-comment  { font-size:0.78rem; color:#888; margin-left:182px; margin-top:-8px; margin-bottom:4px; }
+        .list-item      { display:flex; gap:8px; align-items:flex-start; margin-bottom:10px; font-size:0.87rem; color:#444; line-height:1.5; }
+        .list-item .dot { flex-shrink:0; width:8px; height:8px; border-radius:50%; margin-top:6px; }
+        .dot-green      { background:#10b981; }
+        .dot-amber      { background:#f59e0b; }
+        .meta-row       { display:flex; gap:24px; flex-wrap:wrap; font-size:0.82rem; color:#888; margin-top:6px; }
+        .meta-row span  { display:flex; align-items:center; gap:5px; }
+    </style>
+
+    <a asp-action="Index" class="qr-back">← Back to QC List</a>
+
+    @{
+        var scoreClass = Model.OverallScore >= 80 ? "score-high" : Model.OverallScore >= 60 ? "score-mid" : "score-low";
+        var circleBg   = Model.OverallScore >= 80 ? "#d1fae5" : Model.OverallScore >= 60 ? "#fef9c3" : "#fee2e2";
+        var circleColor= Model.OverallScore >= 80 ? "#065f46" : Model.OverallScore >= 60 ? "#854d0e" : "#991b1b";
+    }
+
+    <div class="qr-header">
+        <div class="qr-score-circle" style="background:@circleBg; color:@circleColor">
+            @Model.OverallScore
+        </div>
+        <div class="qr-intake-info" style="flex:1">
+            <h2>@Model.IntakeRecord.ProcessName</h2>
+            <div class="meta-row">
+                <span>📋 @Model.IntakeRecord.IntakeId</span>
+                <span>🏢 @Model.IntakeRecord.BusinessUnit</span>
+                <span>⏱ @Model.CompletedAt?.ToString("dd MMM yyyy HH:mm")</span>
+                <span>Overall: <strong style="color:@circleColor">@Model.OverallScore / 100</strong></span>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(summary))
+            {
+                <p class="qr-summary-text">@summary</p>
+            }
+        </div>
+    </div>
+
+    <div class="qr-grid">
+        <!-- Parameter Scores -->
+        <div class="qr-panel" style="grid-column:1 / -1">
+            <div class="qr-panel-title">QC Parameter Scores</div>
+            @if (parameters.HasValue && parameters.Value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var param in parameters.Value.EnumerateArray())
+                {
+                    var pScore   = param.TryGetProperty("score",   out var ps) ? ps.GetInt32()    : 0;
+                    var pLabel   = param.TryGetProperty("label",   out var pl) ? pl.GetString()   : "";
+                    var pComment = param.TryGetProperty("comment", out var pc) ? pc.GetString()   : "";
+                    var pBar     = pScore >= 80 ? "#10b981" : pScore >= 60 ? "#f59e0b" : "#ef4444";
+                    <div class="param-row">
+                        <div class="param-label">@pLabel</div>
+                        <div class="param-bar-wrap">
+                            <div class="param-bar-fill" style="width:@(pScore)%;background:@pBar"></div>
+                        </div>
+                        <div class="param-score" style="color:@pBar">@pScore</div>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(pComment))
+                    {
+                        <div class="param-comment">@pComment</div>
+                    }
+                }
+            }
+            else
+            {
+                <p style="color:#aaa;font-size:0.87rem">No parameter detail available.</p>
+            }
+        </div>
+
+        <!-- Strengths -->
+        <div class="qr-panel">
+            <div class="qr-panel-title">✅ Strengths</div>
+            @if (strengths.HasValue && strengths.Value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in strengths.Value.EnumerateArray())
+                {
+                    <div class="list-item">
+                        <span class="dot dot-green"></span>
+                        <span>@item.GetString()</span>
+                    </div>
+                }
+            }
+            else
+            {
+                <p style="color:#aaa;font-size:0.87rem">No strengths identified.</p>
+            }
+        </div>
+
+        <!-- Improvements -->
+        <div class="qr-panel">
+            <div class="qr-panel-title">⚠ Improvements Needed</div>
+            @if (improvements.HasValue && improvements.Value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in improvements.Value.EnumerateArray())
+                {
+                    <div class="list-item">
+                        <span class="dot dot-amber"></span>
+                        <span>@item.GetString()</span>
+                    </div>
+                }
+            }
+            else
+            {
+                <p style="color:#aaa;font-size:0.87rem">No improvements identified.</p>
+            }
+        </div>
+    </div>
+
+    <div style="margin-top:8px">
+        <a asp-action="Index" style="color:#666;font-size:0.85rem;text-decoration:none">← Back to QC Check list</a>
+    </div>
+</main>
+</div>

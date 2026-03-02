@@ -1,11 +1,11 @@
 @* Shared App Shell: Header + Sidebar (matching the FlowIQ wireframe theme)
    Usage: @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "intake" } })
-   ActivePage values: intake, analysis, tasks, report, usermgmt, authsettings
+   ActivePage values: intake, analysis, tasks, report, qc, usermgmt, authsettings, masterdata
 *@
 @{
     var activePage = (string?)ViewData["ActivePage"] ?? "";
     string Nav(string page) => activePage.Equals(page, StringComparison.OrdinalIgnoreCase) ? "sidebar-link active" : "sidebar-link";
-    // ActivePage values: dashboard, intake, analysis, tasks, report, usermgmt, authsettings
+    // ActivePage values: dashboard, intake, analysis, tasks, report, qc, usermgmt, authsettings, masterdata
 }
 
 @* Styles are in wwwroot/css/site.css (loaded in _Layout.cshtml <head>) *@
@@ -66,6 +66,12 @@
             </span>
             <span class="sidebar-label">DD Report</span>
         </a>
+        <a asp-controller="Qc" asp-action="Index" class="@Nav("qc")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            </span>
+            <span class="sidebar-label">QC Check</span>
+        </a>
         <div class="sidebar-section-title">Admin</div>
         <a asp-controller="UserManagement" asp-action="Index" class="@Nav("usermgmt")">
             <span class="sidebar-icon" aria-hidden="true">
@@ -78,6 +84,12 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="15" r="1" fill="white"/></svg>
             </span>
             <span class="sidebar-label">Auth Settings</span>
+        </a>
+        <a asp-controller="MasterData" asp-action="Department" class="@Nav("masterdata")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            </span>
+            <span class="sidebar-label">Master Data</span>
         </a>
     </aside>
 

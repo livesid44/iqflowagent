@@ -38,5 +38,18 @@ public static class DbSeeder
             db.AuthSettings.Add(new AuthSettings());
             await db.SaveChangesAsync();
         }
+
+        if (!db.MasterDepartments.Any())
+        {
+            var departments = new[]
+            {
+                "Finance", "Human Resources", "Information Technology", "Operations",
+                "Customer Service", "Sales", "Marketing", "Legal & Compliance",
+                "Supply Chain", "Risk Management"
+            };
+            foreach (var dept in departments)
+                db.MasterDepartments.Add(new MasterDepartment { Name = dept });
+            await db.SaveChangesAsync();
+        }
     }
 }

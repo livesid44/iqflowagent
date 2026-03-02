@@ -46,14 +46,24 @@ public class IntakeController : Controller
     }
 
     // GET /Intake/Chat — conversational chat-style intake
-    public IActionResult Chat()
+    public async Task<IActionResult> Chat()
     {
+        ViewBag.Departments = await _db.MasterDepartments
+            .Where(d => d.IsActive)
+            .OrderBy(d => d.Name)
+            .Select(d => d.Name)
+            .ToListAsync();
         return View();
     }
 
     // GET /Intake/Create — traditional form intake (kept for fallback)
-    public IActionResult Create()
+    public async Task<IActionResult> Create()
     {
+        ViewBag.Departments = await _db.MasterDepartments
+            .Where(d => d.IsActive)
+            .OrderBy(d => d.Name)
+            .Select(d => d.Name)
+            .ToListAsync();
         return View(new IntakeViewModel());
     }
 
@@ -182,6 +192,12 @@ public class IntakeController : Controller
         }
 
         var taskCount = await _db.IntakeTasks.CountAsync(t => t.IntakeRecordId == id);
+
+        ViewBag.Departments = await _db.MasterDepartments
+            .Where(d => d.IsActive)
+            .OrderBy(d => d.Name)
+            .Select(d => d.Name)
+            .ToListAsync();
 
         var vm = new IntakeEditViewModel
         {

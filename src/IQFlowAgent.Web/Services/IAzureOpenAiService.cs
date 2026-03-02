@@ -22,4 +22,14 @@ public interface IAzureOpenAiService
         string fieldDefinitionsJson,
         string? analysisJson,
         string? artifactText);
+
+    /// <summary>
+    /// Runs a QC check against the closed intake, all task documents, and any final report.
+    /// Returns structured JSON with per-parameter scores and an overall score 0–100.
+    /// </summary>
+    Task<string> RunQcCheckAsync(
+        IntakeRecord intake,
+        string? analysisJson,
+        string? tasksSummary,
+        string? documentText);
 }

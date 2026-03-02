@@ -1,0 +1,148 @@
+@model IEnumerable<IQFlowAgent.Web.Models.IntakeRecord>
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "QC Check";
+    ViewData["ActivePage"] = "qc";
+    var latestQcs = ViewBag.LatestQcs as Dictionary<int, IQFlowAgent.Web.Models.QcCheck> ?? new();
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
+
+<main class="app-main">
+    <div class="page-title">QC Check</div>
+    <div class="page-sub">Run AI quality checks on closed intakes and review scores</div>
+
+    <style>
+        .qc-header      { display:flex; justify-content:space-between; align-items:center; margin:20px 0 16px; }
+        .qc-card        { background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.07); overflow:hidden; }
+        .qc-table       { width:100%; border-collapse:collapse; }
+        .qc-table th    { background:#f8faff; font-size:0.78rem; color:#666; text-transform:uppercase; letter-spacing:.05em; padding:12px 16px; text-align:left; border-bottom:1px solid #e9ecf5; }
+        .qc-table td    { padding:13px 16px; font-size:0.87rem; color:#333; border-bottom:1px solid #f0f3f9; vertical-align:middle; }
+        .qc-table tr:last-child td { border-bottom:none; }
+        .qc-table tr:hover td { background:#fafbff; }
+        .intake-id      { font-family:monospace; font-size:0.8rem; background:#f0f4ff; color:#1a2a5e; padding:3px 8px; border-radius:5px; }
+        .score-pill      { display:inline-block; padding:4px 12px; border-radius:20px; font-size:0.82rem; font-weight:700; }
+        .score-high     { background:#d1fae5; color:#065f46; }
+        .score-mid      { background:#fef9c3; color:#854d0e; }
+        .score-low      { background:#fee2e2; color:#991b1b; }
+        .score-none     { background:#f1f5f9; color:#888; }
+        .score-bar-wrap { width:90px; background:#e9ecf5; border-radius:6px; height:8px; display:inline-block; vertical-align:middle; }
+        .score-bar-fill { height:8px; border-radius:6px; transition:width .4s; }
+        .btn-run-qc     { background:#1a2a5e; color:#fff; border:none; border-radius:7px; padding:7px 18px; font-size:0.82rem; font-weight:600; cursor:pointer; }
+        .btn-run-qc:hover { background:#0f1d45; }
+        .btn-view-qc    { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; border-radius:7px; padding:7px 14px; font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; }
+        .btn-view-qc:hover { background:#dcfce7; }
+        .btn-dash       { background:#e31837; color:#fff; border:none; border-radius:8px; padding:9px 20px; font-size:0.88rem; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; }
+        .btn-dash:hover { background:#c01530; }
+        .status-running { color:#d97706; font-size:0.8rem; }
+        .status-error   { color:#b91c1c; font-size:0.8rem; }
+        .empty-state    { text-align:center; padding:48px 24px; color:#aaa; }
+        .toast-success  { background:#d1fae5; border:1px solid #6ee7b7; color:#065f46; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:0.88rem; }
+        .toast-error-box{ background:#fee2e2; border:1px solid #fca5a5; color:#991b1b; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:0.88rem; }
+    </style>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="toast-success">✓ @TempData["Success"]</div>
+    }
+    @if (TempData["Error"] != null)
+    {
+        <div class="toast-error-box">⚠ @TempData["Error"]</div>
+    }
+
+    <div class="qc-header">
+        <span style="color:#666;font-size:0.88rem">@Model.Count() closed intake(s)</span>
+        <a asp-action="Dashboard" class="btn-dash">📊 QC Dashboard</a>
+    </div>
+
+    <div class="qc-card">
+        <table class="qc-table">
+            <thead>
+                <tr>
+                    <th>Intake ID</th>
+                    <th>Process Name</th>
+                    <th>Business Unit</th>
+                    <th>Closed</th>
+                    <th>Last QC Score</th>
+                    <th>QC Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var intake in Model)
+                {
+                    var qc        = latestQcs.TryGetValue(intake.Id, out var q) ? q : null;
+                    var scoreClass = qc == null ? "score-none" :
+                                     qc.OverallScore >= 80 ? "score-high" :
+                                     qc.OverallScore >= 60 ? "score-mid"  : "score-low";
+                    var barColor   = qc == null ? "#ccc" :
+                                     qc.OverallScore >= 80 ? "#10b981" :
+                                     qc.OverallScore >= 60 ? "#f59e0b" : "#ef4444";
+                    <tr>
+                        <td><span class="intake-id">@intake.IntakeId</span></td>
+                        <td><strong>@intake.ProcessName</strong></td>
+                        <td>@intake.BusinessUnit</td>
+                        <td style="color:#888">@intake.AnalyzedAt?.ToString("dd MMM yyyy")</td>
+                        <td>
+                            @if (qc?.Status == "Complete")
+                            {
+                                <span class="score-pill @scoreClass">@qc.OverallScore / 100</span>
+                                <div style="margin-top:5px">
+                                    <span class="score-bar-wrap">
+                                        <span class="score-bar-fill" style="width:@(qc.OverallScore)%;background:@barColor"></span>
+                                    </span>
+                                </div>
+                            }
+                            else if (qc?.Status == "Running")
+                            {
+                                <span class="status-running">⏳ Running…</span>
+                            }
+                            else if (qc?.Status == "Error")
+                            {
+                                <span class="status-error">⚠ Error</span>
+                            }
+                            else
+                            {
+                                <span class="score-pill score-none">Not Run</span>
+                            }
+                        </td>
+                        <td style="color:#888;font-size:0.8rem">
+                            @if (qc?.CompletedAt.HasValue == true)
+                            {
+                                @qc.CompletedAt.Value.ToString("dd MMM yyyy HH:mm")
+                            }
+                        </td>
+                        <td>
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <form asp-action="RunQc" method="post">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="intakeId" value="@intake.Id" />
+                                    <button type="submit" class="btn-run-qc"
+                                        onclick="return confirm('Run QC check for @intake.IntakeId?')">
+                                        @(qc?.Status == "Complete" ? "↺ Re-run QC" : "▶ Run QC")
+                                    </button>
+                                </form>
+                                @if (qc?.Status == "Complete")
+                                {
+                                    <a asp-action="Result" asp-route-id="@qc.Id" class="btn-view-qc">View Result</a>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Any())
+                {
+                    <tr>
+                        <td colspan="7">
+                            <div class="empty-state">
+                                <div style="font-size:2.5rem;margin-bottom:12px">🔍</div>
+                                <div style="font-size:1rem;font-weight:600;color:#666">No Closed Intakes</div>
+                                <div style="font-size:0.85rem;margin-top:6px">QC checks can only be run on closed intakes. Complete the intake workflow to close them.</div>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</main>
+</div>

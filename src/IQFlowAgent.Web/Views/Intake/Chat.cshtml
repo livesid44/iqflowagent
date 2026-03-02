@@ -349,6 +349,15 @@
 @section Scripts {
 <script>
 // ─────────────────────────────────────────────────────────────
+//  Department list from server
+// ─────────────────────────────────────────────────────────────
+const DEPARTMENTS = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+    (ViewBag.Departments as List<string> ?? new List<string>())
+        .Select(d => new[] { d, d })
+        .ToList()
+));
+
+// ─────────────────────────────────────────────────────────────
 //  State
 // ─────────────────────────────────────────────────────────────
 const data = {
@@ -396,9 +405,8 @@ const steps = [
     {
         key: 'Department',
         ask: () => `And the <span class='highlight'>Department</span> within <em>${data.BusinessUnit}</em>? (optional — press Skip if not applicable)`,
-        type: 'text',
-        placeholder: 'e.g. Customer Care, Accounts Payable…',
-        required: false,
+        type: 'select',
+        options: () => [['', '— Select Department —'], ...DEPARTMENTS],
         skippable: true
     },
     {
@@ -660,7 +668,8 @@ function renderInput(step, index) {
     } else if (step.type === 'select') {
         const sel = document.createElement('select');
         sel.className = 'chat-text-input';
-        (step.options || []).forEach(([val, label]) => {
+        const opts = typeof step.options === 'function' ? step.options() : (step.options || []);
+        opts.forEach(([val, label]) => {
             const opt = document.createElement('option');
             opt.value = val; opt.textContent = label;
             sel.appendChild(opt);
