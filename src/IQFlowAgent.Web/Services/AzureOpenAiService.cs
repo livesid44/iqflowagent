@@ -14,22 +14,43 @@ public class AzureOpenAiService : IAzureOpenAiService
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ITenantContextService _tenantContext;
 
     public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory, ITenantContextService tenantContext)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _tenantContext = tenantContext;
+    }
+
+    private async Task<(string? endpoint, string? apiKey, string? deployment, string apiVersion, int maxTokens)> GetAiConfigAsync()
+    {
+        var tenantSettings = await _tenantContext.GetCurrentTenantAiSettingsAsync();
+        if (tenantSettings != null
+            && !string.IsNullOrWhiteSpace(tenantSettings.AzureOpenAIEndpoint)
+            && !string.IsNullOrWhiteSpace(tenantSettings.AzureOpenAIApiKey)
+            && !string.IsNullOrWhiteSpace(tenantSettings.AzureOpenAIDeploymentName)
+            && !tenantSettings.AzureOpenAIEndpoint.Contains("YOUR_RESOURCE")
+            && !tenantSettings.AzureOpenAIApiKey.Contains("YOUR_API_KEY")
+            && !tenantSettings.AzureOpenAIDeploymentName.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            return (tenantSettings.AzureOpenAIEndpoint, tenantSettings.AzureOpenAIApiKey,
+                tenantSettings.AzureOpenAIDeploymentName, tenantSettings.AzureOpenAIApiVersion,
+                tenantSettings.AzureOpenAIMaxTokens);
+        }
+        var endpoint = _config["AzureOpenAI:Endpoint"];
+        var apiKey = _config["AzureOpenAI:ApiKey"];
+        var deployment = _config["AzureOpenAI:DeploymentName"];
+        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
+        var maxTokens = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+        return (endpoint, apiKey, deployment, apiVersion, maxTokens);
     }
 
     public async Task<string> AnalyzeIntakeAsync(IntakeRecord intake, string? documentText)
     {
-        var endpoint  = _config["AzureOpenAI:Endpoint"];
-        var apiKey    = _config["AzureOpenAI:ApiKey"];
-        var deployment = _config["AzureOpenAI:DeploymentName"];
-        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
-        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         // Guard: all three fields must be set to real values
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -158,11 +179,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     public async Task<string> VerifyIntakeClosureAsync(
         IntakeRecord intake, IList<IntakeTask> tasks, string? aggregatedArtifactText)
     {
-        var endpoint   = _config["AzureOpenAI:Endpoint"];
-        var apiKey     = _config["AzureOpenAI:ApiKey"];
-        var deployment = _config["AzureOpenAI:DeploymentName"];
-        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
-        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -379,11 +396,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         string? analysisJson,
         string? artifactText)
     {
-        var endpoint   = _config["AzureOpenAI:Endpoint"];
-        var apiKey     = _config["AzureOpenAI:ApiKey"];
-        var deployment = _config["AzureOpenAI:DeploymentName"];
-        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
-        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -708,11 +721,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     public async Task<string> RunQcCheckAsync(
         IntakeRecord intake, string? analysisJson, string? tasksSummary, string? documentText)
     {
-        var endpoint   = _config["AzureOpenAI:Endpoint"];
-        var apiKey     = _config["AzureOpenAI:ApiKey"];
-        var deployment = _config["AzureOpenAI:DeploymentName"];
-        var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
-        var maxTokens  = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)

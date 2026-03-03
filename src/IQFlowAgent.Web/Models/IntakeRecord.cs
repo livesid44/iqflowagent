@@ -3,6 +3,7 @@ namespace IQFlowAgent.Web.Models;
 public class IntakeRecord
 {
     public int Id { get; set; }
+    public int TenantId { get; set; } = 1;
     public string IntakeId { get; set; } = string.Empty;
 
     // Meta Information

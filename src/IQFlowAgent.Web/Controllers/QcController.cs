@@ -17,6 +17,7 @@ public class QcController : Controller
     private readonly IBlobStorageService  _blob;
     private readonly IWebHostEnvironment  _env;
     private readonly ILogger<QcController> _logger;
+    private readonly ITenantContextService _tenantContext;
 
     private const int MaxDocTextChars = 8000;
 
@@ -25,20 +26,23 @@ public class QcController : Controller
         IAzureOpenAiService ai,
         IBlobStorageService blob,
         IWebHostEnvironment env,
-        ILogger<QcController> logger)
+        ILogger<QcController> logger,
+        ITenantContextService tenantContext)
     {
         _db     = db;
         _ai     = ai;
         _blob   = blob;
         _env    = env;
         _logger = logger;
+        _tenantContext = tenantContext;
     }
 
     // GET /Qc/Index — list closed intakes with Run QC button and latest QC score
     public async Task<IActionResult> Index()
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var intakes = await _db.IntakeRecords
-            .Where(i => i.Status == "Closed")
+            .Where(i => i.Status == "Closed" && i.TenantId == tenantId)
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
 

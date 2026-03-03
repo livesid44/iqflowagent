@@ -248,7 +248,7 @@ public class TaskController : Controller
         var uniqueSuffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
         string filePath;
 
-        if (_blobService.IsConfigured)
+        if (await _blobService.IsConfiguredAsync())
         {
             var blobName = $"{task.TaskId}-{uniqueSuffix}{ext}";
             using var stream = artifact.OpenReadStream();
@@ -497,7 +497,7 @@ public class TaskController : Controller
                 try
                 {
                     string? content = null;
-                    if (_blobService.IsConfigured && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    if (await _blobService.IsConfiguredAsync() && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                         content = await _blobService.DownloadTextAsync(doc.FilePath);
                     else
                     {

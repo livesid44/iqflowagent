@@ -46,6 +46,14 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<IAzureOpenAiService, AzureOpenAiService>();
 builder.Services.AddScoped<IBlobStorageService, BlobStorageService>();
 builder.Services.AddScoped<IDocxReportService, DocxReportService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ITenantContextService, TenantContextService>();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromHours(8);
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+});
 
 builder.Services.AddControllersWithViews();
 
@@ -67,6 +75,7 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
+app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
 

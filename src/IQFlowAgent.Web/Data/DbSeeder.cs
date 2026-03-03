@@ -39,6 +39,43 @@ public static class DbSeeder
             await db.SaveChangesAsync();
         }
 
+        // Seed default "Orange" tenant (Id=1)
+        if (!db.Tenants.Any())
+        {
+            db.Tenants.Add(new Tenant
+            {
+                Id = 1,
+                Name = "Orange",
+                Slug = "orange",
+                Color = "#FF6B35",
+                Description = "Default tenant - Orange project",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Assign admin user to Orange tenant
+        var adminUser = await userManager.FindByNameAsync("admin");
+        if (adminUser != null && !db.UserTenants.Any(ut => ut.UserId == adminUser.Id))
+        {
+            db.UserTenants.Add(new UserTenant
+            {
+                UserId = adminUser.Id,
+                TenantId = 1,
+                TenantRole = "Admin",
+                IsDefault = true
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Seed empty TenantAiSettings for Orange tenant
+        if (!db.TenantAiSettings.Any(s => s.TenantId == 1))
+        {
+            db.TenantAiSettings.Add(new TenantAiSettings { TenantId = 1 });
+            await db.SaveChangesAsync();
+        }
+
         if (!db.MasterDepartments.Any())
         {
             var departments = new[]
@@ -48,7 +85,7 @@ public static class DbSeeder
                 "Supply Chain", "Risk Management"
             };
             foreach (var dept in departments)
-                db.MasterDepartments.Add(new MasterDepartment { Name = dept });
+                db.MasterDepartments.Add(new MasterDepartment { Name = dept, TenantId = 1 });
             await db.SaveChangesAsync();
         }
     }

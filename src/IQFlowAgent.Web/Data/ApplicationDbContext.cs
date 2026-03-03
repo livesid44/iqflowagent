@@ -8,6 +8,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
 
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+    public DbSet<TenantAiSettings> TenantAiSettings => Set<TenantAiSettings>();
+    public DbSet<UserTenant> UserTenants => Set<UserTenant>();
     public DbSet<AuthSettings> AuthSettings => Set<AuthSettings>();
     public DbSet<IntakeRecord> IntakeRecords => Set<IntakeRecord>();
     public DbSet<IntakeTask> IntakeTasks => Set<IntakeTask>();
@@ -21,6 +24,24 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<TenantAiSettings>()
+            .HasOne(s => s.Tenant)
+            .WithMany()
+            .HasForeignKey(s => s.TenantId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<UserTenant>()
+            .HasOne(ut => ut.User)
+            .WithMany()
+            .HasForeignKey(ut => ut.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<UserTenant>()
+            .HasOne(ut => ut.Tenant)
+            .WithMany()
+            .HasForeignKey(ut => ut.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<IntakeTask>()
             .HasOne(t => t.IntakeRecord)

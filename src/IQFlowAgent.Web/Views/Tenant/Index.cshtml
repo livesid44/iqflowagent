@@ -1,0 +1,89 @@
+@model List<IQFlowAgent.Web.Models.Tenant>
+@{
+    ViewData["Title"] = "Tenant Management";
+    var userCounts = ViewBag.UserCounts as Dictionary<int, int> ?? new();
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "tenants" } })
+<main class="app-main">
+    <div class="page-title">Tenant Management</div>
+    <div class="page-subtitle">Manage projects / tenants hosted on this instance</div>
+    @if (TempData["Success"] != null) { <div class="alert-success-bar">@TempData["Success"]</div> }
+    @if (TempData["Error"] != null) { <div class="alert-error-bar">@TempData["Error"]</div> }
+
+    <div style="display:flex;gap:12px;margin-bottom:20px;">
+        <button class="btn-primary" onclick="document.getElementById('createModal').style.display='flex'">+ New Tenant</button>
+    </div>
+
+    <div class="data-card">
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Slug</th><th>Color</th><th>Users</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody>
+            @foreach (var t in Model)
+            {
+                <tr>
+                    <td><strong>@t.Name</strong>@if(t.Description != null){<div style="font-size:12px;color:#666">@t.Description</div>}</td>
+                    <td><code>@t.Slug</code></td>
+                    <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:@t.Color;vertical-align:middle;"></span> @t.Color</td>
+                    <td>@(userCounts.TryGetValue(t.Id, out var uc) ? uc : 0)</td>
+                    <td><span class="@(t.IsActive ? "badge-active" : "badge-inactive")">@(t.IsActive ? "Active" : "Inactive")</span></td>
+                    <td>@t.CreatedAt.ToString("dd MMM yyyy")</td>
+                    <td style="display:flex;gap:8px;">
+                        <a asp-controller="TenantAiSettings" asp-action="Index" class="btn-sm-outline" style="font-size:12px;">⚙ AI Settings</a>
+                        <a asp-controller="Tenant" asp-action="Users" asp-route-id="@t.Id" class="btn-sm-outline" style="font-size:12px;">👥 Users</a>
+                        <button class="btn-sm-outline" style="font-size:12px;" onclick="openEditModal(@t.Id, @System.Text.Json.JsonSerializer.Serialize(t.Name), '@t.Color', @System.Text.Json.JsonSerializer.Serialize(t.Description ?? ""), @(t.IsActive ? "true" : "false"))">Edit</button>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Create Modal -->
+    <div id="createModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+        <div style="background:#fff;padding:32px;border-radius:8px;min-width:400px;max-width:500px;">
+            <h3 style="margin:0 0 20px">New Tenant</h3>
+            <form asp-action="Create" method="post">
+                @Html.AntiForgeryToken()
+                <div style="margin-bottom:12px;"><label>Name *</label><input name="name" class="form-input" required /></div>
+                <div style="margin-bottom:12px;"><label>Slug * <small>(URL-safe, e.g. "orange")</small></label><input name="slug" class="form-input" required pattern="[a-z0-9\-]+" /></div>
+                <div style="margin-bottom:12px;"><label>Brand Color</label><input name="color" type="color" value="#e31837" style="width:60px;height:36px;border:none;cursor:pointer;" /></div>
+                <div style="margin-bottom:20px;"><label>Description</label><input name="description" class="form-input" /></div>
+                <div style="display:flex;gap:12px;">
+                    <button type="submit" class="btn-primary">Create</button>
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('createModal').style.display='none'">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+        <div style="background:#fff;padding:32px;border-radius:8px;min-width:400px;max-width:500px;">
+            <h3 style="margin:0 0 20px">Edit Tenant</h3>
+            <form id="editForm" method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="id" id="editId" />
+                <div style="margin-bottom:12px;"><label>Name *</label><input name="name" id="editName" class="form-input" required /></div>
+                <div style="margin-bottom:12px;"><label>Brand Color</label><input name="color" id="editColor" type="color" style="width:60px;height:36px;border:none;cursor:pointer;" /></div>
+                <div style="margin-bottom:12px;"><label>Description</label><input name="description" id="editDescription" class="form-input" /></div>
+                <div style="margin-bottom:20px;"><label><input name="isActive" id="editIsActive" type="checkbox" value="true" /> Active</label></div>
+                <div style="display:flex;gap:12px;">
+                    <button type="submit" class="btn-primary">Save</button>
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('editModal').style.display='none'">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</main>
+</div>
+<script>
+function openEditModal(id, name, color, description, isActive) {
+    document.getElementById('editId').value = id;
+    document.getElementById('editName').value = name;
+    document.getElementById('editColor').value = color;
+    document.getElementById('editDescription').value = description;
+    document.getElementById('editIsActive').checked = isActive;
+    document.getElementById('editForm').action = '/Tenant/Edit';
+    document.getElementById('editModal').style.display = 'flex';
+}
+</script>

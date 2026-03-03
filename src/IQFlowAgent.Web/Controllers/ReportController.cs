@@ -17,6 +17,7 @@ public class ReportController : Controller
     private readonly IBlobStorageService _blobService;
     private readonly ILogger<ReportController> _logger;
     private readonly IWebHostEnvironment _env;
+    private readonly ITenantContextService _tenantContext;
 
     private const string TemplateName = "BARTOK_DD_Template_v2.docx";
     private const int MaxArtifactCharsPerFile = 1500;
@@ -30,7 +31,8 @@ public class ReportController : Controller
         IAzureOpenAiService aiService,
         IBlobStorageService blobService,
         ILogger<ReportController> logger,
-        IWebHostEnvironment env)
+        IWebHostEnvironment env,
+        ITenantContextService tenantContext)
     {
         _db = db;
         _docxService = docxService;
@@ -38,6 +40,7 @@ public class ReportController : Controller
         _blobService = blobService;
         _logger = logger;
         _env = env;
+        _tenantContext = tenantContext;
     }
 
     // ── GET /Report/Prepare?selectedId=&search=&country=&businessUnit=&processType= ─
@@ -45,11 +48,11 @@ public class ReportController : Controller
         int? selectedId,
         string? search, string? country, string? businessUnit, string? processType)
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var allIntakes = await _db.IntakeRecords
+            .Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
-
-        // ── Populate picker ViewBag ─────────────────────────────────────────
         var filtered = allIntakes.Where(x =>
             (string.IsNullOrWhiteSpace(search) ||
              x.IntakeId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
@@ -340,7 +343,7 @@ public class ReportController : Controller
             var reportFileName = $"BARTOK_DD_{intake.IntakeId}_{now:yyyyMMddHHmmss}.docx";
             string filePath;
 
-            if (_blobService.IsConfigured)
+            if (await _blobService.IsConfiguredAsync())
             {
                 using var stream = new MemoryStream(docxBytes);
                 filePath = await _blobService.UploadAsync(
@@ -447,7 +450,7 @@ public class ReportController : Controller
                 try
                 {
                     string? content = null;
-                    if (_blobService.IsConfigured && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    if (await _blobService.IsConfiguredAsync() && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                         content = await _blobService.DownloadTextAsync(doc.FilePath);
                     else
                     {

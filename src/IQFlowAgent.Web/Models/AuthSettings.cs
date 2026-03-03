@@ -3,6 +3,7 @@ namespace IQFlowAgent.Web.Models;
 public class AuthSettings
 {
     public int Id { get; set; }
+    public int TenantId { get; set; } = 1;
     public string AuthMode { get; set; } = "AppPassword";
     public string? LdapServer { get; set; }
     public int LdapPort { get; set; } = 389;

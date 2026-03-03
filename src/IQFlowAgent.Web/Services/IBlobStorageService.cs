@@ -3,7 +3,7 @@ namespace IQFlowAgent.Web.Services;
 public interface IBlobStorageService
 {
     /// <summary>Returns true when Azure Blob Storage is fully configured.</summary>
-    bool IsConfigured { get; }
+    Task<bool> IsConfiguredAsync();
 
     /// <summary>
     /// Uploads a stream to blob storage and returns the blob URL.

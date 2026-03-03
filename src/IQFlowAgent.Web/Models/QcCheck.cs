@@ -3,6 +3,7 @@ namespace IQFlowAgent.Web.Models;
 public class QcCheck
 {
     public int Id { get; set; }
+    public int TenantId { get; set; } = 1;
     public int IntakeRecordId { get; set; }
     public IntakeRecord IntakeRecord { get; set; } = null!;
 

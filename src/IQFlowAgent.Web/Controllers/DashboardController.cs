@@ -1,4 +1,5 @@
 using IQFlowAgent.Web.Data;
+using IQFlowAgent.Web.Services;
 using IQFlowAgent.Web.ViewModels;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -10,15 +11,22 @@ namespace IQFlowAgent.Web.Controllers;
 public class DashboardController : Controller
 {
     private readonly ApplicationDbContext _db;
+    private readonly ITenantContextService _tenantContext;
 
-    public DashboardController(ApplicationDbContext db) => _db = db;
+    public DashboardController(ApplicationDbContext db, ITenantContextService tenantContext)
+    {
+        _db = db;
+        _tenantContext = tenantContext;
+    }
 
     // GET /Dashboard
     public async Task<IActionResult> Index(
         string? search, string? status, string? businessUnit, string? country)
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         // ── 1. Load all intakes (used for KPIs + filter dropdowns) ──────
         var allIntakes = await _db.IntakeRecords
+            .Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
 

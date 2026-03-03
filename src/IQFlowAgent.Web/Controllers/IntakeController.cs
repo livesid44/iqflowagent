@@ -18,10 +18,11 @@ public class IntakeController : Controller
     private readonly ILogger<IntakeController> _logger;
     private readonly IWebHostEnvironment _env;
     private readonly IServiceProvider _services;
+    private readonly ITenantContextService _tenantContext;
 
     public IntakeController(ApplicationDbContext db, IAzureOpenAiService aiService,
         IBlobStorageService blobService, ILogger<IntakeController> logger,
-        IWebHostEnvironment env, IServiceProvider services)
+        IWebHostEnvironment env, IServiceProvider services, ITenantContextService tenantContext)
     {
         _db = db;
         _aiService = aiService;
@@ -29,6 +30,7 @@ public class IntakeController : Controller
         _logger = logger;
         _env = env;
         _services = services;
+        _tenantContext = tenantContext;
     }
 
     // Supported plain-text file extensions that can be parsed for AI analysis
@@ -38,7 +40,9 @@ public class IntakeController : Controller
         "INT-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
     public async Task<IActionResult> Index()
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var intakes = await _db.IntakeRecords
+            .Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.CreatedAt)
             .Take(20)
             .ToListAsync();
@@ -48,8 +52,9 @@ public class IntakeController : Controller
     // GET /Intake/Chat — conversational chat-style intake
     public async Task<IActionResult> Chat()
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         ViewBag.Departments = await _db.MasterDepartments
-            .Where(d => d.IsActive)
+            .Where(d => d.IsActive && d.TenantId == tenantId)
             .OrderBy(d => d.Name)
             .Select(d => d.Name)
             .ToListAsync();
@@ -59,8 +64,9 @@ public class IntakeController : Controller
     // GET /Intake/Create — traditional form intake (kept for fallback)
     public async Task<IActionResult> Create()
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         ViewBag.Departments = await _db.MasterDepartments
-            .Where(d => d.IsActive)
+            .Where(d => d.IsActive && d.TenantId == tenantId)
             .OrderBy(d => d.Name)
             .Select(d => d.Name)
             .ToListAsync();
@@ -75,6 +81,7 @@ public class IntakeController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var intakeId = GenerateIntakeId();
 
         string? savedFilePath = null;
@@ -90,7 +97,7 @@ public class IntakeController : Controller
             savedContentType = model.Document.ContentType;
             savedFileSize = model.Document.Length;
 
-            if (_blobService.IsConfigured)
+            if (await _blobService.IsConfiguredAsync())
             {
                 // Upload to Azure Blob Storage
                 var blobName = $"{intakeId}{ext}";
@@ -118,6 +125,7 @@ public class IntakeController : Controller
 
         var record = new IntakeRecord
         {
+            TenantId = tenantId,
             IntakeId = intakeId,
             ProcessName = model.ProcessName,
             Description = model.Description,
@@ -192,9 +200,9 @@ public class IntakeController : Controller
         }
 
         var taskCount = await _db.IntakeTasks.CountAsync(t => t.IntakeRecordId == id);
-
+        var tenantId = _tenantContext.GetCurrentTenantId();
         ViewBag.Departments = await _db.MasterDepartments
-            .Where(d => d.IsActive)
+            .Where(d => d.IsActive && d.TenantId == tenantId)
             .OrderBy(d => d.Name)
             .Select(d => d.Name)
             .ToListAsync();
@@ -276,7 +284,7 @@ public class IntakeController : Controller
                 var ext = Path.GetExtension(model.NewDocument.FileName);
                 var blobName = $"{record.IntakeId}-v{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
 
-                if (_blobService.IsConfigured)
+                if (await _blobService.IsConfiguredAsync())
                 {
                     using var stream = model.NewDocument.OpenReadStream();
                     newFilePath = await _blobService.UploadAsync(stream, blobName, model.NewDocument.ContentType);
@@ -337,7 +345,7 @@ public class IntakeController : Controller
         if (string.IsNullOrWhiteSpace(filePath)) return;
         try
         {
-            if (_blobService.IsConfigured && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            if (await _blobService.IsConfiguredAsync() && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 await _blobService.DeleteAsync(filePath);
             else
             {
@@ -391,7 +399,7 @@ public class IntakeController : Controller
             string? docText = null;
             if (!string.IsNullOrWhiteSpace(filePath))
             {
-                if (blob.IsConfigured && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                if (await blob.IsConfiguredAsync() && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
                     // Download from Azure Blob Storage
                     docText = await blob.DownloadTextAsync(filePath);

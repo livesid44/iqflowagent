@@ -7,18 +7,21 @@ namespace IQFlowAgent.Web.Services;
 public class AuthSettingsService : IAuthSettingsService
 {
     private readonly ApplicationDbContext _db;
+    private readonly ITenantContextService _tenantContext;
 
-    public AuthSettingsService(ApplicationDbContext db)
+    public AuthSettingsService(ApplicationDbContext db, ITenantContextService tenantContext)
     {
         _db = db;
+        _tenantContext = tenantContext;
     }
 
     public async Task<AuthSettings> GetSettingsAsync()
     {
-        var settings = await _db.AuthSettings.FirstOrDefaultAsync();
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var settings = await _db.AuthSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
         if (settings == null)
         {
-            settings = new AuthSettings();
+            settings = new AuthSettings { TenantId = tenantId };
             _db.AuthSettings.Add(settings);
             await _db.SaveChangesAsync();
         }
@@ -27,9 +30,11 @@ public class AuthSettingsService : IAuthSettingsService
 
     public async Task SaveSettingsAsync(AuthSettings settings)
     {
-        var existing = await _db.AuthSettings.FirstOrDefaultAsync();
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var existing = await _db.AuthSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
         if (existing == null)
         {
+            settings.TenantId = tenantId;
             settings.UpdatedAt = DateTime.UtcNow;
             _db.AuthSettings.Add(settings);
         }

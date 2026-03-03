@@ -13,21 +13,20 @@ public class BlobStorageService : IBlobStorageService
 
     private readonly IConfiguration _config;
     private readonly ILogger<BlobStorageService> _logger;
+    private readonly ITenantContextService _tenantContext;
 
-    public BlobStorageService(IConfiguration config, ILogger<BlobStorageService> logger)
+    public BlobStorageService(IConfiguration config, ILogger<BlobStorageService> logger, ITenantContextService tenantContext)
     {
         _config = config;
         _logger = logger;
+        _tenantContext = tenantContext;
     }
 
-    public bool IsConfigured
+    public async Task<bool> IsConfiguredAsync()
     {
-        get
-        {
-            var conn = _config["AzureStorage:ConnectionString"];
-            return !string.IsNullOrWhiteSpace(conn)
-                && !conn.Equals(PlaceholderConnection, StringComparison.OrdinalIgnoreCase);
-        }
+        var (conn, _) = await GetStorageConfigAsync();
+        return !string.IsNullOrWhiteSpace(conn)
+            && !conn.Equals(PlaceholderConnection, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<string> UploadAsync(Stream content, string blobName, string contentType)
@@ -57,10 +56,9 @@ public class BlobStorageService : IBlobStorageService
 
         try
         {
-            var conn = _config["AzureStorage:ConnectionString"]!;
-            var containerName = _config["AzureStorage:ContainerName"] ?? "intakes";
+            var (conn, containerName) = await GetStorageConfigAsync();
             var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
-            var credentialedClient = new BlobClient(conn, containerName, blobName);
+            var credentialedClient = new BlobClient(conn!, containerName, blobName);
 
             var response = await credentialedClient.DownloadContentAsync();
             return response.Value.Content.ToString();
@@ -76,10 +74,9 @@ public class BlobStorageService : IBlobStorageService
     {
         try
         {
-            var conn = _config["AzureStorage:ConnectionString"]!;
-            var containerName = _config["AzureStorage:ContainerName"] ?? "intakes";
+            var (conn, containerName) = await GetStorageConfigAsync();
             var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
-            var blobClient = new BlobClient(conn, containerName, blobName);
+            var blobClient = new BlobClient(conn!, containerName, blobName);
             await blobClient.DeleteIfExistsAsync();
             _logger.LogInformation("Deleted blob {BlobName}", blobName);
         }
@@ -93,13 +90,26 @@ public class BlobStorageService : IBlobStorageService
 
     private async Task<BlobContainerClient> GetContainerClientAsync()
     {
-        var conn = _config["AzureStorage:ConnectionString"]!;
-        var containerName = _config["AzureStorage:ContainerName"] ?? "intakes";
+        var (conn, containerName) = await GetStorageConfigAsync();
 
-        var serviceClient = new BlobServiceClient(conn);
+        var serviceClient = new BlobServiceClient(conn!);
         var containerClient = serviceClient.GetBlobContainerClient(containerName);
 
         await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
         return containerClient;
+    }
+
+    private async Task<(string? connectionString, string containerName)> GetStorageConfigAsync()
+    {
+        var tenantSettings = await _tenantContext.GetCurrentTenantAiSettingsAsync();
+        if (tenantSettings != null
+            && !string.IsNullOrWhiteSpace(tenantSettings.AzureStorageConnectionString)
+            && !tenantSettings.AzureStorageConnectionString.Equals(PlaceholderConnection, StringComparison.OrdinalIgnoreCase))
+        {
+            return (tenantSettings.AzureStorageConnectionString, tenantSettings.AzureStorageContainerName);
+        }
+        var conn = _config["AzureStorage:ConnectionString"];
+        var container = _config["AzureStorage:ContainerName"] ?? "intakes";
+        return (conn, container);
     }
 }

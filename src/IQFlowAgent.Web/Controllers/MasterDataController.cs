@@ -1,5 +1,6 @@
 using IQFlowAgent.Web.Data;
 using IQFlowAgent.Web.Models;
+using IQFlowAgent.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,17 +12,21 @@ public class MasterDataController : Controller
 {
     private readonly ApplicationDbContext _db;
     private readonly ILogger<MasterDataController> _logger;
+    private readonly ITenantContextService _tenantContext;
 
-    public MasterDataController(ApplicationDbContext db, ILogger<MasterDataController> logger)
+    public MasterDataController(ApplicationDbContext db, ILogger<MasterDataController> logger, ITenantContextService tenantContext)
     {
         _db = db;
         _logger = logger;
+        _tenantContext = tenantContext;
     }
 
     // GET /MasterData/Department
     public async Task<IActionResult> Department()
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var departments = await _db.MasterDepartments
+            .Where(d => d.TenantId == tenantId)
             .OrderBy(d => d.Name)
             .ToListAsync();
         return View(departments);
@@ -38,8 +43,9 @@ public class MasterDataController : Controller
             return RedirectToAction(nameof(Department));
         }
 
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var exists = await _db.MasterDepartments
-            .AnyAsync(d => d.Name.ToLower() == name.Trim().ToLower());
+            .AnyAsync(d => d.TenantId == tenantId && d.Name.ToLower() == name.Trim().ToLower());
         if (exists)
         {
             TempData["Error"] = $"Department '{name.Trim()}' already exists.";
@@ -48,6 +54,7 @@ public class MasterDataController : Controller
 
         _db.MasterDepartments.Add(new MasterDepartment
         {
+            TenantId    = tenantId,
             Name        = name.Trim(),
             Description = description?.Trim(),
             IsActive    = true

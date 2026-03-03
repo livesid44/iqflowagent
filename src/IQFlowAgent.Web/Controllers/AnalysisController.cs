@@ -1,5 +1,6 @@
 using IQFlowAgent.Web.Data;
 using IQFlowAgent.Web.Models;
+using IQFlowAgent.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,15 +11,22 @@ namespace IQFlowAgent.Web.Controllers;
 public class AnalysisController : Controller
 {
     private readonly ApplicationDbContext _db;
+    private readonly ITenantContextService _tenantContext;
 
-    public AnalysisController(ApplicationDbContext db) => _db = db;
+    public AnalysisController(ApplicationDbContext db, ITenantContextService tenantContext)
+    {
+        _db = db;
+        _tenantContext = tenantContext;
+    }
 
     // GET /Analysis?selectedId=&search=&country=&businessUnit=&processType=
     public async Task<IActionResult> Index(
         int? selectedId, string? search, string? country,
         string? businessUnit, string? processType)
     {
+        var tenantId = _tenantContext.GetCurrentTenantId();
         var allIntakes = await _db.IntakeRecords
+            .Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
 
