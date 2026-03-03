@@ -35,28 +35,59 @@ public class TenantAiSettingsController : Controller
     public async Task<IActionResult> Save(TenantAiSettings model)
     {
         var tenantId = _tenantContext.GetCurrentTenantId();
-        var existing = await _db.TenantAiSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
-        if (existing == null)
+
+        // Reload tenant for the view in case we need to return the form
+        var tenant = await _db.Tenants.FindAsync(tenantId);
+        if (tenant == null) return NotFound();
+
+        // Clear model-binding errors for the navigation property (BindNever skips it but
+        // older model-state entries from complex-type probing may still linger)
+        ModelState.Remove(nameof(TenantAiSettings.Tenant));
+
+        if (!ModelState.IsValid)
         {
-            model.TenantId = tenantId;
-            model.UpdatedAt = DateTime.UtcNow;
-            model.UpdatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            _db.TenantAiSettings.Add(model);
+            ViewBag.Tenant = tenant;
+            TempData["Error"] = "Please correct the validation errors below.";
+            return View("Index", model);
         }
-        else
+
+        try
         {
-            existing.AzureOpenAIEndpoint = model.AzureOpenAIEndpoint;
-            existing.AzureOpenAIApiKey = model.AzureOpenAIApiKey;
-            existing.AzureOpenAIDeploymentName = model.AzureOpenAIDeploymentName;
-            existing.AzureOpenAIApiVersion = model.AzureOpenAIApiVersion;
-            existing.AzureOpenAIMaxTokens = model.AzureOpenAIMaxTokens;
-            existing.AzureStorageConnectionString = model.AzureStorageConnectionString;
-            existing.AzureStorageContainerName = model.AzureStorageContainerName;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var existing = await _db.TenantAiSettings
+                .FirstOrDefaultAsync(s => s.TenantId == tenantId);
+
+            if (existing == null)
+            {
+                model.TenantId   = tenantId;
+                model.UpdatedAt  = DateTime.UtcNow;
+                model.UpdatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                _db.TenantAiSettings.Add(model);
+            }
+            else
+            {
+                existing.AzureOpenAIEndpoint        = model.AzureOpenAIEndpoint;
+                existing.AzureOpenAIApiKey           = model.AzureOpenAIApiKey;
+                existing.AzureOpenAIDeploymentName   = model.AzureOpenAIDeploymentName;
+                existing.AzureOpenAIApiVersion       = model.AzureOpenAIApiVersion;
+                existing.AzureOpenAIMaxTokens        = model.AzureOpenAIMaxTokens;
+                existing.AzureStorageConnectionString = model.AzureStorageConnectionString;
+                existing.AzureStorageContainerName   = model.AzureStorageContainerName;
+                // Speech-to-Text fields (were previously missing from the update path)
+                existing.AzureSpeechRegion  = model.AzureSpeechRegion;
+                existing.AzureSpeechApiKey  = model.AzureSpeechApiKey;
+                existing.UpdatedAt          = DateTime.UtcNow;
+                existing.UpdatedByUserId    = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            }
+
+            await _db.SaveChangesAsync();
+            TempData["Success"] = "AI & Storage settings saved successfully.";
+            return RedirectToAction(nameof(Index));
         }
-        await _db.SaveChangesAsync();
-        TempData["Success"] = "AI & Storage settings saved successfully.";
-        return RedirectToAction(nameof(Index));
+        catch (Exception ex)
+        {
+            ViewBag.Tenant = tenant;
+            TempData["Error"] = $"Failed to save settings: {ex.Message}";
+            return View("Index", model);
+        }
     }
 }

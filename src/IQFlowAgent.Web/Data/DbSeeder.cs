@@ -1,5 +1,6 @@
 using IQFlowAgent.Web.Models;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace IQFlowAgent.Web.Data;
 
@@ -39,21 +40,24 @@ public static class DbSeeder
             await db.SaveChangesAsync();
         }
 
-        // Seed default "Orange" tenant (Id=1)
-        if (!db.Tenants.Any())
+        // Seed default "Orange" tenant (let the DB assign the Id automatically)
+        Tenant? orangeTenant = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == "orange");
+        if (orangeTenant == null)
         {
-            db.Tenants.Add(new Tenant
+            orangeTenant = new Tenant
             {
-                Id = 1,
                 Name = "Orange",
                 Slug = "orange",
                 Color = "#FF6B35",
                 Description = "Default tenant - Orange project",
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
-            });
+            };
+            db.Tenants.Add(orangeTenant);
             await db.SaveChangesAsync();
+            // orangeTenant.Id is now set by the database (typically 1 on a fresh DB)
         }
+        int defaultTenantId = orangeTenant.Id;
 
         // Assign admin user to Orange tenant
         var adminUser = await userManager.FindByNameAsync("admin");
@@ -62,7 +66,7 @@ public static class DbSeeder
             db.UserTenants.Add(new UserTenant
             {
                 UserId = adminUser.Id,
-                TenantId = 1,
+                TenantId = defaultTenantId,
                 TenantRole = "Admin",
                 IsDefault = true
             });
@@ -70,9 +74,9 @@ public static class DbSeeder
         }
 
         // Seed empty TenantAiSettings for Orange tenant
-        if (!db.TenantAiSettings.Any(s => s.TenantId == 1))
+        if (!db.TenantAiSettings.Any(s => s.TenantId == defaultTenantId))
         {
-            db.TenantAiSettings.Add(new TenantAiSettings { TenantId = 1 });
+            db.TenantAiSettings.Add(new TenantAiSettings { TenantId = defaultTenantId });
             await db.SaveChangesAsync();
         }
 
@@ -85,7 +89,7 @@ public static class DbSeeder
                 "Supply Chain", "Risk Management"
             };
             foreach (var dept in departments)
-                db.MasterDepartments.Add(new MasterDepartment { Name = dept, TenantId = 1 });
+                db.MasterDepartments.Add(new MasterDepartment { Name = dept, TenantId = defaultTenantId });
             await db.SaveChangesAsync();
         }
     }

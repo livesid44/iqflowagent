@@ -8,6 +8,7 @@
     <div class="page-title">AI &amp; Storage Settings</div>
     <div class="page-subtitle">Configure Azure OpenAI, Blob Storage and Speech-to-Text for <strong>@tenant?.Name</strong></div>
     @if (TempData["Success"] != null) { <div class="alert-success-bar">@TempData["Success"]</div> }
+    @if (TempData["Error"] != null)   { <div class="alert-error-bar">@TempData["Error"]</div> }
 
     <form asp-action="Save" method="post">
         @Html.AntiForgeryToken()

@@ -1,9 +1,12 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+
 namespace IQFlowAgent.Web.Models;
 
 public class TenantAiSettings
 {
     public int Id { get; set; }
     public int TenantId { get; set; }
+    [BindNever]
     public Tenant? Tenant { get; set; }
     public string AzureOpenAIEndpoint { get; set; } = string.Empty;
     public string AzureOpenAIApiKey { get; set; } = string.Empty;
