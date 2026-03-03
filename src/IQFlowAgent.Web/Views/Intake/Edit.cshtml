@@ -186,7 +186,7 @@
                 </div>
                 <div class="form-group">
                     <label asp-for="Department">Department</label>
-                    <select asp-for="Department" class="form-control">
+                    <select asp-for="Department" id="deptSelect" class="form-control" onchange="onDeptChange(this.value,'@Html.Raw(Model.Lob ?? "")')">
                         <option value="">— Select Department —</option>
                         @foreach (var dept in (ViewBag.Departments as List<string> ?? new()))
                         {
@@ -199,6 +199,12 @@
                                 <option value="@dept">@dept</option>
                             }
                         }
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label asp-for="Lob">Line of Business (LOB)</label>
+                    <select asp-for="Lob" id="lobSelect" class="form-control">
+                        <option value="">— Select LOB —</option>
                     </select>
                 </div>
             </div>
@@ -221,13 +227,21 @@
             <div class="form-section-title">Location</div>
             <div class="form-row">
                 <div class="form-group">
-                    <label asp-for="Country">Country <span class="required">*</span></label>
-                    <input asp-for="Country" class="form-control" placeholder="e.g. United States" />
+                    <label>Country <span class="required">*</span></label>
+                    <div class="ms-container" id="countryContainer" style="position:relative;">
+                        <input type="text" id="countryInput" class="ms-input" placeholder="Search countries…" autocomplete="off" />
+                        <div class="ms-dropdown" id="countryDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;"></div>
+                    </div>
+                    <input type="hidden" asp-for="Country" id="countryHidden" />
                     <span asp-validation-for="Country" class="text-danger"></span>
                 </div>
                 <div class="form-group">
-                    <label asp-for="City">City</label>
-                    <input asp-for="City" class="form-control" placeholder="e.g. New York" />
+                    <label>City</label>
+                    <div class="ms-container" id="cityContainer" style="position:relative;">
+                        <input type="text" id="cityInput" class="ms-input" placeholder="Search cities…" autocomplete="off" />
+                        <div class="ms-dropdown" id="cityDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;"></div>
+                    </div>
+                    <input type="hidden" asp-for="City" id="cityHidden" />
                 </div>
             </div>
             <div class="form-row">
@@ -392,4 +406,116 @@
         });
     }
 </script>
+
+@* LOB cascade + country/city multi-select *@
+<script src="~/js/country-city-data.js"></script>
+<script>
+    // ── LOB cascade ──────────────────────────────────────────
+    const LOB_BY_DEPT = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+        ((System.Collections.IEnumerable)(ViewBag.LobsByDept ?? new List<object>()))
+            .Cast<dynamic>()
+            .GroupBy((dynamic x) => (string)x.DepartmentName)
+            .ToDictionary(g => g.Key, g => g.Select((dynamic x) => (string)x.Name).ToList())
+    ));
+
+    function onDeptChange(dept, currentLob) {
+        const sel = document.getElementById('lobSelect');
+        sel.innerHTML = '<option value="">— Select LOB —</option>';
+        (LOB_BY_DEPT[dept] || []).forEach(lob => {
+            const opt = document.createElement('option');
+            opt.value = lob; opt.textContent = lob;
+            if (lob === currentLob) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    // Pre-populate LOB dropdown for the current department on load
+    window.addEventListener('DOMContentLoaded', () => {
+        const dept = document.getElementById('deptSelect').value;
+        if (dept) onDeptChange(dept, @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Lob ?? "")));
+    });
+
+    // ── Multi-select component (reusable) ────────────────────
+    function buildMultiSelect(containerId, inputId, dropdownId, hiddenId, list, multi, onChangeCb) {
+        const container = document.getElementById(containerId);
+        const textInput = document.getElementById(inputId);
+        const dropdown  = document.getElementById(dropdownId);
+        const hidden    = document.getElementById(hiddenId);
+        let selected = hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        function render() {
+            container.querySelectorAll('.ms-tag').forEach(t => t.remove());
+            selected.forEach(val => {
+                const tag = document.createElement('span');
+                tag.className = 'ms-tag';
+                const labelNode = document.createTextNode(val + ' ');
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'ms-tag-remove';
+                removeBtn.setAttribute('aria-label', 'Remove ' + val);
+                removeBtn.textContent = '×';
+                removeBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    selected = selected.filter(v => v !== val);
+                    hidden.value = selected.join(', ');
+                    render();
+                    if (onChangeCb) onChangeCb(selected);
+                });
+                tag.appendChild(labelNode);
+                tag.appendChild(removeBtn);
+                container.insertBefore(tag, textInput);
+            });
+            hidden.value = selected.join(', ');
+        }
+
+        function showDropdown(filter) {
+            const lc = filter.toLowerCase();
+            const opts = list.filter(c => !selected.includes(c) && c.toLowerCase().includes(lc));
+            dropdown.innerHTML = '';
+            if (!opts.length) {
+                const empty = document.createElement('div');
+                empty.className = 'ms-empty';
+                empty.textContent = 'No matches';
+                dropdown.appendChild(empty);
+            } else {
+                opts.slice(0, 60).forEach(c => {
+                    const el = document.createElement('div');
+                    el.className = 'ms-option';
+                    el.textContent = c;
+                    el.addEventListener('mousedown', e => { e.preventDefault(); pick(c); });
+                    dropdown.appendChild(el);
+                });
+            }
+            dropdown.style.display = 'block';
+        }
+
+        function pick(val) {
+            if (multi) { if (!selected.includes(val)) selected.push(val); }
+            else { selected = [val]; }
+            textInput.value = ''; dropdown.style.display = 'none';
+            render();
+            if (onChangeCb) onChangeCb(selected);
+        }
+
+        textInput.addEventListener('input',  () => showDropdown(textInput.value));
+        textInput.addEventListener('focus',  () => showDropdown(textInput.value));
+        textInput.addEventListener('blur',   () => setTimeout(() => { dropdown.style.display = 'none'; }, 150));
+        textInput.addEventListener('keydown', e => {
+            if (e.key === 'Backspace' && !textInput.value && selected.length) { selected.pop(); render(); if (onChangeCb) onChangeCb(selected); }
+        });
+        // textInput and dropdown are already inside container in the HTML — do not re-append
+        render();
+        return { getSelected: () => selected };
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const countryMs = buildMultiSelect('countryContainer','countryInput','countryDropdown','countryHidden',
+            COUNTRY_LIST, true,
+            sel => { if (cityMs) cityMs = buildMultiSelect('cityContainer','cityInput','cityDropdown','cityHidden', getCitiesForCountries(sel), true, null); }
+        );
+        let cityMs = buildMultiSelect('cityContainer','cityInput','cityDropdown','cityHidden',
+            getCitiesForCountries(countryMs.getSelected()), true, null);
+    });
+</script>
 }
+

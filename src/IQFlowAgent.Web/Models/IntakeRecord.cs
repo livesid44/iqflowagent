@@ -11,6 +11,7 @@ public class IntakeRecord
     public string Description { get; set; } = string.Empty;
     public string BusinessUnit { get; set; } = string.Empty;
     public string Department { get; set; } = string.Empty;
+    public string Lob { get; set; } = string.Empty; // Line of Business (maps to Deployment)
     public string ProcessOwnerName { get; set; } = string.Empty;
     public string ProcessOwnerEmail { get; set; } = string.Empty;
     public string ProcessType { get; set; } = string.Empty; // Manual, Semi-Automated, Automated

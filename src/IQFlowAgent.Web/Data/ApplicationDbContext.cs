@@ -19,6 +19,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ReportFieldStatus> ReportFieldStatuses => Set<ReportFieldStatus>();
     public DbSet<FinalReport> FinalReports => Set<FinalReport>();
     public DbSet<MasterDepartment> MasterDepartments => Set<MasterDepartment>();
+    public DbSet<MasterLob> MasterLobs => Set<MasterLob>();
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
 
     protected override void OnModelCreating(ModelBuilder builder)

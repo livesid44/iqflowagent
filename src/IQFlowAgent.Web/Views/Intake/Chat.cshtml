@@ -333,6 +333,7 @@
     <input type="hidden" name="Description"          id="f_Description" />
     <input type="hidden" name="BusinessUnit"         id="f_BusinessUnit" />
     <input type="hidden" name="Department"           id="f_Department" />
+    <input type="hidden" name="Lob"                  id="f_Lob" />
     <input type="hidden" name="ProcessOwnerName"     id="f_ProcessOwnerName" />
     <input type="hidden" name="ProcessOwnerEmail"    id="f_ProcessOwnerEmail" />
     <input type="hidden" name="ProcessType"          id="f_ProcessType" />
@@ -347,28 +348,35 @@
 </div>
 
 @section Scripts {
+<script src="~/js/country-city-data.js"></script>
 <script>
 // ─────────────────────────────────────────────────────────────
-//  Department list from server
+//  Department list + LOB map from server
 // ─────────────────────────────────────────────────────────────
 const DEPARTMENTS = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
     (ViewBag.Departments as List<string> ?? new List<string>())
         .Select(d => new[] { d, d })
         .ToList()
 ));
+const LOB_BY_DEPT = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+    ((System.Collections.IEnumerable)(ViewBag.LobsByDept ?? new List<object>()))
+        .Cast<dynamic>()
+        .GroupBy((dynamic x) => (string)x.DepartmentName)
+        .ToDictionary(g => g.Key, g => g.Select((dynamic x) => (string)x.Name).ToList())
+));
 
 // ─────────────────────────────────────────────────────────────
 //  State
 // ─────────────────────────────────────────────────────────────
 const data = {
-    ProcessName: '', Description: '', BusinessUnit: '', Department: '',
+    ProcessName: '', Description: '', BusinessUnit: '', Department: '', Lob: '',
     ProcessOwnerName: '', ProcessOwnerEmail: '', ProcessType: 'Manual',
     EstimatedVolumePerDay: 0, Priority: 'Medium',
     Country: '', City: '', SiteLocation: '', TimeZone: '',
     hasFile: false
 };
 let currentStep = 0;
-const TOTAL_STEPS = 14; // 13 questions (steps[]) + 1 summary step
+const TOTAL_STEPS = 15; // 14 questions (steps[]) + 1 summary step
 const LONG_MSG_THRESHOLD = 100;
 const LONG_TYPING_DELAY  = 900;
 const SHORT_TYPING_DELAY = 600;
@@ -407,6 +415,16 @@ const steps = [
         ask: () => `And the <span class='highlight'>Department</span> within <em>${data.BusinessUnit}</em>? (optional — press Skip if not applicable)`,
         type: 'select',
         options: () => [['', '— Select Department —'], ...DEPARTMENTS],
+        skippable: true
+    },
+    {
+        key: 'Lob',
+        ask: () => `Which <span class='highlight'>Line of Business (LOB)</span> does this process fall under? (optional)`,
+        type: 'select',
+        options: () => {
+            const lobs = LOB_BY_DEPT[data.Department] || [];
+            return [['', '— Select LOB —'], ...lobs.map(l => [l, l])];
+        },
         skippable: true
     },
     {
@@ -451,17 +469,17 @@ const steps = [
     },
     {
         key: 'Country',
-        ask: () => `📍 Location time! In which <span class='highlight'>country</span> is this process located?`,
-        type: 'text',
-        placeholder: 'e.g. United States, United Kingdom, India…',
+        ask: () => `📍 Location time! In which <span class='highlight'>country / countries</span> is this process located? (multi-select)`,
+        type: 'multiselect',
+        list: () => COUNTRY_LIST,
         required: true,
-        validate: v => v.trim().length >= 2 ? null : 'Country is required.'
+        validate: v => v && v.trim().length >= 2 ? null : 'Country is required.'
     },
     {
         key: 'City',
-        ask: () => `And the <span class='highlight'>city</span>? (optional)`,
-        type: 'text',
-        placeholder: 'e.g. New York, London…',
+        ask: () => `And the <span class='highlight'>city / cities</span>? (optional — select one or more)`,
+        type: 'multiselect',
+        list: () => getCitiesForCountries(data.Country ? data.Country.split(',').map(s => s.trim()).filter(Boolean) : []),
         required: false,
         skippable: true
     },
@@ -691,6 +709,99 @@ function renderInput(step, index) {
             inputEl.appendChild(skip);
         }
 
+    } else if (step.type === 'multiselect') {
+        // Inline multi-select for country/city
+        const list = typeof step.list === 'function' ? step.list() : (step.list || []);
+        let selected = [];
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:6px;width:100%;';
+
+        const tagsRow = document.createElement('div');
+        tagsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;min-height:24px;';
+
+        const inputRow = document.createElement('div');
+        inputRow.className = 'input-row';
+
+        const searchInp = document.createElement('input');
+        searchInp.className = 'chat-text-input';
+        searchInp.type = 'text';
+        searchInp.placeholder = 'Type to search…';
+        searchInp.autocomplete = 'off';
+
+        const dd = document.createElement('div');
+        dd.style.cssText = 'background:#fff;border:1px solid #ddd;border-radius:8px;max-height:160px;overflow-y:auto;font-size:0.85rem;box-shadow:0 4px 10px rgba(0,0,0,.1);display:none;';
+
+        function renderTags() {
+            tagsRow.innerHTML = '';
+            selected.forEach(v => {
+                const tag = document.createElement('span');
+                tag.style.cssText = 'background:#dbeafe;color:#1e40af;border-radius:12px;padding:2px 8px;font-size:0.78rem;font-weight:600;display:flex;align-items:center;gap:4px;';
+                const labelNode = document.createTextNode(v + ' ');
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.setAttribute('aria-label', 'Remove ' + v);
+                removeBtn.setAttribute('style', 'background:none;border:none;cursor:pointer;color:#1e40af;padding:0;font-size:0.9rem;');
+                removeBtn.textContent = '×';
+                const capturedV = v;
+                removeBtn.onclick = () => { selected = selected.filter(x => x !== capturedV); renderTags(); };
+                tag.appendChild(labelNode);
+                tag.appendChild(removeBtn);
+                tagsRow.appendChild(tag);
+            });
+        }
+
+        function showDD(q) {
+            const lc = q.toLowerCase();
+            const opts = list.filter(c => !selected.includes(c) && c.toLowerCase().includes(lc));
+            dd.innerHTML = '';
+            if (!opts.length) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'padding:8px 12px;color:#aaa;';
+                empty.textContent = 'No matches';
+                dd.appendChild(empty);
+            } else {
+                opts.slice(0, 50).forEach(c => {
+                    const el = document.createElement('div');
+                    el.style.cssText = 'padding:7px 12px;cursor:pointer;border-bottom:1px solid #f5f5f5;';
+                    el.textContent = c;
+                    el.addEventListener('mousedown', e => { e.preventDefault(); selected.push(c); renderTags(); searchInp.value=''; dd.style.display='none'; });
+                    dd.appendChild(el);
+                });
+            }
+            dd.style.display = 'block';
+        }
+
+        searchInp.addEventListener('input',  () => showDD(searchInp.value));
+        searchInp.addEventListener('focus',  () => showDD(searchInp.value));
+        searchInp.addEventListener('blur',   () => setTimeout(() => dd.style.display='none', 150));
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'chat-send-btn';
+        confirmBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+        confirmBtn.title = 'Confirm selection';
+        confirmBtn.onclick = () => {
+            const val = selected.join(', ');
+            if (step.required && !val) { showInputError('Please select at least one option.', searchInp); return; }
+            answerStep(step, index, val || '');
+        };
+
+        inputRow.appendChild(searchInp);
+        inputRow.appendChild(confirmBtn);
+        wrapper.appendChild(tagsRow);
+        wrapper.appendChild(dd);
+        wrapper.appendChild(inputRow);
+
+        if (step.skippable) {
+            const skip = document.createElement('button');
+            skip.className = 'btn-skip';
+            skip.textContent = 'Skip';
+            skip.onclick = () => answerStep(step, index, '');
+            wrapper.appendChild(skip);
+        }
+        inputEl.appendChild(wrapper);
+        renderTags();
+        searchInp.focus();
+
     } else if (step.type === 'textarea') {
         const ta = document.createElement('textarea');
         ta.className = 'chat-text-input';
@@ -795,6 +906,7 @@ async function showSummary() {
         ['Description', data.Description.length > SUMMARY_DESC_MAX ? data.Description.substring(0, SUMMARY_DESC_MAX) + '…' : data.Description],
         ['Business Unit', data.BusinessUnit],
         ['Department', data.Department || '—'],
+        ['LOB', data.Lob || '—'],
         ['Process Owner', `${data.ProcessOwnerName} (${data.ProcessOwnerEmail})`],
         ['Process Type', data.ProcessType],
         ['Volume / Day', data.EstimatedVolumePerDay || '—'],
@@ -834,6 +946,7 @@ function submitIntake() {
     document.getElementById('f_Description').value           = data.Description;
     document.getElementById('f_BusinessUnit').value          = data.BusinessUnit;
     document.getElementById('f_Department').value            = data.Department;
+    document.getElementById('f_Lob').value                   = data.Lob;
     document.getElementById('f_ProcessOwnerName').value      = data.ProcessOwnerName;
     document.getElementById('f_ProcessOwnerEmail').value     = data.ProcessOwnerEmail;
     document.getElementById('f_ProcessType').value           = data.ProcessType;

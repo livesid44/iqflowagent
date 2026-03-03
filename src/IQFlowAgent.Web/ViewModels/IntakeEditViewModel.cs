@@ -21,6 +21,7 @@ public class IntakeEditViewModel
     public string BusinessUnit { get; set; } = string.Empty;
 
     public string Department { get; set; } = string.Empty;
+    public string Lob { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Process Owner Name is required")]
     [Display(Name = "Process Owner Name")]

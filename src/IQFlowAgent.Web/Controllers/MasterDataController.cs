@@ -114,4 +114,114 @@ public class MasterDataController : Controller
         TempData["Success"] = $"Department '{dept.Name}' {(dept.IsActive ? "activated" : "deactivated")}.";
         return RedirectToAction(nameof(Department));
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  LOB (Line of Business) master data
+    // ═══════════════════════════════════════════════════════════
+
+    // GET /MasterData/Lob
+    public async Task<IActionResult> Lob()
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var lobs = await _db.MasterLobs
+            .Where(l => l.TenantId == tenantId)
+            .OrderBy(l => l.DepartmentName)
+            .ThenBy(l => l.Name)
+            .ToListAsync();
+        ViewBag.Departments = await _db.MasterDepartments
+            .Where(d => d.IsActive && d.TenantId == tenantId)
+            .OrderBy(d => d.Name)
+            .Select(d => d.Name)
+            .ToListAsync();
+        return View(lobs);
+    }
+
+    // POST /MasterData/CreateLob
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> CreateLob(string name, string departmentName, string? description)
+    {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(departmentName))
+        {
+            TempData["Error"] = "LOB name and Department are required.";
+            return RedirectToAction(nameof(Lob));
+        }
+
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var exists = await _db.MasterLobs.AnyAsync(l =>
+            l.TenantId == tenantId &&
+            l.DepartmentName == departmentName.Trim() &&
+            l.Name.ToLower() == name.Trim().ToLower());
+
+        if (exists)
+        {
+            TempData["Error"] = $"LOB '{name.Trim()}' already exists under '{departmentName.Trim()}'.";
+            return RedirectToAction(nameof(Lob));
+        }
+
+        _db.MasterLobs.Add(new MasterLob
+        {
+            TenantId       = tenantId,
+            DepartmentName = departmentName.Trim(),
+            Name           = name.Trim(),
+            Description    = description?.Trim(),
+            IsActive       = true
+        });
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"LOB '{name.Trim()}' created.";
+        return RedirectToAction(nameof(Lob));
+    }
+
+    // POST /MasterData/EditLob/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> EditLob(int id, string name, string departmentName, string? description, bool isActive)
+    {
+        var lob = await _db.MasterLobs.FindAsync(id);
+        if (lob == null) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            TempData["Error"] = "LOB name is required.";
+            return RedirectToAction(nameof(Lob));
+        }
+
+        lob.Name           = name.Trim();
+        lob.DepartmentName = departmentName.Trim();
+        lob.Description    = description?.Trim();
+        lob.IsActive       = isActive;
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"LOB '{name.Trim()}' updated.";
+        return RedirectToAction(nameof(Lob));
+    }
+
+    // POST /MasterData/DeleteLob/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Roles = "SuperAdmin")]
+    public async Task<IActionResult> DeleteLob(int id)
+    {
+        var lob = await _db.MasterLobs.FindAsync(id);
+        if (lob == null) return NotFound();
+
+        _db.MasterLobs.Remove(lob);
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"LOB '{lob.Name}' deleted.";
+        return RedirectToAction(nameof(Lob));
+    }
+
+    // POST /MasterData/ToggleLob/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ToggleLob(int id)
+    {
+        var lob = await _db.MasterLobs.FindAsync(id);
+        if (lob == null) return NotFound();
+
+        lob.IsActive = !lob.IsActive;
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"LOB '{lob.Name}' {(lob.IsActive ? "activated" : "deactivated")}.";
+        return RedirectToAction(nameof(Lob));
+    }
 }
+

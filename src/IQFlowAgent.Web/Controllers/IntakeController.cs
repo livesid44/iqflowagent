@@ -58,6 +58,11 @@ public class IntakeController : Controller
             .OrderBy(d => d.Name)
             .Select(d => d.Name)
             .ToListAsync();
+        ViewBag.LobsByDept = await _db.MasterLobs
+            .Where(l => l.IsActive && l.TenantId == tenantId)
+            .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
+            .Select(l => new { l.DepartmentName, l.Name })
+            .ToListAsync();
         return View();
     }
 
@@ -69,6 +74,11 @@ public class IntakeController : Controller
             .Where(d => d.IsActive && d.TenantId == tenantId)
             .OrderBy(d => d.Name)
             .Select(d => d.Name)
+            .ToListAsync();
+        ViewBag.LobsByDept = await _db.MasterLobs
+            .Where(l => l.IsActive && l.TenantId == tenantId)
+            .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
+            .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
         return View(new IntakeViewModel());
     }
@@ -131,6 +141,7 @@ public class IntakeController : Controller
             Description = model.Description,
             BusinessUnit = model.BusinessUnit,
             Department = model.Department,
+            Lob = model.Lob,
             ProcessOwnerName = model.ProcessOwnerName,
             ProcessOwnerEmail = model.ProcessOwnerEmail,
             ProcessType = model.ProcessType,
@@ -206,6 +217,11 @@ public class IntakeController : Controller
             .OrderBy(d => d.Name)
             .Select(d => d.Name)
             .ToListAsync();
+        ViewBag.LobsByDept = await _db.MasterLobs
+            .Where(l => l.IsActive && l.TenantId == tenantId)
+            .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
+            .Select(l => new { l.DepartmentName, l.Name })
+            .ToListAsync();
 
         var vm = new IntakeEditViewModel
         {
@@ -215,6 +231,7 @@ public class IntakeController : Controller
             Description          = record.Description,
             BusinessUnit         = record.BusinessUnit,
             Department           = record.Department,
+            Lob                  = record.Lob,
             ProcessOwnerName     = record.ProcessOwnerName,
             ProcessOwnerEmail    = record.ProcessOwnerEmail,
             ProcessType          = record.ProcessType,
@@ -262,6 +279,7 @@ public class IntakeController : Controller
         record.Description          = model.Description;
         record.BusinessUnit         = model.BusinessUnit;
         record.Department           = model.Department;
+        record.Lob                  = model.Lob;
         record.ProcessOwnerName     = model.ProcessOwnerName;
         record.ProcessOwnerEmail    = model.ProcessOwnerEmail;
         record.ProcessType          = model.ProcessType;
@@ -338,6 +356,18 @@ public class IntakeController : Controller
         }
 
         return RedirectToAction(nameof(AnalysisResult), new { id });
+    }
+
+    // GET /Intake/LobsByDepartment?deptName=Finance — AJAX endpoint for cascading LOB dropdown
+    public async Task<IActionResult> LobsByDepartment(string deptName)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var lobs = await _db.MasterLobs
+            .Where(l => l.IsActive && l.TenantId == tenantId && l.DepartmentName == deptName)
+            .OrderBy(l => l.Name)
+            .Select(l => l.Name)
+            .ToListAsync();
+        return Json(lobs);
     }
 
     private async Task DeleteDocumentAsync(string? filePath)
