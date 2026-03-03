@@ -18,7 +18,7 @@ namespace IQFlowAgent.Web.Migrations
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "9.0.13");
+            modelBuilder.HasAnnotation("ProductVersion", "8.0.13");
 
             modelBuilder.Entity("IQFlowAgent.Web.Models.ApplicationUser", b =>
                 {
