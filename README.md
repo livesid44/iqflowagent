@@ -172,6 +172,56 @@ cd src\IQFlowAgent.Web; Remove-Item -Recurse -Force bin,obj -ErrorAction Silentl
 
 ---
 
+### `MSB4018: GenerateStaticWebAssetsPropsFile task failed – DirectoryNotFoundException`
+
+**Full error text:**
+```
+MSB4018 The "GenerateStaticWebAssetsPropsFile" task failed unexpectedly.
+System.IO.DirectoryNotFoundException: Could not find a part of the path '...\obj\Debug\net8.0\staticwebassets\msbuild.IQFlowAgent.Web.Microsoft.AspNetCore.StaticWebAssets.props'
+```
+
+**Cause:** Your checkout folder path is too long. Windows has a **MAX_PATH limit of 260 characters**.  
+Deeply-nested folder names like `iqflowagent-copilot-start-dotnet-application-login-user-management (4)\new\iqflowagent-copilot-...` push the total path length past 260 chars, and old MSBuild I/O code cannot create the `obj\` sub-directories.
+
+**Fix — three options (pick any one):**
+
+**Option 1 — Enable Windows long-path support (recommended, permanent fix):**
+```powershell
+# Run PowerShell as Administrator:
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+    -Name "LongPathsEnabled" -Value 1 -Type DWord
+# Then restart Visual Studio / your terminal.
+```
+Or via Group Policy: `Computer Configuration → Administrative Templates → System → Filesystem → Enable Win32 long paths → Enabled`
+
+**Option 2 — Use the `IQFLOW_SHORT_PATHS` env var (no admin rights required):**
+
+A `Directory.Build.props` is included that redirects `obj/` and `bin/` to `%TEMP%\iqflow\` (a short path) when this variable is set to `1`.
+
+```bat
+REM In cmd before building:
+set IQFLOW_SHORT_PATHS=1
+dotnet build
+```
+```powershell
+# In PowerShell before building:
+$env:IQFLOW_SHORT_PATHS="1"
+dotnet build
+```
+For a permanent fix without admin rights: add `IQFLOW_SHORT_PATHS=1` in  
+*System Properties → Advanced → Environment Variables → User variables*,  
+then restart VS.
+
+**Option 3 — Clone to a shorter path (simplest):**
+```bat
+cd C:\dev
+git clone https://github.com/livesid44/iqflowagent iq
+cd iq
+dotnet build src\IQFlowAgent.Web\IQFlowAgent.Web.csproj
+```
+
+---
+
 ### `CS1061: 'DbContextOptionsBuilder' does not contain a definition for 'UseSqlServer'` or `UseSqlite`  
 ### `CS0246: The type or namespace name 'DocumentFormat' could not be found`
 
