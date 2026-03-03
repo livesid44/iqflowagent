@@ -12,6 +12,11 @@ public class TenantAiSettings
     public int AzureOpenAIMaxTokens { get; set; } = 2000;
     public string AzureStorageConnectionString { get; set; } = string.Empty;
     public string AzureStorageContainerName { get; set; } = "intakes";
+
+    // Azure Speech-to-Text (for audio/video transcription)
+    public string AzureSpeechRegion { get; set; } = string.Empty;
+    public string AzureSpeechApiKey { get; set; } = string.Empty;
+
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public string? UpdatedByUserId { get; set; }
 }

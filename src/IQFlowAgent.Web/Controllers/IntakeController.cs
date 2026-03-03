@@ -19,10 +19,12 @@ public class IntakeController : Controller
     private readonly IWebHostEnvironment _env;
     private readonly IServiceProvider _services;
     private readonly ITenantContextService _tenantContext;
+    private readonly IBackgroundJobQueue _jobQueue;
 
     public IntakeController(ApplicationDbContext db, IAzureOpenAiService aiService,
         IBlobStorageService blobService, ILogger<IntakeController> logger,
-        IWebHostEnvironment env, IServiceProvider services, ITenantContextService tenantContext)
+        IWebHostEnvironment env, IServiceProvider services, ITenantContextService tenantContext,
+        IBackgroundJobQueue jobQueue)
     {
         _db = db;
         _aiService = aiService;
@@ -31,10 +33,18 @@ public class IntakeController : Controller
         _env = env;
         _services = services;
         _tenantContext = tenantContext;
+        _jobQueue = jobQueue;
     }
 
     // Supported plain-text file extensions that can be parsed for AI analysis
     private static readonly string[] ParseableExtensions = [".txt", ".csv", ".json", ".xml", ".md"];
+
+    private static readonly HashSet<string> AudioVideoExts =
+        new(StringComparer.OrdinalIgnoreCase)
+        { ".mp3", ".mp4", ".wav", ".m4a", ".ogg", ".webm", ".mkv", ".avi", ".mov" };
+
+    private static bool IsAudioVideo(string fileName) =>
+        AudioVideoExts.Contains(Path.GetExtension(fileName));
 
     private static string GenerateIntakeId() =>
         "INT-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
@@ -83,7 +93,7 @@ public class IntakeController : Controller
         return View(new IntakeViewModel());
     }
 
-    // POST /Intake/Create — save intake + trigger analysis
+    // POST /Intake/Create — save intake + trigger async RAG analysis
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(IntakeViewModel model)
@@ -94,6 +104,7 @@ public class IntakeController : Controller
         var tenantId = _tenantContext.GetCurrentTenantId();
         var intakeId = GenerateIntakeId();
 
+        // ── Upload first document (backwards compat: populates IntakeRecord.UploadedFile*) ──
         string? savedFilePath = null;
         string? savedFileName = null;
         string? savedContentType = null;
@@ -109,7 +120,6 @@ public class IntakeController : Controller
 
             if (await _blobService.IsConfiguredAsync())
             {
-                // Upload to Azure Blob Storage
                 var blobName = $"{intakeId}{ext}";
                 using var stream = model.Document.OpenReadStream();
                 savedFilePath = await _blobService.UploadAsync(stream, blobName, model.Document.ContentType);
@@ -117,19 +127,14 @@ public class IntakeController : Controller
             }
             else
             {
-                // Fallback: save to local wwwroot/uploads
                 var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
                 Directory.CreateDirectory(uploadsDir);
                 var safeFileName = $"{intakeId}{ext}";
                 var fullPath = Path.Combine(uploadsDir, safeFileName);
-
                 using var stream = new FileStream(fullPath, FileMode.Create);
                 await model.Document.CopyToAsync(stream);
-
                 savedFilePath = $"/uploads/{safeFileName}";
-                _logger.LogInformation(
-                    "Azure Blob Storage not configured — saved document for {IntakeId} to local path: {Path}",
-                    intakeId, savedFilePath);
+                _logger.LogInformation("Saved document for {IntakeId} locally: {Path}", intakeId, savedFilePath);
             }
         }
 
@@ -163,13 +168,109 @@ public class IntakeController : Controller
         _db.IntakeRecords.Add(record);
         await _db.SaveChangesAsync();
 
-        // Run analysis in background using a scoped service provider
-        var recordId = record.Id;
-        var webRoot = _env.WebRootPath;
-        _ = Task.Run(async () => await RunAnalysisInBackgroundAsync(recordId, savedFilePath, webRoot));
+        // ── Save primary doc as IntakeDocument record ─────────────────────────
+        int docCount = 0;
+        if (savedFileName != null && savedFilePath != null)
+        {
+            _db.IntakeDocuments.Add(new IntakeDocument
+            {
+                IntakeRecordId   = record.Id,
+                FileName         = savedFileName,
+                FilePath         = savedFilePath,
+                ContentType      = savedContentType,
+                FileSize         = savedFileSize,
+                DocumentType     = "IntakeDocument",
+                UploadedAt       = DateTime.UtcNow,
+                UploadedByUserId = User.Identity?.Name,
+                TranscriptStatus = IsAudioVideo(savedFileName) ? "Pending" : "NA"
+            });
+            docCount++;
+        }
 
-        TempData["Success"] = $"Intake {intakeId} submitted successfully. Analysis is running…";
+        // ── Save additional uploaded files (multi-file RAG) ───────────────────
+        var additionalFiles = Request.Form.Files
+            .Where(f => f.Name == "AdditionalDocuments" && f.Length > 0)
+            .ToList();
+
+        foreach (var file in additionalFiles)
+        {
+            var ext  = Path.GetExtension(file.FileName);
+            var name = $"{intakeId}-{docCount + 1:D2}{ext}";
+            string filePath;
+
+            if (await _blobService.IsConfiguredAsync())
+            {
+                using var s = file.OpenReadStream();
+                filePath = await _blobService.UploadAsync(s, name, file.ContentType);
+            }
+            else
+            {
+                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
+                Directory.CreateDirectory(uploadsDir);
+                var fp = Path.Combine(uploadsDir, name);
+                using var s = new FileStream(fp, FileMode.Create);
+                await file.CopyToAsync(s);
+                filePath = $"/uploads/{name}";
+            }
+
+            _db.IntakeDocuments.Add(new IntakeDocument
+            {
+                IntakeRecordId   = record.Id,
+                FileName         = file.FileName,
+                FilePath         = filePath,
+                ContentType      = file.ContentType,
+                FileSize         = file.Length,
+                DocumentType     = "IntakeDocument",
+                UploadedAt       = DateTime.UtcNow,
+                UploadedByUserId = User.Identity?.Name,
+                TranscriptStatus = IsAudioVideo(file.FileName) ? "Pending" : "NA"
+            });
+            docCount++;
+        }
+
+        await _db.SaveChangesAsync();
+
+        // ── Create RAG job and enqueue for background processing ──────────────
+        var ragJob = new RagJob
+        {
+            IntakeRecordId = record.Id,
+            Status         = "Queued",
+            TotalFiles     = docCount,
+            ProcessedFiles = 0,
+            NotifyUserId   = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value,
+            CreatedAt      = DateTime.UtcNow
+        };
+        _db.RagJobs.Add(ragJob);
+        await _db.SaveChangesAsync();
+
+        _jobQueue.EnqueueRagJob(ragJob.Id);
+        _logger.LogInformation("RAG job {JobId} queued for intake {IntakeId} ({FileCount} file(s)).",
+            ragJob.Id, intakeId, docCount);
+
+        TempData["Success"] = $"Intake {intakeId} submitted. Processing {docCount} file(s) in the background — you'll be notified when analysis is ready.";
         return RedirectToAction(nameof(AnalysisResult), new { id = record.Id });
+    }
+
+    // GET /Intake/RagStatus/{id} — JSON endpoint for polling RAG job status
+    [HttpGet]
+    public async Task<IActionResult> RagStatus(int id)
+    {
+        var job = await _db.RagJobs
+            .Where(j => j.IntakeRecordId == id)
+            .OrderByDescending(j => j.Id)
+            .FirstOrDefaultAsync();
+
+        var intake = await _db.IntakeRecords.FindAsync(id);
+
+        return Json(new
+        {
+            intakeStatus   = intake?.Status ?? "Unknown",
+            jobStatus      = job?.Status ?? "None",
+            totalFiles     = job?.TotalFiles ?? 0,
+            processedFiles = job?.ProcessedFiles ?? 0,
+            completedAt    = job?.CompletedAt?.ToString("o"),
+            error          = job?.ErrorMessage
+        });
     }
 
     // GET /Intake/AnalysisResult/5 — show analysis result for a specific intake

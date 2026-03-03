@@ -21,6 +21,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<MasterDepartment> MasterDepartments => Set<MasterDepartment>();
     public DbSet<MasterLob> MasterLobs => Set<MasterLob>();
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
+    public DbSet<RagJob> RagJobs => Set<RagJob>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -85,6 +86,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .HasOne(q => q.IntakeRecord)
             .WithMany()
             .HasForeignKey(q => q.IntakeRecordId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<RagJob>()
+            .HasOne(r => r.IntakeRecord)
+            .WithMany()
+            .HasForeignKey(r => r.IntakeRecordId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

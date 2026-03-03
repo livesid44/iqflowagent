@@ -32,4 +32,10 @@ public interface IAzureOpenAiService
         string? analysisJson,
         string? tasksSummary,
         string? documentText);
+
+    /// <summary>
+    /// Generates a structured SOP / training document from a meeting transcript.
+    /// Returns the SOP as a markdown string.
+    /// </summary>
+    Task<string> GenerateSopFromTranscriptAsync(string transcript, IntakeRecord intake);
 }

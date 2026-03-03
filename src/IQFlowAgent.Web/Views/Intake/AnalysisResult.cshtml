@@ -250,6 +250,61 @@
         </div>
     }
 
+    @if (Model.Status is "Submitted" or "Analyzing")
+    {
+        <div id="rag-status-banner" style="background:#fff8e1;border:1px solid #ffc107;border-radius:8px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:20px;">⚙️</span>
+            <div style="flex:1;">
+                <strong>Processing files in the background…</strong>
+                <div id="rag-status-text" style="font-size:13px;color:#666;margin-top:2px;">
+                    Analysing your uploaded documents with AI — this page will update automatically.
+                </div>
+            </div>
+            <div id="rag-spinner" style="width:20px;height:20px;border:3px solid #ffc107;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        </div>
+        <style>@@keyframes spin{to{transform:rotate(360deg)}}</style>
+        <script>
+            (function() {
+                var intakeDbId = @Model.Id;
+                var pollInterval = 4000;
+                var maxPolls = 75; // 5 min
+                var polls = 0;
+
+                function poll() {
+                    if (polls++ >= maxPolls) return;
+                    fetch('/Intake/RagStatus/' + intakeDbId)
+                        .then(r => r.json())
+                        .then(data => {
+                            var txt = document.getElementById('rag-status-text');
+                            var banner = document.getElementById('rag-status-banner');
+                            if (data.jobStatus === 'Processing' || data.intakeStatus === 'Analyzing') {
+                                if (txt) txt.textContent =
+                                    'Processing files (' + data.processedFiles + ' / ' + data.totalFiles + ' complete)…';
+                                setTimeout(poll, pollInterval);
+                            } else if (data.jobStatus === 'Complete' || data.intakeStatus === 'Complete') {
+                                banner.style.background = '#e8f5e9';
+                                banner.style.borderColor = '#43a047';
+                                if (txt) txt.textContent = 'Analysis complete! Reloading…';
+                                document.getElementById('rag-spinner').style.display = 'none';
+                                setTimeout(() => location.reload(), 1500);
+                            } else if (data.jobStatus === 'Error') {
+                                banner.style.background = '#fdecea';
+                                banner.style.borderColor = '#e53935';
+                                banner.querySelector('span').textContent = '❌';
+                                if (txt) txt.textContent = 'Processing failed: ' + (data.error || 'Unknown error');
+                                document.getElementById('rag-spinner').style.display = 'none';
+                            } else {
+                                setTimeout(poll, pollInterval);
+                            }
+                        })
+                        .catch(() => setTimeout(poll, pollInterval * 2));
+                }
+
+                setTimeout(poll, pollInterval);
+            })();
+        </script>
+    }
+
     @{
         var existingTitles = (ViewBag.ExistingTaskTitles as List<string>) ?? new List<string>();
         var taskCount = (int)(ViewBag.TaskCount ?? 0);

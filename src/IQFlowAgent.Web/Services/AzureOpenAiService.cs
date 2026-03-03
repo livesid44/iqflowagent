@@ -903,4 +903,161 @@ public class AzureOpenAiService : IAzureOpenAiService
             }
         });
     }
+
+    // ─── GenerateSopFromTranscriptAsync ──────────────────────────────────────
+
+    public async Task<string> GenerateSopFromTranscriptAsync(string transcript, IntakeRecord intake)
+    {
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Azure OpenAI not configured for tenant {TenantId} — returning mock SOP.", intake.TenantId);
+            return GenerateMockSop(transcript, intake);
+        }
+
+        const int MaxTranscriptChars = 6000;
+        var trimmedTranscript = transcript.Length > MaxTranscriptChars
+            ? transcript[..MaxTranscriptChars] + "\n[... transcript truncated ...]"
+            : transcript;
+
+        var systemPrompt = $"""
+            You are a business process analyst. Create a professional Standard Operating Procedure (SOP)
+            document from the provided meeting transcript. Use Markdown formatting.
+
+            Context:
+            - Process: {intake.ProcessName}
+            - Business Unit: {intake.BusinessUnit}
+            - Department: {intake.Department}
+
+            Include these sections: Title/metadata, Purpose & scope, Roles & responsibilities,
+            Pre-requisites, Step-by-step procedure (numbered), Exception handling,
+            Key metrics/SLAs, Revision history.
+
+            Be concise but thorough. Use plain language.
+            """;
+
+        var userMessage = $"Meeting transcript:\n\n{trimmedTranscript}";
+        var requestUrl  = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+
+        _logger.LogInformation("Generating SOP for {IntakeId} via {Url}", intake.IntakeId, requestUrl);
+
+        try
+        {
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = userMessage }
+                },
+                max_tokens  = Math.Min(maxTokens, 2500),
+                temperature = 0.5
+            };
+
+            var client  = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            client.DefaultRequestHeaders.Accept.Add(
+                new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+            var json     = JsonSerializer.Serialize(requestBody);
+            var payload  = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var response = await client.PostAsync(requestUrl, payload);
+            var body     = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("SOP generation failed ({Status}) for {IntakeId}: {Body}",
+                    (int)response.StatusCode, intake.IntakeId, body);
+                return GenerateMockSop(transcript, intake);
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString() ?? GenerateMockSop(transcript, intake);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SOP generation failed for intake {IntakeId} (tenant {TenantId}).", intake.IntakeId, intake.TenantId);
+            return GenerateMockSop(transcript, intake);
+        }
+    }
+
+    private static string GenerateMockSop(string transcript, IntakeRecord intake) => $"""
+        # Standard Operating Procedure — {intake.ProcessName}
+
+        **Version:** 1.0
+        **Date:** {DateTime.UtcNow:dd MMM yyyy}
+        **Business Unit:** {intake.BusinessUnit}
+        **Department:** {intake.Department}
+        **Process Owner:** {intake.ProcessOwnerName}
+
+        ---
+
+        ## 1. Purpose
+
+        This SOP defines the standard procedure for **{intake.ProcessName}** within the {intake.BusinessUnit} business unit.
+        It has been generated from a recorded meeting transcript and captures the agreed process steps, roles, and exception handling.
+
+        ## 2. Scope
+
+        Applies to all team members in {intake.Department} responsible for executing or overseeing this process.
+
+        ## 3. Roles & Responsibilities
+
+        | Role | Responsibility |
+        |------|---------------|
+        | Process Owner | {intake.ProcessOwnerName} — overall accountability |
+        | Team Members | Execute daily process steps as defined below |
+        | Manager | Review exceptions and approve deviations |
+
+        ## 4. Pre-requisites
+
+        - Access to relevant systems and tools
+        - Completion of onboarding training
+        - Understanding of compliance requirements
+
+        ## 5. Step-by-Step Procedure
+
+        1. **Initiate** — Receive request or trigger event from upstream system
+        2. **Validate** — Check completeness and accuracy of input data
+        3. **Process** — Apply business rules and execute the core workflow
+        4. **Review** — Quality-check outputs against defined criteria
+        5. **Escalate** — If exceptions arise, follow the escalation path
+        6. **Complete** — Record outcomes and update relevant systems
+        7. **Notify** — Communicate completion to stakeholders
+
+        ## 6. Exception Handling
+
+        | Exception | Action | Escalation |
+        |-----------|--------|------------|
+        | Invalid input data | Return to requestor with guidance | Level 1 Support |
+        | System unavailable | Log ticket and retry after 30 min | IT Support |
+        | SLA breach risk | Notify manager immediately | Process Owner |
+
+        ## 7. Key Metrics / SLAs
+
+        - Target processing time: within defined SLA window
+        - Error rate target: < 2%
+        - Escalation SLA: respond within 4 business hours
+
+        ## 8. Revision History
+
+        | Version | Date | Author | Changes |
+        |---------|------|--------|---------|
+        | 1.0 | {DateTime.UtcNow:dd MMM yyyy} | AI-Generated | Initial version from meeting transcript |
+
+        ---
+
+        *This document was auto-generated from a meeting recording. Please review and validate before publishing.*
+
+        [Note: This is a mock SOP — configure Azure Speech + OpenAI in Tenant AI Settings for AI-generated content]
+        """;
 }

@@ -253,21 +253,31 @@
         <!-- ── SECTION 4: Document Upload ───────────────────────── -->
         <div class="form-card">
             <div class="form-section-title">
-                <i class="bi bi-file-earmark-arrow-up"></i> Document Upload <span style="font-weight:400;color:#999;font-size:0.8rem;">(optional)</span>
+                <i class="bi bi-file-earmark-arrow-up"></i> Document Upload <span style="font-weight:400;color:#999;font-size:0.8rem;">(optional — multiple files supported)</span>
             </div>
             <p style="font-size:0.85rem;color:#777;margin-bottom:14px;">
-                Upload process documentation, SOPs, or any relevant files. Text files (TXT, CSV, JSON, MD) will be parsed and included in the AI analysis.
-                PDF and DOCX files will be stored and referenced.
+                Upload process documentation, SOPs, audio/video recordings, or any relevant files.
+                Text files (TXT, CSV, JSON, MD) will be parsed for AI analysis.
+                Audio/video files (MP3, MP4, WAV, M4A, Teams recordings) will be transcribed using Azure Speech-to-Text.
             </p>
             <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-                <i class="bi bi-cloud-arrow-up"></i>
-                <p><strong>Click to upload</strong> or drag and drop</p>
-                <p style="margin-top:4px;">PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <p><strong>Click to select files</strong> or drag and drop</p>
+                <p style="margin-top:4px;color:#aaa;">PDF, DOCX, TXT, CSV, JSON, MD, MP3, MP4, WAV, M4A — max 20 MB each</p>
             </div>
+            @* Primary document (bound to model) *@
             <input type="file" id="fileInput" asp-for="Document"
-                   accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
-                   onchange="previewFile(this)" />
-            <div id="filePreview"></div>
+                   accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml,.mp3,.mp4,.wav,.m4a,.ogg,.webm,.mov"
+                   onchange="addFilesToQueue([this.files[0]])" style="display:none;" />
+            @* Additional files (multi-file RAG) *@
+            <input type="file" id="additionalFiles" name="AdditionalDocuments" multiple
+                   accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml,.mp3,.mp4,.wav,.m4a,.ogg,.webm,.mov"
+                   onchange="addFilesToQueue(Array.from(this.files))" style="display:none;" />
+            <div id="fileQueue" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;"></div>
+            <button type="button" onclick="document.getElementById('additionalFiles').click()"
+                    style="margin-top:8px;background:none;border:1px dashed #ccc;border-radius:6px;padding:6px 14px;color:#666;font-size:13px;cursor:pointer;">
+                + Add more files
+            </button>
         </div>
 
         <!-- ── Actions ──────────────────────────────────────────── -->
@@ -285,28 +295,48 @@
 <partial name="_ValidationScriptsPartial" />
 <script src="~/js/country-city-data.js"></script>
 <script>
-    // Drag & drop upload zone
+    // Drag & drop upload zone — multi-file support
     const zone = document.getElementById('uploadZone');
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
     zone.addEventListener('drop', e => {
         e.preventDefault();
         zone.classList.remove('drag-over');
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            const input = document.getElementById('fileInput');
-            input.files = files;
-            previewFile(input);
-        }
+        if (e.dataTransfer.files.length > 0)
+            addFilesToQueue(Array.from(e.dataTransfer.files));
     });
 
-    function previewFile(input) {
-        const preview = document.getElementById('filePreview');
-        if (input.files && input.files[0]) {
-            const f = input.files[0];
-            const size = (f.size / 1024 / 1024).toFixed(2);
-            preview.innerHTML = `<i class="bi bi-file-earmark-check" style="color:#1a2a5e;"></i>
-                <strong>${f.name}</strong> — ${size} MB`;
+    const AV_EXTS = new Set(['.mp3','.mp4','.wav','.m4a','.ogg','.webm','.mov','.mkv','.avi']);
+
+    function addFilesToQueue(files) {
+        const queue = document.getElementById('fileQueue');
+        files.forEach(f => {
+            const ext   = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+            const isAV  = AV_EXTS.has(ext);
+            const size  = (f.size / 1024 / 1024).toFixed(2);
+            const tag   = isAV ? '🎙️ Audio/Video — will be transcribed' : '📄 Document';
+            const row   = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:8px;background:#f5f7ff;border:1px solid #e0e4f5;border-radius:6px;padding:8px 12px;font-size:13px;';
+            const nameNode = document.createTextNode(f.name);
+            const infoNode = document.createTextNode(` — ${size} MB — ${tag}`);
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = '×';
+            removeBtn.type = 'button';
+            removeBtn.style.cssText = 'margin-left:auto;background:none;border:none;color:#e00;font-size:16px;cursor:pointer;';
+            removeBtn.addEventListener('click', () => row.remove());
+            row.appendChild(nameNode);
+            const info = document.createElement('span');
+            info.style.color = '#888';
+            info.appendChild(infoNode);
+            row.appendChild(info);
+            row.appendChild(removeBtn);
+            queue.appendChild(row);
+        });
+        // Assign first file to primary input for model binding
+        if (files.length > 0) {
+            const dt = new DataTransfer();
+            dt.items.add(files[0]);
+            document.getElementById('fileInput').files = dt.files;
         }
     }
 

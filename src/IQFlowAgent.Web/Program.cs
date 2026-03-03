@@ -1,4 +1,5 @@
 using IQFlowAgent.Web.Data;
+using IQFlowAgent.Web.Hubs;
 using IQFlowAgent.Web.Models;
 using IQFlowAgent.Web.Services;
 using Microsoft.AspNetCore.Identity;
@@ -46,8 +47,16 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<IAzureOpenAiService, AzureOpenAiService>();
 builder.Services.AddScoped<IBlobStorageService, BlobStorageService>();
 builder.Services.AddScoped<IDocxReportService, DocxReportService>();
+builder.Services.AddScoped<IAzureSpeechService, AzureSpeechService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
+
+// RAG background processing
+builder.Services.AddSingleton<IBackgroundJobQueue, BackgroundJobQueue>();
+builder.Services.AddHostedService<RagProcessorService>();
+
+// SignalR for real-time notifications
+builder.Services.AddSignalR();
 builder.Services.AddSession(options =>
 {
     options.IdleTimeout = TimeSpan.FromHours(8);
@@ -82,5 +91,7 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Account}/{action=Login}/{id?}");
+
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 app.Run();

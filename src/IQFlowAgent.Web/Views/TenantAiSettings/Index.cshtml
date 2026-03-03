@@ -33,6 +33,21 @@
             </div>
         </div>
 
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header" style="font-weight:600;font-size:15px;padding:16px 20px;border-bottom:1px solid #eee;">
+                Azure Speech-to-Text Settings
+                <span style="font-size:12px;font-weight:400;color:#888;margin-left:8px;">Required for audio/video transcription (Teams recordings, MP4, WAV, MP3)</span>
+            </div>
+            <div style="padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div><label>Speech Region</label><input asp-for="AzureSpeechRegion" class="form-input" placeholder="e.g. eastus, westeurope" /></div>
+                <div><label>Speech API Key</label><input asp-for="AzureSpeechApiKey" class="form-input" type="password" placeholder="Your Azure Speech API key" autocomplete="off" /></div>
+                <div style="grid-column:1/-1;background:#f0f7ff;border:1px solid #b3d4f5;border-radius:6px;padding:12px;font-size:13px;color:#1a5276;">
+                    <strong>ℹ How to get Speech credentials:</strong> Go to <em>Azure Portal → Create a resource → Speech service</em>.
+                    Copy the Key and Region from <em>Keys and Endpoint</em>. The region must match the resource (e.g. <code>eastus</code>).
+                </div>
+            </div>
+        </div>
+
         @if (Model.UpdatedAt != default) {
             <p style="color:#888;font-size:12px;">Last updated: @Model.UpdatedAt.ToString("dd MMM yyyy HH:mm") by @Model.UpdatedByUserId</p>
         }
