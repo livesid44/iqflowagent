@@ -51,9 +51,8 @@ public class TenantContextService : ITenantContextService
     public async Task<List<Tenant>> GetUserTenantsAsync(string userId)
     {
         return await _db.UserTenants
-            .Where(ut => ut.UserId == userId)
+            .Where(ut => ut.UserId == userId && ut.Tenant != null && ut.Tenant.IsActive)
             .Select(ut => ut.Tenant!)
-            .Where(t => t != null && t.IsActive)
             .ToListAsync();
     }
 }

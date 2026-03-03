@@ -20,15 +20,15 @@
     </div>
     <div class="header-right">
         @{
-            var tenantCtxSvc = Context.RequestServices.GetService<IQFlowAgent.Web.Services.ITenantContextService>();
-            var currentTenantId = tenantCtxSvc?.GetCurrentTenantId() ?? 1;
+            var tenantContextService = Context.RequestServices.GetService<IQFlowAgent.Web.Services.ITenantContextService>();
+            var currentTenantId = tenantContextService?.GetCurrentTenantId() ?? 1;
             List<IQFlowAgent.Web.Models.Tenant>? userTenants = null;
-            if (tenantCtxSvc != null && User.Identity?.IsAuthenticated == true)
+            if (tenantContextService != null && User.Identity?.IsAuthenticated == true)
             {
-                var userMgr = Context.RequestServices.GetService<Microsoft.AspNetCore.Identity.UserManager<IQFlowAgent.Web.Models.ApplicationUser>>();
-                var userId = userMgr?.GetUserId(User);
+                var userManager = Context.RequestServices.GetService<Microsoft.AspNetCore.Identity.UserManager<IQFlowAgent.Web.Models.ApplicationUser>>();
+                var userId = userManager?.GetUserId(User);
                 if (userId != null)
-                    userTenants = await tenantCtxSvc.GetUserTenantsAsync(userId);
+                    userTenants = await tenantContextService.GetUserTenantsAsync(userId);
             }
         }
         @if (userTenants != null && (userTenants.Count > 1 || User.IsInRole("SuperAdmin")))
