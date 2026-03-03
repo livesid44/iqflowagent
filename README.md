@@ -92,7 +92,61 @@ dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
 | Azure Blob Storage | Empty `ConnectionString` | Files stored in `wwwroot/uploads/` |
 | SQL Server | Empty `SqlServer` connection string | SQLite (`iqflowagent.db` auto-created) |
 
+## Publishing
+
+### Recommended: use `publish.cmd` (avoids all VS Publish issues)
+
+```bat
+REM From the repo root:
+publish.cmd
+```
+
+Output lands in `src\IQFlowAgent.Web\bin\publish\`.  
+Copy the contents to your IIS / App Service `wwwroot`.
+
+### VS Publish (advanced)
+
+1. Right-click the project → **Publish**
+2. Click **Import Profile** → select `src/IQFlowAgent.Web/Properties/PublishProfiles/FolderPublish.pubxml`
+3. Click **Publish**
+
+> ⚠️ **Do NOT use a publish profile created by VS before the .NET 8 downgrade.**  
+> Old profiles have `<TargetFramework>net9.0</TargetFramework>` which causes publish to fail  
+> with *"The current .NET SDK does not support targeting .NET 9.0"*.  
+> **Fix:** delete all `.pubxml` files in `Properties/PublishProfiles/` except `FolderPublish.pubxml`,  
+> then import `FolderPublish.pubxml` as described above.
+
+---
+
 ## Troubleshooting Build Errors
+
+### `The current .NET SDK does not support targeting .NET 9.0` (during VS Publish)
+
+**Cause:** You have a locally-created VS publish profile (created before the project was  
+downgraded from .NET 9 to .NET 8) that still contains `<TargetFramework>net9.0</TargetFramework>`.  
+VS Publish uses that old profile instead of the committed `FolderPublish.pubxml`.
+
+**Fix — two options:**
+
+**Option 1 (recommended): Use `publish.cmd`**
+```bat
+publish.cmd
+```
+
+**Option 2: Fix the VS Publish profile**
+1. In Solution Explorer → expand `Properties/PublishProfiles/`
+2. Delete any `.pubxml` file that is NOT named `FolderPublish.pubxml`
+3. Right-click project → Publish → **Import Profile** → select `FolderPublish.pubxml`
+4. Publish again
+
+A `Directory.Build.targets` file is also included as a safety net — it silently corrects  
+`TargetFramework=net9.0` back to `net8.0` during any MSBuild invocation. After pulling  
+the latest code, run:
+```powershell
+cd src\IQFlowAgent.Web; Remove-Item -Recurse -Force bin,obj -ErrorAction SilentlyContinue; dotnet restore; dotnet build
+```
+
+---
 
 ### `NETSDK1005: Assets file doesn't have a target for 'net8.0'`
 
