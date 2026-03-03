@@ -17,6 +17,8 @@
                 <img src="~/images/aura.png" alt="IQFlowAgent" />
             </a>
         </div>
+        <div class="header-logo-divider" aria-hidden="true"></div>
+        <img src="~/images/techmahindra.svg" class="header-tm-logo" alt="Tech Mahindra" />
     </div>
     <div class="header-right">
         @{
@@ -155,13 +157,17 @@
             if (open) {
                 document.getElementById('appSidebar').classList.add('open');
                 document.getElementById('appLayout').classList.add('sidebar-open');
+                var footer = document.getElementById('appFooter');
+                if (footer) footer.style.marginLeft = '265px';
             }
         })();
         function toggleAppSidebar() {
             var sidebar = document.getElementById('appSidebar');
             var layout  = document.getElementById('appLayout');
+            var footer  = document.getElementById('appFooter');
             var isOpen  = sidebar.classList.toggle('open');
             layout.classList.toggle('sidebar-open', isOpen);
+            if (footer) footer.style.marginLeft = isOpen ? '265px' : '50px';
             localStorage.setItem('sidebarOpen', isOpen ? '1' : '0');
         }
         function toggleTenantDropdown() {

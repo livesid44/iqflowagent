@@ -4,38 +4,61 @@
     var userCounts = ViewBag.UserCounts as Dictionary<int, int> ?? new();
 }
 @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "tenants" } })
+
 <main class="app-main">
+
+<style>
+.tenant-color-dot { display:inline-block; width:20px; height:20px; border-radius:4px; vertical-align:middle; border:1px solid rgba(0,0,0,.1); }
+.page-toolbar { display:flex; gap:12px; margin-bottom:20px; align-items:center; }
+.color-picker-wrap { display:flex; align-items:center; gap:8px; }
+.color-picker-wrap input[type=color] { width:48px; height:36px; border:1px solid #ddd; border-radius:6px; cursor:pointer; padding:2px; }
+</style>
+
     <div class="page-title">Tenant Management</div>
     <div class="page-subtitle">Manage projects / tenants hosted on this instance</div>
     @if (TempData["Success"] != null) { <div class="alert-success-bar">@TempData["Success"]</div> }
-    @if (TempData["Error"] != null) { <div class="alert-error-bar">@TempData["Error"]</div> }
+    @if (TempData["Error"] != null)   { <div class="alert-error-bar">@TempData["Error"]</div> }
 
-    <div style="display:flex;gap:12px;margin-bottom:20px;">
+    <div class="page-toolbar">
         <button class="btn-primary" onclick="document.getElementById('createModal').style.display='flex'">+ New Tenant</button>
     </div>
 
     <div class="data-card">
         <table class="data-table">
-            <thead><tr><th>Name</th><th>Slug</th><th>Color</th><th>Users</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>Name</th><th>Slug</th><th>Color</th>
+                    <th>Users</th><th>Status</th><th>Created</th><th>Actions</th>
+                </tr>
+            </thead>
             <tbody>
             @foreach (var t in Model)
             {
                 <tr>
-                    <td><strong>@t.Name</strong>@if(t.Description != null){<div style="font-size:12px;color:#666">@t.Description</div>}</td>
+                    <td>
+                        <strong>@t.Name</strong>
+                        @if (t.Description != null) { <div style="font-size:12px;color:#666">@t.Description</div> }
+                    </td>
                     <td><code>@t.Slug</code></td>
-                    <td><span style="display:inline-block;width:20px;height:20px;border-radius:4px;background:@t.Color;vertical-align:middle;"></span> @t.Color</td>
+                    <td>
+                        <span class="tenant-color-dot" style="background:@t.Color"></span>
+                        <span style="font-size:0.82rem;color:#666;margin-left:4px;">@t.Color</span>
+                    </td>
                     <td>@(userCounts.TryGetValue(t.Id, out var uc) ? uc : 0)</td>
                     <td><span class="@(t.IsActive ? "badge-active" : "badge-inactive")">@(t.IsActive ? "Active" : "Inactive")</span></td>
-                    <td>@t.CreatedAt.ToString("dd MMM yyyy")</td>
-                    <td style="display:flex;gap:8px;">
-                        <a asp-controller="TenantAiSettings" asp-action="Index" class="btn-sm-outline" style="font-size:12px;">⚙ AI Settings</a>
-                        <a asp-controller="Tenant" asp-action="Users" asp-route-id="@t.Id" class="btn-sm-outline" style="font-size:12px;">👥 Users</a>
-                        <button class="btn-sm-outline edit-tenant-btn" style="font-size:12px;"
-                                data-id="@t.Id"
-                                data-name="@t.Name"
-                                data-color="@t.Color"
-                                data-description="@(t.Description ?? "")"
-                                data-active="@(t.IsActive ? "true" : "false")">Edit</button>
+                    <td style="font-size:0.82rem;color:#888;">@t.CreatedAt.ToString("dd MMM yyyy")</td>
+                    <td>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                            <a asp-controller="TenantAiSettings" asp-action="Index" class="btn-sm-outline" aria-label="Configure AI settings for @t.Name">AI Settings</a>
+                            <a asp-controller="Tenant" asp-action="Users" asp-route-id="@t.Id" class="btn-sm-outline" aria-label="Manage users for @t.Name">Users</a>
+                            <button class="btn-sm-outline edit-tenant-btn"
+                                    aria-label="Edit tenant @t.Name"
+                                    data-id="@t.Id"
+                                    data-name="@t.Name"
+                                    data-color="@t.Color"
+                                    data-description="@(t.Description ?? "")"
+                                    data-active="@(t.IsActive ? "true" : "false")">Edit</button>
+                        </div>
                     </td>
                 </tr>
             }
@@ -45,15 +68,18 @@
 
     <!-- Create Modal -->
     <div id="createModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
-        <div style="background:#fff;padding:32px;border-radius:8px;min-width:400px;max-width:500px;">
-            <h3 style="margin:0 0 20px">New Tenant</h3>
+        <div class="modal-box">
+            <div class="modal-title">New Tenant</div>
             <form asp-action="Create" method="post">
                 @Html.AntiForgeryToken()
-                <div style="margin-bottom:12px;"><label>Name *</label><input name="name" class="form-input" required /></div>
-                <div style="margin-bottom:12px;"><label>Slug * <small>(URL-safe, e.g. "orange")</small></label><input name="slug" class="form-input" required pattern="[a-z0-9\-]+" /></div>
-                <div style="margin-bottom:12px;"><label>Brand Color</label><input name="color" type="color" value="#e31837" style="width:60px;height:36px;border:none;cursor:pointer;" /></div>
-                <div style="margin-bottom:20px;"><label>Description</label><input name="description" class="form-input" /></div>
-                <div style="display:flex;gap:12px;">
+                <div class="modal-field"><label>Name *</label><input name="name" class="form-input" required /></div>
+                <div class="modal-field"><label>Slug * <small style="color:#888;">(URL-safe, e.g. "orange")</small></label><input name="slug" class="form-input" required pattern="[a-z0-9\-]+" /></div>
+                <div class="modal-field">
+                    <label>Brand Color</label>
+                    <div class="color-picker-wrap"><input name="color" type="color" value="#e31837" /></div>
+                </div>
+                <div class="modal-field"><label>Description</label><input name="description" class="form-input" /></div>
+                <div class="modal-actions">
                     <button type="submit" class="btn-primary">Create</button>
                     <button type="button" class="btn-secondary" onclick="document.getElementById('createModal').style.display='none'">Cancel</button>
                 </div>
@@ -63,24 +89,29 @@
 
     <!-- Edit Modal -->
     <div id="editModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
-        <div style="background:#fff;padding:32px;border-radius:8px;min-width:400px;max-width:500px;">
-            <h3 style="margin:0 0 20px">Edit Tenant</h3>
+        <div class="modal-box">
+            <div class="modal-title">Edit Tenant</div>
             <form id="editForm" method="post">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="id" id="editId" />
-                <div style="margin-bottom:12px;"><label>Name *</label><input name="name" id="editName" class="form-input" required /></div>
-                <div style="margin-bottom:12px;"><label>Brand Color</label><input name="color" id="editColor" type="color" style="width:60px;height:36px;border:none;cursor:pointer;" /></div>
-                <div style="margin-bottom:12px;"><label>Description</label><input name="description" id="editDescription" class="form-input" /></div>
-                <div style="margin-bottom:20px;"><label><input name="isActive" id="editIsActive" type="checkbox" value="true" /> Active</label></div>
-                <div style="display:flex;gap:12px;">
+                <div class="modal-field"><label>Name *</label><input name="name" id="editName" class="form-input" required /></div>
+                <div class="modal-field">
+                    <label>Brand Color</label>
+                    <div class="color-picker-wrap"><input name="color" id="editColor" type="color" /></div>
+                </div>
+                <div class="modal-field"><label>Description</label><input name="description" id="editDescription" class="form-input" /></div>
+                <div class="modal-field"><label><input name="isActive" id="editIsActive" type="checkbox" value="true" style="margin-right:6px;" /> Active</label></div>
+                <div class="modal-actions">
                     <button type="submit" class="btn-primary">Save</button>
                     <button type="button" class="btn-secondary" onclick="document.getElementById('editModal').style.display='none'">Cancel</button>
                 </div>
             </form>
         </div>
     </div>
+
 </main>
 </div>
+
 <script>
 document.querySelectorAll('.edit-tenant-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
