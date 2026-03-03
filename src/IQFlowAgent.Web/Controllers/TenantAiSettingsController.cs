@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using IQFlowAgent.Web.Data;
 using IQFlowAgent.Web.Models;
 using IQFlowAgent.Web.Services;
@@ -39,7 +40,7 @@ public class TenantAiSettingsController : Controller
         {
             model.TenantId = tenantId;
             model.UpdatedAt = DateTime.UtcNow;
-            model.UpdatedByUserId = User.Identity?.Name;
+            model.UpdatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
             _db.TenantAiSettings.Add(model);
         }
         else
@@ -52,7 +53,7 @@ public class TenantAiSettingsController : Controller
             existing.AzureStorageConnectionString = model.AzureStorageConnectionString;
             existing.AzureStorageContainerName = model.AzureStorageContainerName;
             existing.UpdatedAt = DateTime.UtcNow;
-            existing.UpdatedByUserId = User.Identity?.Name;
+            existing.UpdatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         }
         await _db.SaveChangesAsync();
         TempData["Success"] = "AI & Storage settings saved successfully.";

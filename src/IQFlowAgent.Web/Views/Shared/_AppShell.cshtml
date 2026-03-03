@@ -34,17 +34,18 @@
         @if (userTenants != null && (userTenants.Count > 1 || User.IsInRole("SuperAdmin")))
         {
             <div style="position:relative;margin-right:12px;">
-                <button onclick="document.getElementById('tenantDropdown').classList.toggle('hidden')" style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px;">
+                <button id="tenantToggleBtn" aria-expanded="false" aria-controls="tenantDropdown" aria-haspopup="true"
+                        onclick="toggleTenantDropdown()" style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px;">
                     🏢 @(userTenants.FirstOrDefault(t => t.Id == currentTenantId)?.Name ?? "Tenant") ▾
                 </button>
-                <div id="tenantDropdown" class="hidden" style="position:absolute;right:0;top:36px;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.1);min-width:160px;z-index:200;">
+                <div id="tenantDropdown" role="menu" class="hidden" style="position:absolute;right:0;top:36px;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.1);min-width:160px;z-index:200;">
                     @foreach (var t in userTenants)
                     {
                         <form asp-controller="Tenant" asp-action="Switch" method="post" style="margin:0;">
                             @Html.AntiForgeryToken()
                             <input type="hidden" name="tenantId" value="@t.Id" />
                             <input type="hidden" name="returnUrl" value="@Context.Request.Path" />
-                            <button type="submit" style="display:block;width:100%;text-align:left;padding:8px 16px;background:none;border:none;cursor:pointer;font-size:13px;@(t.Id == currentTenantId ? "font-weight:600;" : "")">
+                            <button type="submit" role="menuitem" style="display:block;width:100%;text-align:left;padding:8px 16px;background:none;border:none;cursor:pointer;font-size:13px;@(t.Id == currentTenantId ? "font-weight:600;" : "")">
                                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:@t.Color;margin-right:6px;"></span>@t.Name
                             </button>
                         </form>
@@ -157,5 +158,22 @@
             layout.classList.toggle('sidebar-open', isOpen);
             localStorage.setItem('sidebarOpen', isOpen ? '1' : '0');
         }
+        function toggleTenantDropdown() {
+            var btn = document.getElementById('tenantToggleBtn');
+            var dropdown = document.getElementById('tenantDropdown');
+            if (!btn || !dropdown) return;
+            var isExpanded = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', isExpanded ? 'false' : 'true');
+            dropdown.classList.toggle('hidden', isExpanded);
+        }
+        // Close tenant dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            var btn = document.getElementById('tenantToggleBtn');
+            var dropdown = document.getElementById('tenantDropdown');
+            if (btn && dropdown && !btn.contains(e.target) && !dropdown.contains(e.target)) {
+                btn.setAttribute('aria-expanded', 'false');
+                dropdown.classList.add('hidden');
+            }
+        });
     </script>
     @* Main content injected by each page *@

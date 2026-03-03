@@ -30,7 +30,12 @@
                     <td style="display:flex;gap:8px;">
                         <a asp-controller="TenantAiSettings" asp-action="Index" class="btn-sm-outline" style="font-size:12px;">⚙ AI Settings</a>
                         <a asp-controller="Tenant" asp-action="Users" asp-route-id="@t.Id" class="btn-sm-outline" style="font-size:12px;">👥 Users</a>
-                        <button class="btn-sm-outline" style="font-size:12px;" onclick="openEditModal(@t.Id, @System.Text.Json.JsonSerializer.Serialize(t.Name), '@t.Color', @System.Text.Json.JsonSerializer.Serialize(t.Description ?? ""), @(t.IsActive ? "true" : "false"))">Edit</button>
+                        <button class="btn-sm-outline edit-tenant-btn" style="font-size:12px;"
+                                data-id="@t.Id"
+                                data-name="@t.Name"
+                                data-color="@t.Color"
+                                data-description="@(t.Description ?? "")"
+                                data-active="@(t.IsActive ? "true" : "false")">Edit</button>
                     </td>
                 </tr>
             }
@@ -77,13 +82,15 @@
 </main>
 </div>
 <script>
-function openEditModal(id, name, color, description, isActive) {
-    document.getElementById('editId').value = id;
-    document.getElementById('editName').value = name;
-    document.getElementById('editColor').value = color;
-    document.getElementById('editDescription').value = description;
-    document.getElementById('editIsActive').checked = isActive;
-    document.getElementById('editForm').action = '/Tenant/Edit';
-    document.getElementById('editModal').style.display = 'flex';
-}
+document.querySelectorAll('.edit-tenant-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.getElementById('editId').value = this.dataset.id;
+        document.getElementById('editName').value = this.dataset.name;
+        document.getElementById('editColor').value = this.dataset.color;
+        document.getElementById('editDescription').value = this.dataset.description;
+        document.getElementById('editIsActive').checked = this.dataset.active === 'true';
+        document.getElementById('editForm').action = '/Tenant/Edit';
+        document.getElementById('editModal').style.display = 'flex';
+    });
+});
 </script>
