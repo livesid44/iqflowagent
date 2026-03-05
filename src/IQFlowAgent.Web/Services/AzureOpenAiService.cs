@@ -164,9 +164,10 @@ public class AzureOpenAiService : IAzureOpenAiService
                 .GetProperty("content")
                 .GetString();
 
-            return string.IsNullOrWhiteSpace(content)
-                ? GenerateMockAnalysis(intake)
-                : content;
+            if (string.IsNullOrWhiteSpace(content))
+                return GenerateMockAnalysis(intake);
+
+            return InjectSourceField(content, "llm");
         }
         catch (Exception ex)
         {
@@ -269,9 +270,10 @@ public class AzureOpenAiService : IAzureOpenAiService
                 .GetProperty("content")
                 .GetString();
 
-            return string.IsNullOrWhiteSpace(content)
-                ? GenerateMockVerification(intake, tasks)
-                : content;
+            if (string.IsNullOrWhiteSpace(content))
+                return GenerateMockVerification(intake, tasks);
+
+            return InjectSourceField(content, "llm");
         }
         catch (Exception ex)
         {
@@ -667,6 +669,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         return System.Text.Json.JsonSerializer.Serialize(new
         {
+            _source = "mock",
             processName = intake.ProcessName,
             confidenceScore = 82,
             stepsIdentified = 6,
@@ -1060,4 +1063,105 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         [Note: This is a mock SOP — configure Azure Speech + OpenAI in Tenant AI Settings for AI-generated content]
         """;
+
+    // ── TestConnectionAsync ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Sends a lightweight test prompt to the configured Azure OpenAI endpoint and
+    /// returns whether it received a successful HTTP 200 response.
+    /// </summary>
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
+    {
+        var (endpoint, apiKey, deployment, apiVersion, _) = await GetAiConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, 0, "Azure OpenAI is not configured. Please fill in Endpoint, API Key and Deployment Name.");
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+            return (false, 0, $"Endpoint '{endpoint}' is not a valid URL.");
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+
+        var requestBody = new
+        {
+            messages = new object[]
+            {
+                new { role = "user", content = "Reply with the single word: OK" }
+            },
+            max_tokens  = 5,
+            temperature = 0
+        };
+
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(15);
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+            int code = (int)response.StatusCode;
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Azure OpenAI connection test succeeded for deployment '{Deployment}'.", deployment);
+                return (true, code, $"Connected successfully to deployment '{deployment}' (HTTP {code}).");
+            }
+
+            var body = await response.Content.ReadAsStringAsync();
+            _logger.LogWarning("Azure OpenAI connection test returned HTTP {Code}: {Body}", code, body);
+
+            var hint = code switch
+            {
+                401 => "Authentication failed — check your API Key.",
+                403 => "Access denied — verify subscription and permissions.",
+                404 => $"Deployment '{deployment}' not found — check the name in Azure AI Foundry.",
+                429 => "Rate limit or quota exceeded.",
+                _   => $"HTTP {code} — check your endpoint URL and credentials."
+            };
+            return (false, code, hint);
+        }
+        catch (TaskCanceledException)
+        {
+            return (false, 0, "Request timed out (15 s). Verify the endpoint URL is reachable.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Azure OpenAI connection test threw an exception.");
+            return (false, 0, $"Connection error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Injects a <c>_source</c> field into a JSON object string without full re-serialization.
+    /// Falls back to the original string if parsing fails.
+    /// </summary>
+    private static string InjectSourceField(string json, string source)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return json;
+
+            using var ms     = new System.IO.MemoryStream();
+            using var writer = new Utf8JsonWriter(ms);
+            writer.WriteStartObject();
+            writer.WriteString("_source", source);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+                prop.WriteTo(writer);
+            writer.WriteEndObject();
+            writer.Flush();
+            return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        }
+        catch
+        {
+            return json;
+        }
+    }
 }

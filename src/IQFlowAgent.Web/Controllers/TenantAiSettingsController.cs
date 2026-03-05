@@ -31,15 +31,18 @@ public class TenantAiSettingsController : Controller
 {
     private readonly ApplicationDbContext _db;
     private readonly ITenantContextService _tenantContext;
+    private readonly IAzureOpenAiService _aiService;
     private readonly ILogger<TenantAiSettingsController> _logger;
 
     public TenantAiSettingsController(
         ApplicationDbContext db,
         ITenantContextService tenantContext,
+        IAzureOpenAiService aiService,
         ILogger<TenantAiSettingsController> logger)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _aiService = aiService;
         _logger = logger;
     }
 
@@ -137,6 +140,22 @@ public class TenantAiSettingsController : Controller
         {
             _logger.LogError(ex, "TenantAiSettings/Save failed");
             return Json(new { success = false, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure OpenAI credentials by sending a lightweight prompt.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestConnection()
+    {
+        try
+        {
+            var (success, statusCode, message) = await _aiService.TestConnectionAsync();
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
         }
     }
 
