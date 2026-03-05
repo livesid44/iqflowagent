@@ -1,3 +1,4 @@
+using IQFlowAgent.Web;
 using IQFlowAgent.Web.Data;
 using IQFlowAgent.Web.Hubs;
 using IQFlowAgent.Web.Models;
@@ -65,6 +66,20 @@ builder.Services.AddSession(options =>
 });
 
 builder.Services.AddControllersWithViews();
+
+// Allow file uploads up to 250 MB (intake documents, audio/video recordings).
+// Must be set on both Kestrel and the MVC form-options layer.
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.Limits.MaxRequestBodySize = AppConstants.MaxUploadBytes;
+});
+
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(formOptions =>
+{
+    formOptions.MultipartBodyLengthLimit = AppConstants.MaxUploadBytes;
+    formOptions.ValueLengthLimit         = int.MaxValue;
+    formOptions.MultipartHeadersLengthLimit = int.MaxValue;
+});
 
 var app = builder.Build();
 

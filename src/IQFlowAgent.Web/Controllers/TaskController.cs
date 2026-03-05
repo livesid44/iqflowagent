@@ -233,6 +233,8 @@ public class TaskController : Controller
     // ── POST /Task/UploadArtifact/5 ──────────────────────────────────────────
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [RequestSizeLimit(AppConstants.MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AppConstants.MaxUploadBytes)]
     public async Task<IActionResult> UploadArtifact(int id, IFormFile artifact)
     {
         var task = await _db.IntakeTasks.FindAsync(id);

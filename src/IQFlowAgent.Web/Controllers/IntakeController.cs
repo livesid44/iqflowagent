@@ -96,6 +96,8 @@ public class IntakeController : Controller
     // POST /Intake/Create — save intake + trigger async RAG analysis
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [RequestSizeLimit(AppConstants.MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AppConstants.MaxUploadBytes)]
     public async Task<IActionResult> Create(IntakeViewModel model)
     {
         if (!ModelState.IsValid)
@@ -353,6 +355,8 @@ public class IntakeController : Controller
     // POST /Intake/Edit/5 — save edits (blocked for Closed intakes)
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [RequestSizeLimit(AppConstants.MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AppConstants.MaxUploadBytes)]
     public async Task<IActionResult> Edit(int id, IntakeEditViewModel model)
     {
         if (!ModelState.IsValid)
