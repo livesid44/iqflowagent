@@ -1,0 +1,11 @@
+namespace IQFlowAgent.Web.Models;
+
+public class MasterDepartment
+{
+    public int Id { get; set; }
+    public int TenantId { get; set; } = 1;
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

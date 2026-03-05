@@ -1,0 +1,72 @@
+@using IQFlowAgent.Web.Models
+@model List<IQFlowAgent.Web.Models.UserTenant>
+@{
+    ViewData["Title"] = "Tenant Users";
+    var tenant = ViewBag.Tenant as Tenant;
+    var allUsers = ViewBag.AllUsers as List<ApplicationUser> ?? new();
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "tenants" } })
+<main class="app-main">
+    <div class="page-title">Users — @tenant?.Name</div>
+    <div class="page-subtitle">Manage users assigned to this tenant</div>
+    @if (TempData["Success"] != null) { <div class="alert-success-bar">@TempData["Success"]</div> }
+
+    <div style="display:flex;gap:12px;margin-bottom:20px;">
+        <a asp-action="Index" class="btn-secondary">← Back to Tenants</a>
+        <button class="btn-primary" onclick="document.getElementById('assignModal').style.display='flex'">+ Assign User</button>
+    </div>
+
+    <div class="data-card">
+        <table class="data-table">
+            <thead><tr><th>User</th><th>Email</th><th>Tenant Role</th><th>Default</th><th>Assigned</th><th>Actions</th></tr></thead>
+            <tbody>
+            @foreach (var ut in Model)
+            {
+                <tr>
+                    <td>@ut.User?.FullName (@ut.User?.UserName)</td>
+                    <td>@ut.User?.Email</td>
+                    <td><span class="badge-role">@ut.TenantRole</span></td>
+                    <td>@(ut.IsDefault ? "✓" : "")</td>
+                    <td>@ut.AssignedAt.ToString("dd MMM yyyy")</td>
+                    <td>
+                        <form asp-action="RemoveUser" method="post" style="display:inline">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="tenantId" value="@tenant?.Id" />
+                            <input type="hidden" name="userId" value="@ut.UserId" />
+                            <button type="submit" class="btn-sm-danger" onclick="return confirm('Remove user from tenant?')">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            @if (!Model.Any()) { <tr><td colspan="6" style="text-align:center;color:#999">No users assigned yet.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Assign User Modal -->
+    <div id="assignModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
+        <div style="background:#fff;padding:32px;border-radius:8px;min-width:400px;">
+            <h3 style="margin:0 0 20px">Assign User to @tenant?.Name</h3>
+            <form asp-action="AssignUser" method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="tenantId" value="@tenant?.Id" />
+                <div style="margin-bottom:12px;"><label>User</label>
+                    <select name="userId" class="form-input">
+                        @foreach (var u in allUsers) { <option value="@u.Id">@u.FullName (@u.UserName)</option> }
+                    </select>
+                </div>
+                <div style="margin-bottom:20px;"><label>Role</label>
+                    <select name="tenantRole" class="form-input">
+                        <option value="User">User</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </div>
+                <div style="display:flex;gap:12px;">
+                    <button type="submit" class="btn-primary">Assign</button>
+                    <button type="button" class="btn-secondary" onclick="document.getElementById('assignModal').style.display='none'">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</main>
+</div>

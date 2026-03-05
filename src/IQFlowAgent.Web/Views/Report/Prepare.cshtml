@@ -1,0 +1,322 @@
+@using IQFlowAgent.Web.Models
+@model List<ReportFieldStatus>
+
+@{
+    var intake = ViewBag.Intake as IQFlowAgent.Web.Models.IntakeRecord;
+    var existingReport = ViewBag.ExistingReport as IQFlowAgent.Web.Models.FinalReport;
+    int openTaskCount = ViewBag.OpenTaskCount ?? 0;
+    var intakeId = intake?.Id ?? 0;
+
+    int totalFields     = Model.Count;
+    int availableFields = Model.Count(f => f.Status == "Available");
+    int naFields        = Model.Count(f => f.IsNA || f.Status == "NA");
+    int missingFields   = Model.Count(f => f.Status is "Missing" or "Pending");
+    int taskCreated     = Model.Count(f => f.Status == "TaskCreated");
+    bool allReady       = totalFields > 0 && missingFields == 0 && taskCreated == 0;
+    bool hasFields      = totalFields > 0;
+
+    var sections = Model.GroupBy(f => f.Section).OrderBy(g => g.Key);
+}
+
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "report" } })
+
+<style>
+    /* ── Empty-state (no intake selected) ─────────────────────────────── */
+    .empty-state-box {
+        text-align: center; padding: 64px 32px;
+        background: #fff; border-radius: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    }
+    .empty-state-box .es-icon { font-size: 3rem; margin-bottom: 16px; }
+    .empty-state-box h3 { font-size: 1.1rem; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; }
+    .empty-state-box p  { font-size: 0.88rem; color: #6b7280; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+    .page-title { font-size: 1.4rem; font-weight: 700; color: #1a1a2e; }
+    .page-subtitle { font-size: 0.85rem; color: #6b7280; margin-top: 2px; }
+
+    .progress-banner { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 24px; margin-bottom: 24px; display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+    .prog-stat { text-align: center; }
+    .prog-stat-num { font-size: 1.6rem; font-weight: 800; }
+    .prog-stat-lbl { font-size: 0.72rem; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }
+    .num-available { color: #10b981; }
+    .num-na        { color: #6b7280; }
+    .num-missing   { color: #ef4444; }
+    .num-task      { color: #f59e0b; }
+    .prog-bar-wrap { flex: 1; min-width: 200px; }
+    .prog-bar-bg { background: #f3f4f6; border-radius: 8px; height: 10px; overflow: hidden; }
+    .prog-bar-fill { height: 100%; border-radius: 8px; background: linear-gradient(90deg,#10b981,#059669); transition: width .4s; }
+
+    .section-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+    .section-header { background: #f9fafb; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
+    .section-title { font-weight: 700; font-size: 0.9rem; color: #1a1a2e; }
+    .section-counts { font-size: 0.76rem; color: #6b7280; }
+
+    .field-row { display: grid; grid-template-columns: 200px 1fr 100px 180px; gap: 12px; align-items: start; padding: 14px 20px; border-bottom: 1px solid #f3f4f6; }
+    .field-row:last-child { border-bottom: none; }
+    .field-label { font-size: 0.82rem; font-weight: 600; color: #374151; padding-top: 4px; }
+    .field-value { font-size: 0.82rem; color: #4b5563; }
+    .field-value textarea { width: 100%; min-height: 60px; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 10px; font-size: 0.81rem; font-family: inherit; resize: vertical; }
+    .field-notes  { font-size: 0.74rem; color: #9ca3af; margin-top: 4px; font-style: italic; }
+
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.71rem; font-weight: 700; text-transform: uppercase; }
+    .badge-available { background: #d1fae5; color: #065f46; }
+    .badge-missing   { background: #fee2e2; color: #991b1b; }
+    .badge-na        { background: #f3f4f6; color: #6b7280; }
+    .badge-pending   { background: #fef3c7; color: #92400e; }
+    .badge-task      { background: #ede9fe; color: #5b21b6; }
+
+    .action-btns { display: flex; flex-direction: column; gap: 6px; }
+    .btn-sm { padding: 4px 10px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
+    .btn-save-val   { background: #2563eb; color: #fff; }
+    .btn-mark-na    { background: #6b7280; color: #fff; }
+    .btn-undo-na    { background: #d97706; color: #fff; }
+    .btn-task       { background: #7c3aed; color: #fff; }
+
+    .toolbar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+    .btn-analyze  { background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; font-size: 0.85rem; }
+    .btn-generate { background: linear-gradient(90deg,#10b981,#059669); color: #fff; padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; font-size: 0.85rem; }
+    .btn-generate:disabled { background: #d1d5db; cursor: not-allowed; }
+    .btn-back { background: #f3f4f6; color: #374151; padding: 10px 16px; border-radius: 8px; border: 1px solid #e5e7eb; font-weight: 600; font-size: 0.85rem; text-decoration: none; }
+
+    .alert { padding: 12px 18px; border-radius: 8px; margin-bottom: 18px; font-size: 0.84rem; }
+    .alert-success { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+    .alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .alert-info    { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+    .alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+
+    .report-ready-box { background: linear-gradient(135deg,#ecfdf5 0%,#d1fae5 100%); border: 1px solid #6ee7b7; border-radius: 10px; padding: 20px 24px; margin-bottom: 24px; }
+    .report-ready-box h3 { margin: 0 0 8px; color: #065f46; font-size: 1rem; }
+    .report-ready-box p { margin: 0 0 16px; font-size: 0.84rem; color: #047857; }
+
+    .existing-report-box { background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 16px 20px; margin-bottom: 20px; font-size: 0.84rem; color: #166534; }
+
+    @@media (max-width: 900px) {
+        .field-row { grid-template-columns: 1fr; }
+    }
+</style>
+
+<main class="app-main">
+
+    @* ── Intake Picker (always visible) ──────────────────────────────────── *@
+    @await Html.PartialAsync("_IntakePicker")
+
+    @if (intake == null)
+    {
+        <div class="empty-state-box">
+            <div class="es-icon">📋</div>
+            <h3>Select an Intake to Prepare the BARTOK DD Report</h3>
+            <p>Choose an intake from the picker above to view or generate the final report for that process.</p>
+        </div>
+    }
+    else
+    {
+    <div class="page-header">
+        <div>
+            <div class="page-title">📋 BARTOK DD Report Preparation</div>
+            <div class="page-subtitle">
+                Intake: <strong>@intake.IntakeId</strong> — @intake.ProcessName
+            </div>
+        </div>
+        <a href="/Task/Index?selectedId=@intakeId" class="btn-back">← Task Board</a>
+    </div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success">✅ @TempData["Success"]</div>
+    }
+    @if (TempData["Error"] != null)
+    {
+        <div class="alert alert-error">❌ @TempData["Error"]</div>
+    }
+
+    @if (openTaskCount > 0)
+    {
+        <div class="alert alert-warning">
+            ⚠️ <strong>@openTaskCount open task(s)</strong> remain for this intake.
+            It is recommended to close all tasks before generating the final report,
+            as task artifacts are used to populate report fields.
+            <a href="/Task/Index?selectedId=@intakeId" style="color:#92400e;font-weight:700;">View Tasks →</a>
+        </div>
+    }
+
+    @if (existingReport != null)
+    {
+        <div class="existing-report-box">
+            ✅ A final report was previously generated on <strong>@existingReport.GeneratedAt.ToString("dd MMM yyyy HH:mm")</strong> —
+            <strong>@existingReport.ReportFileName</strong>
+            @if (existingReport.FilePath.StartsWith("http"))
+            {
+                <a href="@existingReport.FilePath" target="_blank" style="color:#166534;font-weight:700;margin-left:8px;">☁️ Download from Blob →</a>
+            }
+            else
+            {
+                <a href="/Report/Download?intakeId=@intakeId" style="color:#166534;font-weight:700;margin-left:8px;">⬇️ Download →</a>
+            }
+        </div>
+    }
+
+    @if (!hasFields)
+    {
+        <div class="alert alert-info">
+            ℹ️ No field analysis has been run yet.
+            Click <strong>"Run AI Field Analysis"</strong> to let the AI determine which BARTOK template fields can be populated from the available intake data and task artifacts.
+        </div>
+    }
+    else
+    {
+        <!-- Progress Banner -->
+        <div class="progress-banner">
+            <div class="prog-stat"><div class="prog-stat-num">@totalFields</div><div class="prog-stat-lbl">Total Fields</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-available">@availableFields</div><div class="prog-stat-lbl">Available</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-na">@naFields</div><div class="prog-stat-lbl">Marked N/A</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-missing">@missingFields</div><div class="prog-stat-lbl">Missing</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-task">@taskCreated</div><div class="prog-stat-lbl">Tasks Created</div></div>
+            <div class="prog-bar-wrap">
+                @{ var pct = totalFields > 0 ? ((availableFields + naFields) * 100 / totalFields) : 0; }
+                <div style="font-size:0.78rem;color:#6b7280;margin-bottom:4px;">@pct% ready</div>
+                <div class="prog-bar-bg"><div class="prog-bar-fill" style="width:@pct%"></div></div>
+            </div>
+        </div>
+
+        @if (allReady)
+        {
+            <div class="report-ready-box">
+                <h3>🎉 All fields are ready! You can now generate the final report.</h3>
+                <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated, uploaded to storage, and the intake will be marked as <strong>Closed</strong>.</p>
+                <p style="font-size:0.82rem;color:#047857;">Click the <strong>"Generate Final Report &amp; Close Intake"</strong> button below.</p>
+            </div>
+        }
+    }
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <form method="post" action="/Report/AnalyzeFields">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="intakeId" value="@intakeId" />
+            <button type="submit" class="btn-analyze">🤖 @(hasFields ? "Re-run AI Field Analysis" : "Run AI Field Analysis")</button>
+        </form>
+        @if (hasFields)
+        {
+            if (allReady)
+            {
+                <form method="post" action="/Report/Generate" onsubmit="return confirm('Generate final BARTOK DD report and close this intake? This action cannot be undone.');">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="intakeId" value="@intakeId" />
+                    <button type="submit" class="btn-generate">📄 Generate Final Report &amp; Close Intake</button>
+                </form>
+            }
+            else
+            {
+                <button class="btn-generate" disabled title="@missingFields missing field(s) must be resolved first">
+                    📄 Generate Final Report
+                </button>
+            }
+        }
+    </div>
+
+    @if (hasFields)
+    {
+        foreach (var sectionGroup in sections)
+        {
+            var sAvail   = sectionGroup.Count(f => f.Status == "Available");
+            var sMissing = sectionGroup.Count(f => f.Status is "Missing" or "Pending" or "TaskCreated");
+            var sNA      = sectionGroup.Count(f => f.IsNA);
+
+            <div class="section-card">
+                <div class="section-header">
+                    <div class="section-title">@sectionGroup.Key</div>
+                    <div class="section-counts">
+                        <span style="color:#10b981">✓ @sAvail ready</span>
+                        @if (sNA > 0) { <span style="margin-left:8px;color:#6b7280">N/A: @sNA</span> }
+                        @if (sMissing > 0) { <span style="margin-left:8px;color:#ef4444">⚠ @sMissing missing</span> }
+                    </div>
+                </div>
+
+                @foreach (var field in sectionGroup)
+                {
+                    <div class="field-row">
+                        <!-- Label + status -->
+                        <div>
+                            <div class="field-label">@field.FieldLabel</div>
+                            <div style="margin-top:6px;">
+                                @{
+                                    var badgeClass = field.IsNA ? "badge-na" : field.Status switch {
+                                        "Available"   => "badge-available",
+                                        "Missing"     => "badge-missing",
+                                        "Pending"     => "badge-pending",
+                                        "TaskCreated" => "badge-task",
+                                        "NA"          => "badge-na",
+                                        _             => "badge-pending"
+                                    };
+                                    var badgeText = field.IsNA ? "N/A" : field.Status;
+                                }
+                                <span class="badge @badgeClass">@badgeText</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(field.LinkedTaskId))
+                            {
+                                <div style="font-size:0.73rem;color:#7c3aed;margin-top:4px;">Task: @field.LinkedTaskId</div>
+                            }
+                        </div>
+
+                        <!-- Value editor -->
+                        <div class="field-value">
+                            <form method="post" action="/Report/SetValue">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="fieldStatusId" value="@field.Id" />
+                                <textarea name="fillValue" rows="2" placeholder="@field.TemplatePlaceholder">@field.FillValue</textarea>
+                                <div style="margin-top:6px;">
+                                    <button type="submit" class="btn-sm btn-save-val">💾 Save Value</button>
+                                </div>
+                            </form>
+                            @if (!string.IsNullOrWhiteSpace(field.Notes))
+                            {
+                                <div class="field-notes">ℹ️ @field.Notes</div>
+                            }
+                        </div>
+
+                        <!-- Status badge column -->
+                        <div style="padding-top:4px;">
+                            @if (field.AnalyzedAt.HasValue)
+                            {
+                                <div style="font-size:0.7rem;color:#9ca3af;">Analyzed<br/>@field.AnalyzedAt.Value.ToString("dd MMM HH:mm")</div>
+                            }
+                        </div>
+
+                        <!-- Action buttons -->
+                        <div class="action-btns">
+                            @if (!field.IsNA)
+                            {
+                                <form method="post" action="/Report/MarkNA">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="fieldStatusId" value="@field.Id" />
+                                    <input type="hidden" name="isNA" value="true" />
+                                    <button type="submit" class="btn-sm btn-mark-na">Mark N/A</button>
+                                </form>
+                            }
+                            else
+                            {
+                                <form method="post" action="/Report/MarkNA">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="fieldStatusId" value="@field.Id" />
+                                    <input type="hidden" name="isNA" value="false" />
+                                    <button type="submit" class="btn-sm btn-undo-na">Undo N/A</button>
+                                </form>
+                            }
+
+                            @if (field.Status is "Missing" or "Pending" && !field.IsNA)
+                            {
+                                <form method="post" action="/Report/CreateTaskForField">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="fieldStatusId" value="@field.Id" />
+                                    <button type="submit" class="btn-sm btn-task">+ Create Task</button>
+                                </form>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+    } @* end else (intake selected) *@
+</main>
+</div>@* close app-layout *@

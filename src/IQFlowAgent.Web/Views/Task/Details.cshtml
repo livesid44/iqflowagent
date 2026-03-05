@@ -1,0 +1,476 @@
+@model IQFlowAgent.Web.Models.IntakeTask
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Task: " + Model.TaskId;
+    ViewData["ActivePage"] = "tasks";
+    var isOverdue = Model.DueDate < DateTime.UtcNow && Model.Status is "Open" or "In Progress";
+    var allStatuses = new[] { "Open", "In Progress", "Completed", "Cancelled" };
+}
+
+<style>
+    /* ── Task header card ─────────────────────────────────── */
+    .task-header-card {
+        background:#fff; border-radius:14px; padding:26px 28px;
+        box-shadow:0 2px 12px rgba(0,0,0,0.08); margin-bottom:24px;
+        border-left:5px solid #e31837;
+    }
+    .task-header-card.pri-High { border-left-color:#e31837; }
+    .task-header-card.pri-Medium { border-left-color:#d97706; }
+    .task-header-card.pri-Low { border-left-color:#059669; }
+
+    .th-toprow { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+    .task-title-main { font-size:1.35rem; font-weight:800; color:#1a2a5e; margin-bottom:6px; }
+    .task-id-chip { font-family:monospace; font-size:0.8rem; color:#888; }
+    .task-meta-row { display:flex; gap:14px; flex-wrap:wrap; margin-top:14px; font-size:0.84rem; color:#555; }
+    .task-meta-item { display:flex; align-items:center; gap:5px; }
+
+    .badge-status { padding:5px 14px; border-radius:20px; font-size:0.78rem; font-weight:700; }
+    .status-Open { background:#e8ecf7; color:#1a2a5e; }
+    .status-InProgress { background:#fef3c7; color:#d97706; }
+    .status-Completed { background:#d1fae5; color:#059669; }
+    .status-Cancelled { background:#f3f4f6; color:#6b7280; }
+    .badge-na { background:#f0fdf4; color:#15803d; border:1.5px solid #86efac; padding:4px 12px; border-radius:20px; font-size:0.78rem; font-weight:700; }
+    .na-reason-box { background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:10px 14px; font-size:0.84rem; color:#166534; margin-top:8px; }
+
+    .badge-priority { padding:5px 12px; border-radius:20px; font-size:0.75rem; font-weight:700; text-transform:uppercase; }
+    .badge-priority.High { background:#fde8ec; color:#e31837; }
+    .badge-priority.Medium { background:#fef3c7; color:#d97706; }
+    .badge-priority.Low { background:#d1fae5; color:#059669; }
+
+    .due-chip { font-size:0.82rem; font-weight:600; }
+    .due-chip.overdue { color:#e31837; }
+    .due-chip.ok { color:#059669; }
+
+    /* ── Two-column layout ────────────────────────────────── */
+    .details-layout { display:flex; gap:22px; align-items:flex-start; }
+    .details-main { flex:1; min-width:0; }
+    .details-sidebar { width:300px; flex-shrink:0; }
+
+    /* ── Section cards ────────────────────────────────────── */
+    .section-card {
+        background:#fff; border-radius:12px; padding:22px 24px;
+        box-shadow:0 2px 10px rgba(0,0,0,0.07); margin-bottom:18px;
+    }
+    .section-card h4 {
+        font-size:0.92rem; font-weight:700; color:#1a2a5e;
+        margin-bottom:16px; display:flex; align-items:center; gap:7px;
+        padding-bottom:10px; border-bottom:1px solid #f0f0f0;
+    }
+
+    /* ── Action log timeline ──────────────────────────────── */
+    .timeline { position:relative; padding-left:30px; }
+    .timeline::before {
+        content:''; position:absolute; left:9px; top:0; bottom:0;
+        width:2px; background:#e5e7eb;
+    }
+    .timeline-item { position:relative; margin-bottom:18px; }
+    .timeline-dot {
+        position:absolute; left:-30px; top:3px;
+        width:18px; height:18px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center;
+        font-size:0.65rem; flex-shrink:0;
+    }
+    .dot-status { background:#1a2a5e; color:#fff; }
+    .dot-comment { background:#059669; color:#fff; }
+    .dot-artifact { background:#7c3aed; color:#fff; }
+
+    .timeline-bubble {
+        background:#f8f9fc; border:1px solid #e5e7eb; border-radius:10px;
+        padding:10px 14px; font-size:0.84rem;
+    }
+    .timeline-bubble.status-change { background:#eef1fb; }
+    .timeline-meta { font-size:0.72rem; color:#aaa; margin-top:5px; display:flex; gap:8px; align-items:center; }
+    .timeline-by { font-weight:600; color:#555; }
+
+    .status-arrow {
+        display:inline-flex; align-items:center; gap:5px; font-weight:600; font-size:0.82rem;
+    }
+    .s-old { text-decoration:line-through; color:#aaa; }
+    .s-new { color:#1a2a5e; }
+
+    /* ── Action panels (right sidebar) ───────────────────── */
+    .action-panel { background:#fff; border-radius:12px; padding:18px 20px;
+        box-shadow:0 2px 10px rgba(0,0,0,0.07); margin-bottom:16px; }
+    .action-panel h5 { font-size:0.88rem; font-weight:700; color:#1a2a5e;
+        margin-bottom:14px; display:flex; align-items:center; gap:6px; }
+    .action-panel select, .action-panel textarea {
+        width:100%; border:1px solid #e0e0e0; border-radius:8px;
+        padding:9px 12px; font-size:0.84rem; font-family:inherit;
+        outline:none; box-sizing:border-box;
+    }
+    .action-panel select:focus, .action-panel textarea:focus { border-color:#1a2a5e; }
+    .action-panel textarea { resize:vertical; min-height:80px; }
+    .btn-action {
+        width:100%; background:#e31837; color:#fff; border:none;
+        border-radius:8px; padding:9px; font-size:0.86rem;
+        font-weight:600; cursor:pointer; margin-top:10px;
+    }
+    .btn-action:hover { background:#c01530; }
+    .btn-action.secondary { background:#1a2a5e; }
+    .btn-action.secondary:hover { background:#142248; }
+    .btn-action.purple { background:#7c3aed; }
+    .btn-action.purple:hover { background:#6d28d9; }
+
+    /* ── Upload zone ──────────────────────────────────────── */
+    .drop-zone {
+        border:2px dashed #d1d5db; border-radius:8px; padding:18px;
+        text-align:center; cursor:pointer; transition:border-color 0.2s;
+        font-size:0.82rem; color:#888; background:#fafafa; margin-bottom:10px;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color:#1a2a5e; background:#eef1fb; }
+    .drop-zone i { display:block; font-size:1.5rem; margin-bottom:6px; color:#aaa; }
+    #artifactFile { display:none; }
+
+    /* ── Document list ────────────────────────────────────── */
+    .doc-row { display:flex; align-items:center; gap:8px; padding:8px 0;
+        border-bottom:1px solid #f3f4f6; font-size:0.83rem; }
+    .doc-row:last-child { border-bottom:none; }
+    .doc-row i { color:#e31837; flex-shrink:0; }
+    .doc-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .doc-size { color:#aaa; font-size:0.76rem; white-space:nowrap; }
+
+    /* ── Description ──────────────────────────────────────── */
+    .desc-box { background:#f8f9fc; border-radius:8px; padding:14px 16px;
+        font-size:0.88rem; line-height:1.6; color:#444; margin-bottom:0; }
+
+    /* ── Toast alert ──────────────────────────────────────── */
+    .toast-msg { padding:10px 16px; border-radius:8px; margin-bottom:16px; font-size:0.87rem; }
+    .toast-success { background:#d1fae5; color:#065f46; }
+    .toast-info    { background:#dbeafe; color:#1d4ed8; }
+    .toast-error { background:#fde8ec; color:#9b1c1c; }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <!-- breadcrumb -->
+    <div style="font-size:0.82rem;color:#888;margin-bottom:14px;">
+        <a asp-controller="Intake" asp-action="Index" style="color:#1a2a5e;text-decoration:none;">Intakes</a>
+        <span class="mx-1">›</span>
+        <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@Model.IntakeRecordId"
+           style="color:#1a2a5e;text-decoration:none;">@Model.IntakeRecord.IntakeId</a>
+        <span class="mx-1">›</span>
+        <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.IntakeRecordId"
+           style="color:#1a2a5e;text-decoration:none;">Tasks</a>
+        <span class="mx-1">›</span>
+        <span>@Model.TaskId</span>
+    </div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="toast-msg toast-success"><i class="bi bi-check-circle-fill me-2"></i>@TempData["Success"]</div>
+    }
+    @if (TempData["Info"] != null)
+    {
+        <div class="toast-msg toast-info"><i class="bi bi-info-circle-fill me-2"></i>@TempData["Info"]</div>
+    }
+    @if (TempData["Error"] != null)
+    {
+        <div class="toast-msg toast-error"><i class="bi bi-x-circle-fill me-2"></i>@TempData["Error"]</div>
+    }
+
+    <!-- ── Task header ──────────────────────────────────────────── -->
+    <div class="task-header-card pri-@Model.Priority">
+        <div class="th-toprow">
+            <div>
+                <div class="task-id-chip">@Model.TaskId</div>
+                <div class="task-title-main">@Model.Title</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <span class="badge-priority @Model.Priority">@Model.Priority</span>
+                <span class="badge-status status-@Model.Status.Replace(" ","")">@Model.Status</span>
+                @if (Model.IsNotApplicable)
+                {
+                    <span class="badge-na" title="Bypassed from AI closure verification">⊘ Not Applicable</span>
+                }
+            </div>
+        </div>
+        <div class="task-meta-row">
+            <span class="task-meta-item">
+                <i class="bi bi-inbox"></i>
+                <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@Model.IntakeRecordId"
+                   style="color:#1a2a5e;font-weight:600;text-decoration:none;">
+                    @Model.IntakeRecord.IntakeId — @Model.IntakeRecord.ProcessName
+                </a>
+            </span>
+            <span class="task-meta-item">
+                <i class="bi bi-person"></i> @Model.Owner
+            </span>
+            <span class="task-meta-item due-chip @(isOverdue ? "overdue" : "ok")">
+                <i class="bi bi-clock"></i>
+                Due @Model.DueDate.ToLocalTime().ToString("ddd MMM d, HH:mm")
+                @if (isOverdue) { <span>(Overdue)</span> }
+            </span>
+            <span class="task-meta-item" style="margin-left:auto;color:#aaa;font-size:0.78rem;">
+                Created @Model.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm") by @(Model.CreatedByUserId ?? "system")
+            </span>
+        </div>
+        @if (Model.IsNotApplicable && !string.IsNullOrWhiteSpace(Model.NaReason))
+        {
+            <div class="na-reason-box">⊘ N/A Reason: @Model.NaReason</div>
+        }
+    </div>
+
+    <!-- ── Two-column body ─────────────────────────────────────── -->
+    <div class="details-layout">
+
+        <!-- ── LEFT: Action log + description + documents ─── -->
+        <div class="details-main">
+
+            <!-- Description -->
+            @if (!string.IsNullOrWhiteSpace(Model.Description))
+            {
+                <div class="section-card">
+                    <h4><i class="bi bi-text-paragraph"></i> Description</h4>
+                    <div class="desc-box">@Model.Description</div>
+                </div>
+            }
+
+            <!-- Action Log Timeline -->
+            <div class="section-card">
+                <h4><i class="bi bi-activity"></i> Action Log
+                    <span style="background:#e8ecf7;color:#1a2a5e;border-radius:20px;padding:2px 9px;font-size:0.76rem;margin-left:6px;">
+                        @Model.ActionLogs.Count
+                    </span>
+                </h4>
+                @if (!Model.ActionLogs.Any())
+                {
+                    <div style="text-align:center;color:#ccc;font-size:0.85rem;padding:20px 0;">
+                        <i class="bi bi-activity" style="font-size:1.8rem;display:block;margin-bottom:8px;"></i>
+                        No activity yet.
+                    </div>
+                }
+                else
+                {
+                    <div class="timeline">
+                        @foreach (var log in Model.ActionLogs)
+                        {
+                            var dotClass = log.ActionType switch {
+                                "StatusChange" => "dot-status",
+                                "ArtifactUploaded" => "dot-artifact",
+                                _ => "dot-comment"
+                            };
+                            var dotIcon = log.ActionType switch {
+                                "StatusChange" => "bi-arrow-left-right",
+                                "ArtifactUploaded" => "bi-paperclip",
+                                _ => "bi-chat-text"
+                            };
+                            <div class="timeline-item">
+                                <div class="timeline-dot @dotClass">
+                                    <i class="bi @dotIcon"></i>
+                                </div>
+                                <div class="timeline-bubble @(log.ActionType == "StatusChange" ? "status-change" : "")">
+                                    @if (log.ActionType == "StatusChange")
+                                    {
+                                        <div class="status-arrow">
+                                            @if (log.OldStatus != null)
+                                            {
+                                                <span class="s-old">@log.OldStatus</span>
+                                                <i class="bi bi-arrow-right" style="color:#aaa;"></i>
+                                            }
+                                            <span class="s-new">@log.NewStatus</span>
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(log.Comment))
+                                    {
+                                        <div style="margin-top:@(log.ActionType == "StatusChange" ? "5px" : "0");">
+                                            @log.Comment
+                                        </div>
+                                    }
+                                    <div class="timeline-meta">
+                                        <span class="timeline-by">@(log.CreatedByName ?? log.CreatedByUserId ?? "System")</span>
+                                        <span>·</span>
+                                        <span>@log.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</span>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <!-- Uploaded Documents / Artifacts -->
+            @if (Model.Documents.Any())
+            {
+                <div class="section-card">
+                    <h4><i class="bi bi-paperclip"></i> Artifacts
+                        <span style="background:#e8ecf7;color:#1a2a5e;border-radius:20px;padding:2px 9px;font-size:0.76rem;margin-left:6px;">
+                            @Model.Documents.Count
+                        </span>
+                    </h4>
+                    @foreach (var doc in Model.Documents)
+                    {
+                        var isBlobUrl = doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+                        <div class="doc-row">
+                            <i class="bi bi-file-earmark-arrow-down"></i>
+                            @if (isBlobUrl)
+                            {
+                                <a href="@doc.FilePath" target="_blank" rel="noopener noreferrer"
+                                   class="doc-name" style="color:#1a2a5e;text-decoration:none;">
+                                    @doc.FileName
+                                </a>
+                                <span style="color:#4b7bec;font-size:0.74rem;">
+                                    <i class="bi bi-cloud-check-fill"></i>
+                                </span>
+                            }
+                            else
+                            {
+                                <a href="@doc.FilePath" class="doc-name" style="color:#1a2a5e;text-decoration:none;">
+                                    @doc.FileName
+                                </a>
+                            }
+                            @if (doc.FileSize.HasValue)
+                            {
+                                <span class="doc-size">@((doc.FileSize.Value / 1024.0).ToString("F1")) KB</span>
+                            }
+                            <span style="font-size:0.72rem;color:#aaa;">
+                                @doc.UploadedAt.ToLocalTime().ToString("MMM d")
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <!-- ── RIGHT: Action panels ──────────────────────── -->
+        <div class="details-sidebar">
+
+            <!-- Update Status -->
+            <div class="action-panel">
+                <h5><i class="bi bi-arrow-left-right"></i> Update Status</h5>
+                <form asp-action="UpdateStatus" asp-route-id="@Model.Id" method="post">
+                    @Html.AntiForgeryToken()
+                    <select name="newStatus">
+                        @foreach (var s in allStatuses)
+                        {
+                            if (s == Model.Status)
+                            {
+                                <option value="@s" selected>@s</option>
+                            }
+                            else
+                            {
+                                <option value="@s">@s</option>
+                            }
+                        }
+                    </select>
+                    <textarea name="comment" placeholder="Optional note about this status change…"
+                              style="margin-top:10px;"></textarea>
+                    <button type="submit" class="btn-action">
+                        <i class="bi bi-check2 me-1"></i> Update Status
+                    </button>
+                </form>
+            </div>
+
+            <!-- Add Comment -->
+            <div class="action-panel">
+                <h5><i class="bi bi-chat-text"></i> Add Comment</h5>
+                <form asp-action="AddComment" asp-route-id="@Model.Id" method="post">
+                    @Html.AntiForgeryToken()
+                    <textarea name="comment" placeholder="Write a comment…" required></textarea>
+                    <button type="submit" class="btn-action secondary">
+                        <i class="bi bi-send me-1"></i> Post Comment
+                    </button>
+                </form>
+            </div>
+
+            <!-- Upload Artifact -->
+            <div class="action-panel">
+                <h5><i class="bi bi-paperclip"></i> Upload Artifact</h5>
+                <form asp-action="UploadArtifact" asp-route-id="@Model.Id" method="post"
+                      enctype="multipart/form-data" id="artifactForm">
+                    @Html.AntiForgeryToken()
+                    <div class="drop-zone" id="dropZone" onclick="document.getElementById('artifactFile').click()">
+                        <i class="bi bi-cloud-arrow-up"></i>
+                        <span id="dropLabel">Click or drag file here</span>
+                    </div>
+                    <input type="file" name="artifact" id="artifactFile"
+                           onchange="fileChosen(this)" />
+                    <button type="submit" class="btn-action purple">
+                        <i class="bi bi-upload me-1"></i> Upload
+                    </button>
+                </form>
+            </div>
+
+            <!-- Mark as Not Applicable -->
+            @if (!Model.IsNotApplicable)
+            {
+                <div class="action-panel">
+                    <h5 style="color:#15803d;">⊘ Mark as Not Applicable</h5>
+                    <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">
+                        NA tasks are bypassed from AI closure verification and treated as closed.
+                    </p>
+                    <form asp-action="MarkNotApplicable" asp-route-id="@Model.Id" method="post">
+                        @Html.AntiForgeryToken()
+                        <textarea name="naReason" placeholder="Reason (optional)…"
+                                  style="margin-bottom:0;"></textarea>
+                        <button type="submit" class="btn-action"
+                                style="background:#15803d;"
+                                onclick="return confirm('Mark this task as Not Applicable? It will be excluded from AI closure verification.')">
+                            ⊘ Mark as N/A
+                        </button>
+                    </form>
+                </div>
+            }
+            else
+            {
+                <div class="action-panel" style="border-left:3px solid #86efac;">
+                    <h5 style="color:#15803d;">⊘ Not Applicable</h5>
+                    <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">
+                        This task is excluded from AI closure verification.
+                    </p>
+                    <form asp-action="UndoNotApplicable" asp-route-id="@Model.Id" method="post">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn-action" style="background:#6b7280;">
+                            ↩ Undo N/A
+                        </button>
+                    </form>
+                </div>
+            }
+
+            <!-- Task info summary -->
+            <div class="action-panel" style="font-size:0.82rem;color:#555;background:#f8f9fc;">
+                <h5><i class="bi bi-info-circle"></i> Task Info</h5>
+                <div style="display:flex;flex-direction:column;gap:7px;">
+                    <div><span style="color:#aaa;">Created:</span> @Model.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")</div>
+                    <div><span style="color:#aaa;">Due:</span>
+                        <span class="@(isOverdue ? "due-chip overdue" : "")">
+                            @Model.DueDate.ToLocalTime().ToString("MMM d, HH:mm")
+                        </span>
+                    </div>
+                    @if (Model.CompletedAt.HasValue)
+                    {
+                        <div><span style="color:#aaa;">Completed:</span> @Model.CompletedAt.Value.ToLocalTime().ToString("MMM d, HH:mm")</div>
+                    }
+                    <div style="margin-top:4px;">
+                        <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.IntakeRecordId"
+                           style="font-size:0.82rem;color:#1a2a5e;font-weight:600;">
+                            ← All tasks for this intake
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+</div>
+
+<script>
+    const dropZone = document.getElementById('dropZone');
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault(); dropZone.classList.remove('dragover');
+        const dt = e.dataTransfer;
+        if (dt && dt.files && dt.files.length > 0) {
+            const input = document.getElementById('artifactFile');
+            input.files = dt.files;
+            fileChosen(input);
+        }
+    });
+    function fileChosen(input) {
+        const label = document.getElementById('dropLabel');
+        label.textContent = input.files.length > 0
+            ? input.files[0].name
+            : 'Click or drag file here';
+    }
+</script>

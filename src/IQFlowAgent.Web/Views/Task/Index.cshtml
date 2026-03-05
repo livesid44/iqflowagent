@@ -1,0 +1,371 @@
+@model IEnumerable<IQFlowAgent.Web.Models.IntakeTask>
+@using IQFlowAgent.Web.Models
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Tasks";
+    ViewData["ActivePage"] = "tasks";
+    var allStatuses = new[] { "Open", "In Progress", "Completed", "Cancelled" };
+    var statusColors = new Dictionary<string, string>
+    {
+        ["Open"] = "#1a2a5e",
+        ["In Progress"] = "#d97706",
+        ["Completed"] = "#059669",
+        ["Cancelled"] = "#6b7280"
+    };
+    var tasks = Model.ToList();
+    int? selId = ViewBag.IntakePickerSelected is int sv ? (int?)sv : null;
+    Func<IntakeTask, bool> IsOverdue = t =>
+        t.DueDate < DateTime.UtcNow && (t.Status == "Open" || t.Status == "In Progress");
+
+    // Verify & Close button: visible only when all tasks are Completed/Cancelled/NA and there is at least one task
+    bool allTasksClosed = tasks.Count > 0 && tasks.All(t => t.Status is "Completed" or "Cancelled" || t.IsNotApplicable);
+}
+
+<style>
+    .tasks-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:22px; }
+    .tasks-toolbar select, .tasks-toolbar input {
+        border:1px solid #e0e0e0; border-radius:8px; padding:8px 14px;
+        font-size:0.85rem; color:#333; background:#fff; outline:none;
+    }
+    .tasks-toolbar select:focus, .tasks-toolbar input:focus { border-color:#1a2a5e; }
+    .btn-filter {
+        background:#1a2a5e; color:#fff; border:none; border-radius:8px;
+        padding:8px 20px; font-size:0.85rem; cursor:pointer; font-weight:600;
+    }
+    .btn-filter:hover { background:#142248; }
+    .btn-clear { background:#f5f6fa; color:#555; border:1px solid #e0e0e0;
+        border-radius:8px; padding:8px 16px; font-size:0.85rem; cursor:pointer; }
+
+    /* ── Board columns ───────────────────────────────────────── */
+    .board { display:flex; gap:16px; align-items:flex-start; overflow-x:auto; padding-bottom:12px; }
+    .board-col {
+        flex:1; min-width:240px; background:#f0f2f8; border-radius:12px;
+        padding:14px 12px; min-height:200px;
+    }
+    .col-header {
+        display:flex; align-items:center; justify-content:space-between;
+        margin-bottom:14px; padding-bottom:10px; border-bottom:2px solid rgba(0,0,0,0.07);
+    }
+    .col-title { font-weight:700; font-size:0.9rem; display:flex; align-items:center; gap:7px; }
+    .col-count { background:#fff; border-radius:20px; padding:2px 9px;
+        font-size:0.78rem; font-weight:700; color:#555; }
+
+    /* ── Task card ───────────────────────────────────────────── */
+    .task-card {
+        background:#fff; border-radius:10px; padding:14px 16px;
+        margin-bottom:10px; box-shadow:0 1px 6px rgba(0,0,0,0.07);
+        border-left:4px solid #ccc; cursor:pointer; transition:box-shadow 0.15s;
+        text-decoration:none; color:inherit; display:block;
+    }
+    .task-card:hover { box-shadow:0 4px 16px rgba(0,0,0,0.13); color:inherit; }
+    .task-card.pri-High { border-left-color:#e31837; }
+    .task-card.pri-Medium { border-left-color:#d97706; }
+    .task-card.pri-Low { border-left-color:#059669; }
+
+    .task-card-id { font-size:0.72rem; color:#888; font-family:monospace; margin-bottom:4px; }
+    .task-card-title { font-size:0.88rem; font-weight:600; color:#1a2a5e; margin-bottom:6px; line-height:1.35; }
+    .task-card-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:8px; }
+
+    .badge-priority {
+        font-size:0.7rem; font-weight:700; padding:2px 8px; border-radius:20px;
+        text-transform:uppercase; letter-spacing:0.4px;
+    }
+    .badge-priority.High { background:#fde8ec; color:#e31837; }
+    .badge-priority.Medium { background:#fef3c7; color:#d97706; }
+    .badge-priority.Low { background:#d1fae5; color:#059669; }
+
+    .task-due { font-size:0.72rem; color:#888; display:flex; align-items:center; gap:3px; }
+    .task-due.overdue { color:#e31837; font-weight:600; }
+    .task-owner { font-size:0.72rem; color:#555; display:flex; align-items:center; gap:3px;
+        max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .task-comments { font-size:0.72rem; color:#888; display:flex; align-items:center; gap:3px; margin-left:auto; }
+
+    /* ── Table view ──────────────────────────────────────────── */
+    .view-toggle { display:flex; gap:6px; margin-left:auto; }
+    .btn-view { border:1px solid #e0e0e0; background:#fff; border-radius:6px;
+        padding:6px 12px; cursor:pointer; font-size:0.82rem; color:#555; }
+    .btn-view.active { background:#1a2a5e; color:#fff; border-color:#1a2a5e; }
+
+    .tasks-table { width:100%; border-collapse:collapse; font-size:0.87rem; }
+    .tasks-table th { background:#f5f6fa; color:#555; padding:10px 14px;
+        text-align:left; border-bottom:2px solid #e0e0e0; font-weight:600; white-space:nowrap; }
+    .tasks-table td { padding:10px 14px; border-bottom:1px solid #f0f0f0; vertical-align:middle; }
+    .tasks-table tr:hover td { background:#f9f9ff; }
+
+    .status-badge { padding:3px 10px; border-radius:20px; font-size:0.74rem; font-weight:700; display:inline-block; }
+    .status-Open { background:#e8ecf7; color:#1a2a5e; }
+    .status-InProgress { background:#fef3c7; color:#d97706; }
+    .status-Completed { background:#d1fae5; color:#059669; }
+    .status-Cancelled { background:#f3f4f6; color:#6b7280; }
+    .badge-na-small { font-size:0.68rem; font-weight:700; background:#f0fdf4; color:#15803d; border:1px solid #86efac; border-radius:10px; padding:1px 7px; }
+
+    .intake-chip { font-size:0.72rem; color:#1a2a5e; background:#eef0f9;
+        padding:2px 8px; border-radius:4px; font-family:monospace; }
+
+    .empty-state { text-align:center; padding:60px 20px; color:#aaa; }
+    .empty-state i { font-size:3rem; display:block; margin-bottom:12px; }
+
+    .btn-verify-close {
+        background: linear-gradient(135deg, #059669, #047857);
+        color: #fff; border: none; border-radius: 8px;
+        padding: 9px 20px; font-size: 0.85rem; font-weight: 700;
+        cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+        box-shadow: 0 2px 8px rgba(5,150,105,0.25);
+    }
+    .btn-verify-close:hover { background: linear-gradient(135deg, #047857, #065f46); color:#fff; }
+    .btn-verify-close:disabled {
+        background: #d1fae5; color: #6b7280; cursor: not-allowed; box-shadow: none;
+    }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <div class="page-title">
+        <i class="bi bi-kanban me-2"></i> Tasks
+        @if (!string.IsNullOrWhiteSpace((string?)ViewBag.IntakeName))
+        {
+            <span style="font-size:0.88rem;font-weight:400;color:#888;margin-left:12px;">
+                — @ViewBag.IntakeRef: @ViewBag.IntakeName
+            </span>
+        }
+    </div>
+    <div class="page-sub">Track and manage action items from AI analysis</div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div style="background:#d1fae5;color:#065f46;padding:10px 16px;border-radius:8px;margin-bottom:18px;font-size:0.88rem;">
+            <i class="bi bi-check-circle-fill me-2"></i>@TempData["Success"]
+        </div>
+    }
+    @if (TempData["Error"] != null)
+    {
+        <div style="background:#fde8ec;color:#9b1c1c;padding:10px 16px;border-radius:8px;margin-bottom:18px;font-size:0.88rem;">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@TempData["Error"]
+        </div>
+    }
+
+    @* ── Intake picker ────────────────────────────────────── *@
+    @await Html.PartialAsync("_IntakePicker")
+
+    @* ── No intake selected prompt ─────────────────────────── *@
+    @if (!selId.HasValue)
+    {
+        <div style="text-align:center;padding:50px 20px;color:#aaa;">
+            <i class="bi bi-arrow-up-circle" style="font-size:2.8rem;display:block;margin-bottom:12px;color:#d0d5e8;"></i>
+            <p style="font-size:.9rem;"><strong>Select an intake</strong> from the list above to view its tasks.</p>
+        </div>
+    }
+    else
+    {
+    <!-- ── Toolbar ──────────────────────────────────────────────── -->
+    <form method="get" asp-action="Index">
+        <input type="hidden" name="selectedId" value="@selId" />
+        <div class="tasks-toolbar">
+            <select name="status">
+                <option value="">All Statuses</option>
+                @foreach (var s in allStatuses)
+                {
+                    <option value="@s" selected="@(ViewBag.FilterStatus == s)">@s</option>
+                }
+            </select>
+            <select name="priority">
+                <option value="">All Priorities</option>
+                <option value="High" selected="@(ViewBag.FilterPriority == "High")">High</option>
+                <option value="Medium" selected="@(ViewBag.FilterPriority == "Medium")">Medium</option>
+                <option value="Low" selected="@(ViewBag.FilterPriority == "Low")">Low</option>
+            </select>
+            <button type="submit" class="btn-filter"><i class="bi bi-funnel me-1"></i>Filter</button>
+            <a href="@Url.Action("Index", new { selectedId = selId })" class="btn-clear">Clear</a>
+            <div class="view-toggle">
+                <button type="button" class="btn-view active" id="btnBoard" onclick="switchView('board')">
+                    <i class="bi bi-kanban"></i>
+                </button>
+                <button type="button" class="btn-view" id="btnTable" onclick="switchView('table')">
+                    <i class="bi bi-table"></i>
+                </button>
+            </div>
+            @if (allTasksClosed)
+            {
+                <button type="button" class="btn-verify-close ms-auto"
+                        onclick="document.getElementById('verifyModal').style.display='flex'"
+                        title="All tasks are closed — click to run AI closure verification">
+                    <i class="bi bi-shield-check"></i> Verify &amp; Close Intake
+                </button>
+                <a href="/Report/Prepare?selectedId=@selId"
+                   style="margin-left:8px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border-radius:8px;padding:9px 18px;font-size:0.85rem;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;gap:6px;"
+                   title="Prepare and generate the BARTOK DD Final Report for this intake">
+                    <i class="bi bi-file-earmark-word"></i> Prepare Report
+                </a>
+            }
+        </div>
+    </form>
+
+    @* ── Verify & Close confirmation modal ──────────────────────────────── *@
+    @if (allTasksClosed)
+    {
+    <div id="verifyModal"
+         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;
+                align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:16px;padding:32px 36px;max-width:460px;width:90%;
+                    box-shadow:0 10px 40px rgba(0,0,0,0.25);text-align:center;">
+            <i class="bi bi-shield-check" style="font-size:2.4rem;color:#059669;"></i>
+            <h5 style="margin:16px 0 10px;color:#1a2a5e;font-weight:700;">AI Closure Verification</h5>
+            <p style="font-size:0.9rem;color:#555;line-height:1.6;margin-bottom:24px;">
+                All <strong>@tasks.Count task@(tasks.Count == 1 ? "" : "s")</strong> for this intake are closed.
+                The AI will review each task's comments and artifacts to verify sufficient closure evidence.<br /><br />
+                Tasks that lack evidence will be <strong>automatically reopened</strong>.
+                The intake will be marked <em>Closed</em> only if all tasks pass.
+            </p>
+            <form method="post" asp-action="VerifyAndClose" asp-route-intakeId="@selId">
+                @Html.AntiForgeryToken()
+                <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+                    <button type="submit" class="btn-verify-close" style="font-size:0.9rem;padding:10px 26px;">
+                        <i class="bi bi-robot"></i> Run AI Verification
+                    </button>
+                    <button type="button"
+                            onclick="document.getElementById('verifyModal').style.display='none'"
+                            style="background:#f5f6fa;color:#555;border:1px solid #e0e0e0;border-radius:8px;
+                                   padding:10px 22px;font-size:0.88rem;cursor:pointer;">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    }
+
+    <!-- ── Board view ───────────────────────────────────────────── -->
+    <div id="boardView">
+        @if (!tasks.Any())
+        {
+            <div class="empty-state">
+                <i class="bi bi-kanban"></i>
+                No tasks found. Tasks are created from Action Items in the AI Analysis.
+            </div>
+        }
+        else
+        {
+            <div class="board">
+                @foreach (var colStatus in allStatuses)
+                {
+                    var colTasks = tasks.Where(t => t.Status == colStatus).ToList();
+                    var dotColor = statusColors.GetValueOrDefault(colStatus, "#888");
+                    <div class="board-col">
+                        <div class="col-header">
+                            <div class="col-title">
+                                <span style="width:10px;height:10px;border-radius:50%;background:@dotColor;display:inline-block;"></span>
+                                @colStatus
+                            </div>
+                            <span class="col-count">@colTasks.Count</span>
+                        </div>
+                        @if (!colTasks.Any())
+                        {
+                            <div style="text-align:center;color:#ccc;font-size:0.82rem;padding:20px 0;">
+                                <i class="bi bi-inbox"></i><br />No tasks
+                            </div>
+                        }
+                        @foreach (var t in colTasks)
+                        {
+                            var isOverdue = IsOverdue(t);
+                            <a asp-action="Details" asp-route-id="@t.Id" class="task-card pri-@t.Priority">
+                                <div class="task-card-id">@t.TaskId</div>
+                                <div class="task-card-title">@t.Title</div>
+                                <div class="task-card-meta">
+                                    <span class="badge-priority @t.Priority">@t.Priority</span>
+                                    @if (t.IsNotApplicable) { <span class="badge-na-small">⊘ N/A</span> }
+                                    <span class="task-due @(isOverdue ? "overdue" : "")">
+                                        <i class="bi bi-clock"></i>
+                                        @(isOverdue ? "Overdue · " : "Due ")@t.DueDate.ToLocalTime().ToString("MMM d, HH:mm")
+                                    </span>
+                                </div>
+                                <div class="task-card-meta" style="margin-top:6px;">
+                                    <span class="task-owner">
+                                        <i class="bi bi-person"></i> @t.Owner
+                                    </span>
+                                    <span class="task-comments">
+                                        <i class="bi bi-chat-text"></i> @t.ActionLogs.Count
+                                    </span>
+                                </div>
+                            </a>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- ── Table view (hidden by default) ───────────────────────── -->
+    <div id="tableView" style="display:none;">
+        @if (!tasks.Any())
+        {
+            <div class="empty-state">
+                <i class="bi bi-table"></i>
+                No tasks found.
+            </div>
+        }
+        else
+        {
+            <div style="background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.07);overflow:hidden;">
+                <table class="tasks-table">
+                    <thead>
+                        <tr>
+                            <th>Task ID</th>
+                            <th>Title</th>
+                            <th>Intake</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                            <th>Owner</th>
+                            <th>Due Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in tasks)
+                        {
+                            var isOverdue = IsOverdue(t);
+                            var statusClass = "status-" + t.Status.Replace(" ", "");
+                            <tr>
+                                <td><span style="font-family:monospace;font-size:0.78rem;color:#888;">@t.TaskId</span></td>
+                                <td style="max-width:220px;">
+                                    <a asp-action="Details" asp-route-id="@t.Id"
+                                       style="color:#1a2a5e;font-weight:600;text-decoration:none;">@t.Title</a>
+                                </td>
+                                <td>
+                                    <a asp-controller="Intake" asp-action="AnalysisResult" asp-route-id="@t.IntakeRecordId"
+                                       class="intake-chip">@t.IntakeRecord.IntakeId</a>
+                                </td>
+                                <td><span class="badge-priority @t.Priority">@t.Priority</span></td>
+                                <td>
+                                    <span class="status-badge @statusClass">@t.Status</span>
+                                    @if (t.IsNotApplicable) { <span class="badge-na-small" style="margin-left:4px;">⊘ N/A</span> }
+                                </td>
+                                <td style="font-size:0.82rem;color:#555;">@t.Owner</td>
+                                <td class="@(isOverdue ? "task-due overdue" : "task-due")"
+                                    style="font-size:0.82rem;">
+                                    @t.DueDate.ToLocalTime().ToString("MMM d, HH:mm")
+                                    @if (isOverdue) { <span style="font-size:0.7rem;"> ⚠</span> }
+                                </td>
+                                <td>
+                                    <a asp-action="Details" asp-route-id="@t.Id"
+                                       style="font-size:0.78rem;color:#1a2a5e;">View →</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+    } @* end: intake selected *@
+</main>
+</div>
+
+<script>
+    function switchView(v) {
+        document.getElementById('boardView').style.display = v === 'board' ? '' : 'none';
+        document.getElementById('tableView').style.display = v === 'table' ? '' : 'none';
+        document.getElementById('btnBoard').classList.toggle('active', v === 'board');
+        document.getElementById('btnTable').classList.toggle('active', v === 'table');
+    }
+</script>

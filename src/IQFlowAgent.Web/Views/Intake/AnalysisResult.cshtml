@@ -1,0 +1,797 @@
+@model IQFlowAgent.Web.Models.IntakeRecord
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Analysis Result";
+    ViewData["ActivePage"] = "analysis";
+
+    // Parse the JSON analysis result (if available)
+    JsonElement? analysis = null;
+    if (!string.IsNullOrWhiteSpace(Model.AnalysisResult))
+    {
+        try { analysis = JsonSerializer.Deserialize<JsonElement>(Model.AnalysisResult); }
+        catch { /* keep null */ }
+    }
+
+    string GetStr(string key, string fallback = "")
+    {
+        if (analysis == null) return fallback;
+        return analysis.Value.TryGetProperty(key, out var v) ? v.GetString() ?? fallback : fallback;
+    }
+    int GetInt(string key, int fallback = 0)
+    {
+        if (analysis == null) return fallback;
+        return analysis.Value.TryGetProperty(key, out var v) ? v.GetInt32() : fallback;
+    }
+    string[] GetArr(string key)
+    {
+        if (analysis == null) return Array.Empty<string>();
+        if (!analysis.Value.TryGetProperty(key, out var v)) return Array.Empty<string>();
+        return v.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
+    }
+}
+
+<style>
+    /* ── Status cards ─────────────────────────────────────── */
+    .status-cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+    .status-card {
+        flex: 1; min-width: 160px; background: #fff;
+        border-radius: 12px; padding: 20px 18px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+        text-align: center;
+    }
+    .status-card .s-num { font-size: 2.2rem; font-weight: 800; color: #1a2a5e; line-height: 1; }
+    .status-card .s-label { font-size: 0.8rem; color: #888; margin-top: 4px; }
+    .status-card.red .s-num { color: #e31837; }
+    .status-card.green .s-num { color: #059669; }
+    .status-card.orange .s-num { color: #d97706; }
+
+    /* ── Confidence bar ──────────────────────────────────── */
+    .confidence-bar-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .confidence-bar { flex: 1; height: 8px; background: #e0e7f5; border-radius: 4px; overflow: hidden; }
+    .confidence-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #1a2a5e, #e31837); transition: width 1s; }
+    .confidence-pct { font-weight: 700; color: #1a2a5e; font-size: 0.95rem; min-width: 40px; text-align: right; }
+
+    /* ── Analysis card ───────────────────────────────────── */
+    .analysis-card {
+        background: #fff; border-radius: 12px; padding: 28px;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.07); margin-bottom: 22px;
+    }
+    .analysis-card h3 { font-size: 1rem; font-weight: 700; color: #1a2a5e; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .analysis-card h3 .bi { color: #e31837; }
+
+    .insights-list { list-style: none; padding: 0; margin: 0; }
+    .insights-list li {
+        display: flex; align-items: flex-start; gap: 8px;
+        padding: 8px 0; border-bottom: 1px solid #f0f0f0;
+        font-size: 0.88rem; color: #444; line-height: 1.5;
+    }
+    .insights-list li:last-child { border-bottom: none; }
+    .insights-list .bi { color: #059669; font-size: 0.9rem; margin-top: 2px; flex-shrink: 0; }
+
+    .rec-grid { display: flex; flex-direction: column; gap: 10px; }
+    .rec-item {
+        display: flex; align-items: flex-start; gap: 12px;
+        background: #f8faff; border-radius: 8px; padding: 12px 14px;
+        font-size: 0.87rem; color: #444;
+    }
+    .rec-icon { font-size: 1.1rem; color: #e31837; flex-shrink: 0; }
+
+    .risk-list { display: flex; flex-direction: column; gap: 8px; }
+    .risk-item {
+        display: flex; align-items: center; gap: 8px;
+        background: #fff8f9; border: 1px solid #ffd6dc; border-radius: 8px;
+        padding: 10px 14px; font-size: 0.87rem; color: #9b1c28;
+    }
+
+    /* ── Validation grid ─────────────────────────────────── */
+    .validation-grid { display: flex; gap: 16px; flex-wrap: wrap; }
+    .val-card {
+        flex: 1; min-width: 220px; background: #fff;
+        border-radius: 10px; padding: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .val-card h4 { font-size: 0.88rem; font-weight: 700; color: #1a2a5e; margin-bottom: 12px; }
+    .val-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f5f5f5; font-size: 0.83rem; }
+    .val-row:last-child { border-bottom: none; }
+    .val-row span:last-child { font-weight: 600; color: #1a2a5e; }
+
+    /* ── Status pill on page ─────────────────────────────── */
+    .intake-id-banner {
+        display: flex; align-items: center; gap: 10px;
+        background: #fff; border: 1px solid #e0e7f5; border-radius: 10px;
+        padding: 10px 16px; margin-bottom: 22px; font-size: 0.88rem;
+    }
+    .intake-id-banner code { background: #eef2ff; color: #1a2a5e; padding: 2px 8px; border-radius: 4px; font-size: 0.82rem; }
+    .status-pill {
+        padding: 3px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .pill-complete  { background: #d1fae5; color: #065f46; }
+    .pill-analyzing { background: #fef3c7; color: #92400e; }
+    .pill-submitted { background: #dbeafe; color: #1d4ed8; }
+    .pill-error     { background: #ffe0e6; color: #c01530; }
+    .pill-draft     { background: #f1f5f9; color: #64748b; }
+
+    /* Action buttons */
+    .btn-reanalyze {
+        background: #1a2a5e; border: none; color: #fff;
+        border-radius: 8px; padding: 9px 20px; font-size: 0.88rem; cursor: pointer;
+        transition: background 0.2s;
+    }
+    .btn-reanalyze:hover { background: #294993; }
+    .btn-edit-intake {
+        display: inline-flex; align-items: center; gap: 4px;
+        text-decoration: none;
+    }
+    .btn-back { color: #888; text-decoration: none; font-size: 0.85rem; }
+
+    /* Spinner for "Analyzing" state */
+    .analyzing-state { text-align: center; padding: 60px 20px; }
+    .analyzing-state .spinner { width: 48px; height: 48px; border: 4px solid #e0e7f5; border-top-color: #e31837; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+    @@keyframes spin { to { transform: rotate(360deg); } }
+
+    .action-list { display: flex; flex-direction: column; gap: 10px; }
+    .action-item {
+        display: flex; align-items: flex-start; gap: 14px;
+        background: #f8faff; border-radius: 10px; padding: 14px 16px;
+        border-left: 4px solid #1a2a5e;
+    }
+    .action-item.priority-High  { border-left-color: #e31837; }
+    .action-item.priority-Medium{ border-left-color: #d97706; }
+    .action-item.priority-Low   { border-left-color: #059669; }
+    .action-num {
+        background: #1a2a5e; color: #fff; border-radius: 50%;
+        width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+        font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+    }
+    .action-item.priority-High  .action-num { background: #e31837; }
+    .action-item.priority-Medium .action-num { background: #d97706; }
+    .action-item.priority-Low   .action-num { background: #059669; }
+    .action-body { flex: 1; }
+    .action-title { font-weight: 700; color: #1a2a5e; font-size: 0.9rem; margin-bottom: 3px; }
+    .action-desc  { font-size: 0.84rem; color: #555; line-height: 1.5; margin-bottom: 6px; }
+    .action-meta  { display: flex; gap: 10px; flex-wrap: wrap; }
+    .action-owner { font-size: 0.78rem; color: #888; }
+    .action-owner .bi { color: #1a2a5e; margin-right: 3px; }
+    .priority-badge {
+        font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .priority-badge.High   { background: #ffe0e6; color: #c01530; }
+    .priority-badge.Medium { background: #fef3c7; color: #92400e; }
+    .priority-badge.Low    { background: #d1fae5; color: #065f46; }
+
+    .checkpoint-table { width: 100%; border-collapse: collapse; }
+    .checkpoint-table th {
+        background: #f5f6fa; color: #1a2a5e;
+        font-size: 0.8rem; padding: 9px 14px; text-align: left; font-weight: 600;
+    }
+    .checkpoint-table td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 0.86rem; vertical-align: middle; }
+    .checkpoint-table tr:last-child td { border-bottom: none; }
+    .checkpoint-table tr:hover td { background: #fafbff; }
+    .cp-status {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 3px 10px; border-radius: 14px; font-size: 0.75rem; font-weight: 700;
+    }
+    .cp-Pass    { background: #d1fae5; color: #065f46; }
+    .cp-Fail    { background: #ffe0e6; color: #c01530; }
+    .cp-Warning { background: #fef3c7; color: #92400e; }
+    .cp-heading-summary { margin-left: auto; display: flex; gap: 8px; font-size: 0.78rem; font-weight: 500; }
+    .cp-count-pass    { color: #065f46; }
+    .cp-count-warning { color: #92400e; }
+    .cp-count-fail    { color: #c01530; }
+
+    .summary-box {
+        background: linear-gradient(135deg, #f0f4ff 0%, #fff 100%);
+        border: 1px solid #dbe4ff; border-radius: 10px;
+        padding: 18px 20px; margin-bottom: 20px;
+        font-size: 0.9rem; color: #333; line-height: 1.7;
+    }
+    .summary-box strong { color: #1a2a5e; }
+
+    .alert-tasks-created {
+        background: #d1fae5; border: 1px solid #a7f3d0; border-radius: 9px;
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 16px; margin-bottom: 12px;
+    }
+    .alert-tasks-created a { color: #059669; font-weight: 700; text-decoration: underline; margin-left: 6px; }
+    .alert-tasks-created span { font-size: 0.88rem; color: #065f46; }
+
+    .btn-view-all-tasks {
+        background: #059669; color: #fff; border-radius: 7px;
+        padding: 6px 14px; font-size: 0.78rem;
+        text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .btn-view-all-tasks:hover { background: #047857; color: #fff; }
+
+    .task-created-badge {
+        background: #d1fae5; color: #065f46; border-radius: 6px;
+        padding: 4px 12px; font-size: 0.76rem; font-weight: 600; white-space: nowrap;
+    }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:8px;">
+        <a asp-action="Index" class="btn-back"><i class="bi bi-arrow-left"></i> All Intakes</a>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            @if (Model.Status != "Closed")
+            {
+                <a asp-action="Edit" asp-route-id="@Model.Id"
+                   class="btn-reanalyze btn-edit-intake">
+                    ✏ Edit Intake
+                </a>
+            }
+            @if (Model.Status == "Complete" || Model.Status == "Error")
+            {
+                <form asp-action="Reanalyze" asp-route-id="@Model.Id" method="post" style="margin:0;">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn-reanalyze">
+                        <i class="bi bi-arrow-clockwise me-1"></i> Re-analyse
+                    </button>
+                </form>
+            }
+        </div>
+    </div>
+
+    <div class="page-title">AI Analysis</div>
+    <div class="page-sub">LLM-powered process discovery and validation</div>
+
+    @if (TempData["Success"] != null)
+    {
+        <div class="alert alert-success py-2 small mb-3">@TempData["Success"]</div>
+    }
+    @if (TempData["Info"] != null)
+    {
+        <div class="alert py-2 small mb-3" style="background:#dbeafe;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:8px;">
+            <i class="bi bi-info-circle me-1"></i>@TempData["Info"]
+        </div>
+    }
+
+    @if (Model.Status is "Submitted" or "Analyzing")
+    {
+        <div id="rag-status-banner" style="background:#fff8e1;border:1px solid #ffc107;border-radius:8px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:12px;">
+            <span style="font-size:20px;">⚙️</span>
+            <div style="flex:1;">
+                <strong>Processing files in the background…</strong>
+                <div id="rag-status-text" style="font-size:13px;color:#666;margin-top:2px;">
+                    Analysing your uploaded documents with AI — this page will update automatically.
+                </div>
+            </div>
+            <div id="rag-spinner" style="width:20px;height:20px;border:3px solid #ffc107;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+        </div>
+        <style>@@keyframes spin{to{transform:rotate(360deg)}}</style>
+        <script>
+            (function() {
+                var intakeDbId = @Model.Id;
+                var pollInterval = 4000;
+                var maxPolls = 75; // 5 min
+                var polls = 0;
+
+                function poll() {
+                    if (polls++ >= maxPolls) return;
+                    fetch('/Intake/RagStatus/' + intakeDbId)
+                        .then(r => r.json())
+                        .then(data => {
+                            var txt = document.getElementById('rag-status-text');
+                            var banner = document.getElementById('rag-status-banner');
+                            if (data.jobStatus === 'Processing' || data.intakeStatus === 'Analyzing') {
+                                if (txt) txt.textContent =
+                                    'Processing files (' + data.processedFiles + ' / ' + data.totalFiles + ' complete)…';
+                                setTimeout(poll, pollInterval);
+                            } else if (data.jobStatus === 'Complete' || data.intakeStatus === 'Complete') {
+                                banner.style.background = '#e8f5e9';
+                                banner.style.borderColor = '#43a047';
+                                if (txt) txt.textContent = 'Analysis complete! Reloading…';
+                                document.getElementById('rag-spinner').style.display = 'none';
+                                setTimeout(() => location.reload(), 1500);
+                            } else if (data.jobStatus === 'Error') {
+                                banner.style.background = '#fdecea';
+                                banner.style.borderColor = '#e53935';
+                                banner.querySelector('span').textContent = '❌';
+                                if (txt) txt.textContent = 'Processing failed: ' + (data.error || 'Unknown error');
+                                document.getElementById('rag-spinner').style.display = 'none';
+                            } else {
+                                setTimeout(poll, pollInterval);
+                            }
+                        })
+                        .catch(() => setTimeout(poll, pollInterval * 2));
+                }
+
+                setTimeout(poll, pollInterval);
+            })();
+        </script>
+    }
+
+    @{
+        var existingTitles = (ViewBag.ExistingTaskTitles as List<string>) ?? new List<string>();
+        var taskCount = (int)(ViewBag.TaskCount ?? 0);
+    }
+    @if (taskCount > 0)
+    {
+        <div class="alert-tasks-created">
+            <i class="bi bi-check-circle-fill" style="color:#059669;font-size:1.1rem;"></i>
+            <span>
+                <strong>@taskCount task@(taskCount != 1 ? "s" : "") automatically created</strong> from this analysis.
+                <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id">View Tasks →</a>
+            </span>
+        </div>
+    }
+
+    <!-- Intake banner -->
+    <div class="intake-id-banner">
+        <i class="bi bi-clipboard-check" style="color:#e31837;font-size:1.1rem;"></i>
+        <span>Intake ID:</span>
+        <code>@Model.IntakeId</code>
+        <span>—</span>
+        <strong>@Model.ProcessName</strong>
+        <span style="margin-left:auto;">
+            <span class="status-pill pill-@Model.Status.ToLower()">@Model.Status</span>
+        </span>
+    </div>
+
+    @if (Model.Status == "Analyzing" || Model.Status == "Submitted")
+    {
+        <!-- Still running -->
+        <div class="analysis-card">
+            <div class="analyzing-state">
+                <div class="spinner"></div>
+                <p style="color:#888;font-size:0.9rem;">Azure OpenAI is analysing your process intake…</p>
+                <p style="color:#aaa;font-size:0.8rem;">This usually takes a few seconds. Refresh to check for results.</p>
+                <button onclick="location.reload()" class="btn-reanalyze mt-3">
+                    <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                </button>
+            </div>
+        </div>
+    }
+    else if (Model.Status == "Error" || analysis == null)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            Analysis could not be completed.
+            @if (!string.IsNullOrWhiteSpace(Model.AnalysisResult))
+            {
+                <details style="margin-top:8px;">
+                    <summary style="cursor:pointer;font-size:0.82rem;">Raw response</summary>
+                    <pre style="font-size:0.75rem;white-space:pre-wrap;margin-top:8px;">@Model.AnalysisResult</pre>
+                </details>
+            }
+        </div>
+    }
+    else
+    {
+        var confidence = GetInt("confidenceScore", 0);
+        var steps = GetInt("stepsIdentified", 0);
+        var handling = GetInt("estimatedHandlingTimeMinutes", 0);
+        var quality = GetInt("qualityScore", 0);
+        var compliance = GetStr("complianceStatus", "Pending");
+        var automation = GetStr("automationPotential", "Medium");
+        var summary = GetStr("summary");
+        var insights = GetArr("keyInsights");
+        var risks = GetArr("riskAreas");
+
+        <!-- Status summary cards -->
+        <div class="status-cards">
+            <div class="status-card">
+                <div class="s-num">@steps</div>
+                <div class="s-label">Steps Identified</div>
+            </div>
+            <div class="status-card green">
+                <div class="s-num">@quality</div>
+                <div class="s-label">Quality Score</div>
+            </div>
+            <div class="status-card orange">
+                <div class="s-num">@handling<span style="font-size:1rem;">m</span></div>
+                <div class="s-label">Est. Handling Time</div>
+            </div>
+            <div class="status-card @(compliance == "Passed" ? "green" : "red")">
+                <div class="s-num" style="font-size:1.2rem;">@compliance</div>
+                <div class="s-label">Compliance</div>
+            </div>
+            <div class="status-card @(automation == "High" ? "red" : automation == "Medium" ? "orange" : "")">
+                <div class="s-num" style="font-size:1.2rem;">@automation</div>
+                <div class="s-label">Automation Potential</div>
+            </div>
+        </div>
+
+        <!-- Confidence -->
+        <div class="analysis-card">
+            <h3><i class="bi bi-graph-up"></i> Analysis Confidence</h3>
+            <div class="confidence-bar-wrap">
+                <div class="confidence-bar">
+                    <div class="confidence-fill" id="confFill" style="width:0%"></div>
+                </div>
+                <span class="confidence-pct">@confidence%</span>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(summary))
+        {
+            <!-- Executive Summary -->
+            <div class="analysis-card">
+                <h3><i class="bi bi-card-text"></i> Executive Summary</h3>
+                <div class="summary-box">@summary</div>
+            </div>
+        }
+
+        <!-- Key Insights -->
+        @if (insights.Length > 0)
+        {
+            <div class="analysis-card">
+                <h3><i class="bi bi-lightbulb"></i> Key Insights</h3>
+                <ul class="insights-list">
+                    @foreach (var insight in insights)
+                    {
+                        <li><i class="bi bi-check-circle-fill"></i> @insight</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <!-- Recommendations -->
+        @if (analysis!.Value.TryGetProperty("recommendations", out var recs))
+        {
+            <div class="analysis-card">
+                <h3><i class="bi bi-stars"></i> Recommendations</h3>
+                <div class="rec-grid">
+                    @foreach (var rec in recs.EnumerateArray())
+                    {
+                        var text = rec.TryGetProperty("text", out var t) ? t.GetString() : "";
+                        <div class="rec-item">
+                            <i class="bi bi-arrow-right-circle-fill rec-icon"></i>
+                            <span>@text</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Risk Areas -->
+        @if (risks.Length > 0)
+        {
+            <div class="analysis-card">
+                <h3><i class="bi bi-exclamation-triangle"></i> Risk Areas</h3>
+                <div class="risk-list">
+                    @foreach (var risk in risks)
+                    {
+                        <div class="risk-item">
+                            <i class="bi bi-flag-fill" style="color:#e31837;flex-shrink:0;"></i>
+                            @risk
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Action Items -->
+        @if (analysis!.Value.TryGetProperty("actionItems", out var actionItems) && actionItems.GetArrayLength() > 0)
+        {
+            <div class="analysis-card">
+                <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <span><i class="bi bi-list-check"></i> Action Items</span>
+                    @if (taskCount > 0 && taskCount >= actionItems.GetArrayLength())
+                    {
+                        <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
+                           class="btn-view-all-tasks">
+                            <i class="bi bi-kanban"></i> View All Tasks
+                        </a>
+                    }
+                    else
+                    {
+                    <form asp-controller="Task" asp-action="CreateFromAction" method="post" id="createAllForm">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                        <input type="hidden" name="title" id="allTitle" value="[BATCH]" />
+                        <input type="hidden" name="description" id="allDesc" value="" />
+                        <input type="hidden" name="priority" id="allPri" value="High" />
+                        <input type="hidden" name="owner" id="allOwner" value="@Model.ProcessOwnerEmail" />
+                        <button type="button" onclick="createAllTasks()"
+                            style="background:#1a2a5e;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:0.78rem;cursor:pointer;font-weight:600;">
+                            <i class="bi bi-kanban me-1"></i> Create All as Tasks
+                        </button>
+                    </form>
+                    }
+                </h3>
+                <div class="action-list">
+                    @{ int actionNum = 0; }
+                    @foreach (var item in actionItems.EnumerateArray())
+                    {
+                        actionNum++;
+                        var aTitle    = item.TryGetProperty("title",       out var at) ? at.GetString() ?? "" : "";
+                        var aDesc     = item.TryGetProperty("description", out var ad) ? ad.GetString() ?? "" : "";
+                        var aOwner    = item.TryGetProperty("owner",       out var ao) ? ao.GetString() ?? "" : "";
+                        var aPriority = item.TryGetProperty("priority",    out var ap) ? ap.GetString() ?? "Medium" : "Medium";
+                        <div class="action-item priority-@aPriority" style="position:relative;">
+                            <div class="action-num">@actionNum</div>
+                            <div class="action-body">
+                                <div class="action-title">@aTitle</div>
+                                @if (!string.IsNullOrWhiteSpace(aDesc))
+                                {
+                                    <div class="action-desc">@aDesc</div>
+                                }
+                                <div class="action-meta">
+                                    @if (!string.IsNullOrWhiteSpace(aOwner))
+                                    {
+                                        <span class="action-owner"><i class="bi bi-person"></i>@aOwner</span>
+                                    }
+                                    <span class="priority-badge @aPriority">@aPriority</span>
+                                    <!-- Create single task form -->
+                                    @if (existingTitles.Contains(aTitle))
+                                    {
+                                        <span class="task-created-badge">
+                                            <i class="bi bi-check-circle-fill me-1"></i>Task Created
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                    <form asp-controller="Task" asp-action="CreateFromAction" method="post"
+                                          style="margin:0;margin-left:auto;">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                                        <input type="hidden" name="title" value="@aTitle" />
+                                        <input type="hidden" name="description" value="@aDesc" />
+                                        <input type="hidden" name="priority" value="@aPriority" />
+                                        <input type="hidden" name="owner" value="@(string.IsNullOrWhiteSpace(aOwner) ? Model.ProcessOwnerEmail : aOwner)" />
+                                        <button type="submit"
+                                            style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:0.76rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                            <i class="bi bi-plus-circle me-1"></i>Create Task
+                                        </button>
+                                    </form>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Check Points -->
+        @if (analysis!.Value.TryGetProperty("checkPoints", out var checkPoints) && checkPoints.GetArrayLength() > 0)
+        {
+            var passCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Pass");
+            var failCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Fail");
+            var warningCount = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Warning");
+            var pendingCount = failCount + warningCount;
+            <div class="analysis-card">
+                <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                    <span><i class="bi bi-check2-square"></i> Check Points
+                        <span class="cp-heading-summary">
+                            <span class="cp-count-pass"><i class="bi bi-check-circle-fill"></i> @passCount Pass</span>
+                            @if (warningCount > 0)
+                            {<span class="cp-count-warning"><i class="bi bi-exclamation-circle-fill"></i> @warningCount Warning</span>}
+                            @if (failCount > 0)
+                            {<span class="cp-count-fail"><i class="bi bi-x-circle-fill"></i> @failCount Fail</span>}
+                        </span>
+                    </span>
+                    @if (pendingCount > 0)
+                    {
+                        @* Check whether all pending checkpoints already have tasks *@
+                        var allCpTasksExist = checkPoints.EnumerateArray()
+                            .Where(c => { var st = c.TryGetProperty("status", out var sv) ? sv.GetString() : ""; return st == "Fail" || st == "Warning"; })
+                            .All(c => { var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : ""; return existingTitles.Contains($"[Checkpoint] {lbl}"); });
+                        if (allCpTasksExist)
+                        {
+                            <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
+                               class="btn-view-all-tasks">
+                                <i class="bi bi-kanban"></i> View Checkpoint Tasks
+                            </a>
+                        }
+                        else
+                        {
+                            <form asp-controller="Task" asp-action="CreateFromAction" method="post" id="createAllCpForm">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                                <input type="hidden" name="title"       value="[BATCH-CP]" />
+                                <input type="hidden" name="description" value="" />
+                                <input type="hidden" name="priority"    value="High" />
+                                <input type="hidden" name="owner"       value="@Model.ProcessOwnerEmail" />
+                                <button type="button" onclick="createAllCheckpointTasks()"
+                                    style="background:#e31837;color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:0.78rem;cursor:pointer;font-weight:600;">
+                                    <i class="bi bi-plus-circle me-1"></i> Create All Pending as Tasks
+                                </button>
+                            </form>
+                        }
+                    }
+                </h3>
+                <table class="checkpoint-table">
+                    <thead>
+                        <tr>
+                            <th>Check Point</th>
+                            <th style="width:110px;">Status</th>
+                            <th>Notes</th>
+                            <th style="width:140px;">Task</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var cp in checkPoints.EnumerateArray())
+                        {
+                            var cpLabel  = cp.TryGetProperty("label",  out var cl) ? cl.GetString() ?? "" : "";
+                            var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "Warning" : "Warning";
+                            var cpNote   = cp.TryGetProperty("note",   out var cn) ? cn.GetString() ?? "" : "";
+                            var cpIcon   = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
+                            var cpTaskTitle = $"[Checkpoint] {cpLabel}";
+                            var cpPriority  = cpStatus == "Fail" ? "High" : "Medium";
+                            var cpIsPending = cpStatus == "Fail" || cpStatus == "Warning";
+                            <tr>
+                                <td>@cpLabel</td>
+                                <td>
+                                    <span class="cp-status cp-@cpStatus">
+                                        <i class="bi bi-@cpIcon"></i> @cpStatus
+                                    </span>
+                                </td>
+                                <td style="color:#666;">@cpNote</td>
+                                <td>
+                                    @if (cpIsPending)
+                                    {
+                                        @if (existingTitles.Contains(cpTaskTitle))
+                                        {
+                                            <span class="task-created-badge">
+                                                <i class="bi bi-check-circle-fill me-1"></i>Task Created
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <form asp-controller="Task" asp-action="CreateFromAction" method="post"
+                                                  class="cp-task-form" style="margin:0;">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="intakeRecordId" value="@Model.Id" />
+                                                <input type="hidden" name="title"       value="@cpTaskTitle" />
+                                                <input type="hidden" name="description" value="@(string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote)" />
+                                                <input type="hidden" name="priority"    value="@cpPriority" />
+                                                <input type="hidden" name="owner"       value="@Model.ProcessOwnerEmail" />
+                                                <button type="submit"
+                                                    style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                                    <i class="bi bi-plus-circle me-1"></i>Create Task
+                                                </button>
+                                            </form>
+                                        }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <!-- Validation grid -->
+        <div class="analysis-card">
+            <h3><i class="bi bi-clipboard2-check"></i> Validation Summary</h3>
+            <div class="validation-grid">
+                <div class="val-card">
+                    <h4>Process Details</h4>
+                    <div class="val-row"><span>Process Name</span><span>@Model.ProcessName</span></div>
+                    <div class="val-row"><span>Business Unit</span><span>@Model.BusinessUnit</span></div>
+                    <div class="val-row"><span>Department</span><span>@(Model.Department ?? "—")</span></div>
+                    <div class="val-row"><span>Type</span><span>@Model.ProcessType</span></div>
+                    <div class="val-row"><span>Priority</span><span>@Model.Priority</span></div>
+                </div>
+                <div class="val-card">
+                    <h4>Location &amp; Capacity</h4>
+                    <div class="val-row"><span>Country</span><span>@Model.Country</span></div>
+                    <div class="val-row"><span>City</span><span>@(Model.City ?? "—")</span></div>
+                    <div class="val-row"><span>Site</span><span>@(Model.SiteLocation ?? "—")</span></div>
+                    <div class="val-row"><span>Time Zone</span><span>@(Model.TimeZone ?? "—")</span></div>
+                    <div class="val-row"><span>Volume / Day</span><span>@Model.EstimatedVolumePerDay</span></div>
+                </div>
+                <div class="val-card">
+                    <h4>AI Scores</h4>
+                    <div class="val-row"><span>Steps Identified</span><span>@steps</span></div>
+                    <div class="val-row"><span>Quality Score</span><span>@quality / 100</span></div>
+                    <div class="val-row"><span>Confidence</span><span>@confidence%</span></div>
+                    <div class="val-row"><span>Compliance</span><span>@compliance</span></div>
+                    <div class="val-row"><span>Automation Potential</span><span>@automation</span></div>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Model.UploadedFileName))
+        {
+            <div class="analysis-card">
+                <h3><i class="bi bi-file-earmark-check"></i> Uploaded Document</h3>
+                <div style="font-size:0.88rem;">
+                    <i class="bi bi-paperclip me-1" style="color:#e31837;"></i>
+                    @{
+                        var isBlobUrl = !string.IsNullOrWhiteSpace(Model.UploadedFilePath)
+                            && Model.UploadedFilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+                    }
+                    @if (isBlobUrl)
+                    {
+                        <a href="@Model.UploadedFilePath" target="_blank" rel="noopener noreferrer"
+                           style="color:#1a2a5e;font-weight:600;text-decoration:none;">
+                            <strong>@Model.UploadedFileName</strong>
+                            <i class="bi bi-box-arrow-up-right ms-1" style="font-size:0.75rem;"></i>
+                        </a>
+                        <span style="color:#4b7bec;font-size:0.78rem;margin-left:8px;">
+                            <i class="bi bi-cloud-check-fill"></i> Azure Blob Storage
+                        </span>
+                    }
+                    else
+                    {
+                        <strong>@Model.UploadedFileName</strong>
+                    }
+                    @if (Model.UploadedFileSize.HasValue)
+                    {
+                        <span style="color:#888;"> — @((Model.UploadedFileSize.Value / 1024.0).ToString("F1")) KB</span>
+                    }
+                </div>
+            </div>
+        }
+    }
+
+    <!-- View Tasks link -->
+    <div style="margin-top:12px;">
+        <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
+           style="display:inline-flex;align-items:center;gap:7px;background:#1a2a5e;color:#fff;
+                  border-radius:8px;padding:9px 20px;text-decoration:none;font-size:0.87rem;font-weight:600;">
+            <i class="bi bi-kanban"></i> View Tasks for this Intake
+        </a>
+    </div>
+
+    <!-- Analysed timestamp -->
+    @if (Model.AnalyzedAt.HasValue)
+    {
+        <p style="font-size:0.77rem;color:#bbb;text-align:right;margin-top:8px;">
+            <i class="bi bi-clock me-1"></i>Analysed: @Model.AnalyzedAt.Value.ToString("dd MMM yyyy HH:mm") UTC
+        </p>
+    }
+</main>
+</div><!-- close app-layout -->
+
+@section Scripts {
+<script>
+    // Animate confidence bar on load
+    window.addEventListener('load', () => {
+        const fill = document.getElementById('confFill');
+        if (fill) {
+            setTimeout(() => fill.style.width = fill.closest('.analysis-card')
+                ?.querySelector('.confidence-pct')?.textContent?.replace('%','') + '%', 100);
+        }
+    });
+
+    // Collect all action items and submit them one by one via fetch
+    function createAllTasks() {
+        // Filter once: exclude the hidden "createAllForm" placeholder
+        const forms = Array.from(document.querySelectorAll('form[action*="CreateFromAction"]'))
+            .filter(f => f.id !== 'createAllForm');
+        if (!forms.length) return;
+
+        let idx = 0;
+        function submitNext() {
+            if (idx >= forms.length) {
+                window.location.href = '@Url.Action("Index", "Task", new { intakeRecordId = Model.Id })';
+                return;
+            }
+            const data = new FormData(forms[idx]);
+            fetch(forms[idx].action, { method: 'POST', body: data })
+                .then(() => { idx++; submitNext(); })
+                .catch(() => { idx++; submitNext(); });
+        }
+        submitNext();
+    }
+
+    // Collect all pending checkpoint forms and submit them one by one via fetch
+    function createAllCheckpointTasks() {
+        const forms = Array.from(document.querySelectorAll('form.cp-task-form'));
+        if (!forms.length) {
+            window.location.href = '@Url.Action("Index", "Task", new { intakeRecordId = Model.Id })';
+            return;
+        }
+        let idx = 0;
+        function submitNext() {
+            if (idx >= forms.length) {
+                window.location.href = '@Url.Action("Index", "Task", new { intakeRecordId = Model.Id })';
+                return;
+            }
+            const data = new FormData(forms[idx]);
+            fetch(forms[idx].action, { method: 'POST', body: data })
+                .then(() => { idx++; submitNext(); })
+                .catch(() => { idx++; submitNext(); });
+        }
+        submitNext();
+    }
+</script>
+}

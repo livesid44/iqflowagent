@@ -1,0 +1,23 @@
+<!--
+  Directory.Build.targets is imported by MSBuild *after* the project file and any
+  imported publish profiles (.pubxml) are fully evaluated.  This makes it the last
+  place that can safely override a stale TargetFramework value that leaked in from a
+  locally-created VS publish profile (e.g. one created before the project was
+  downgraded from net9.0 to net8.0).
+
+  This file ONLY acts when a pubxml or other import has already set TargetFramework to
+  net9.0.  Normal builds and the committed FolderPublish.pubxml are unaffected.
+-->
+<Project>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <!--
+      Silently correct net9.0 back to net8.0.
+      This happens when the user publishes via VS using a locally-generated publish
+      profile that was created before the project was downgraded to net8.0.
+      To fix permanently: delete Properties/PublishProfiles/*.pubxml (except
+      FolderPublish.pubxml), then re-import FolderPublish.pubxml from the VS
+      Publish dialog.
+    -->
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+.idea/
+*.suo
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
+
+# Local config overrides — may contain real credentials, never commit
+appsettings.Development.json
+appsettings.Local.json

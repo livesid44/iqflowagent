@@ -1,0 +1,145 @@
+@model IQFlowAgent.Web.Models.TenantAiSettings
+@{
+    ViewData["Title"] = "AI & Storage Settings";
+    var tenant = ViewBag.Tenant as IQFlowAgent.Web.Models.Tenant;
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "tenantaisettings" } })
+<main class="app-main">
+    <div class="page-title">AI &amp; Storage Settings</div>
+    <div class="page-subtitle">Configure Azure OpenAI, Blob Storage and Speech-to-Text for <strong>@tenant?.Name</strong></div>
+    @if (TempData["Success"] != null) { <div class="alert-success-bar" id="save-success">@TempData["Success"]</div> }
+    <div class="alert-error-bar" id="save-error" style="display:none"></div>
+    <div class="alert-success-bar" id="save-ok" style="display:none"></div>
+
+    <form id="ai-settings-form" asp-action="Save" method="post" onsubmit="return saveSettings(event)">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="Id" />
+        <input type="hidden" asp-for="TenantId" />
+
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">Azure OpenAI Settings</div>
+            <div class="card-body">
+                <div class="form-grid-2">
+                    <div class="full-width">
+                        <label class="form-label">Endpoint URL</label>
+                        <input asp-for="AzureOpenAIEndpoint" class="form-input" placeholder="https://your-resource.cognitiveservices.azure.com/" />
+                    </div>
+                    <div>
+                        <label class="form-label">API Key</label>
+                        <input asp-for="AzureOpenAIApiKey" class="form-input" type="password" placeholder="Your Azure OpenAI API key" autocomplete="off" />
+                    </div>
+                    <div>
+                        <label class="form-label">Deployment Name</label>
+                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="gpt-4o" />
+                    </div>
+                    <div>
+                        <label class="form-label">API Version</label>
+                        <input asp-for="AzureOpenAIApiVersion" class="form-input" placeholder="2025-01-01-preview" />
+                    </div>
+                    <div>
+                        <label class="form-label">Max Output Tokens</label>
+                        <input asp-for="AzureOpenAIMaxTokens" class="form-input" type="number" min="100" max="16000" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">Azure Blob Storage Settings</div>
+            <div class="card-body">
+                <div class="form-grid-2">
+                    <div class="full-width">
+                        <label class="form-label">Connection String</label>
+                        <input asp-for="AzureStorageConnectionString" class="form-input" type="password" placeholder="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;" autocomplete="off" />
+                    </div>
+                    <div>
+                        <label class="form-label">Container Name</label>
+                        <input asp-for="AzureStorageContainerName" class="form-input" placeholder="intakes" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">
+                Azure Speech-to-Text Settings
+                <span style="font-size:12px;font-weight:400;color:#888;margin-left:8px;">Required for audio/video transcription (Teams recordings, MP4, WAV, MP3)</span>
+            </div>
+            <div class="card-body">
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Speech Region</label>
+                        <input asp-for="AzureSpeechRegion" class="form-input" placeholder="e.g. eastus, westeurope" />
+                    </div>
+                    <div>
+                        <label class="form-label">Speech API Key</label>
+                        <input asp-for="AzureSpeechApiKey" class="form-input" type="password" placeholder="Your Azure Speech API key" autocomplete="off" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>How to get Speech credentials:</strong> Go to <em>Azure Portal &rarr; Create a resource &rarr; Speech service</em>.
+                            Copy the Key and Region from <em>Keys and Endpoint</em>. The region must match the resource (e.g. <code>eastus</code>).
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (Model.UpdatedAt != default) {
+            <p style="color:#888;font-size:12px;margin-bottom:16px;">Last updated: @Model.UpdatedAt.ToString("dd MMM yyyy HH:mm") by @Model.UpdatedByUserId</p>
+        }
+
+        <button type="submit" class="btn-primary" id="save-btn">Save Settings</button>
+        &nbsp;<a href="/TenantAiSettings/Diagnose" target="_blank" class="btn-secondary" style="font-size:12px;">Run Diagnostics</a>
+    </form>
+</main>
+</div>
+<script>
+async function saveSettings(e) {
+    e.preventDefault();
+    const btn = document.getElementById('save-btn');
+    const errEl = document.getElementById('save-error');
+    const okEl  = document.getElementById('save-ok');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+        const form = document.getElementById('ai-settings-form');
+        const resp = await fetch('/TenantAiSettings/Save', {
+            method: 'POST',
+            body: new FormData(form),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        let data;
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+            data = await resp.json();
+        } else {
+            // Non-JSON response (e.g. redirect to login, or unexpected error page)
+            const text = await resp.text();
+            console.error('[AI Settings] Unexpected non-JSON response (HTTP ' + resp.status + '):', text);
+            errEl.textContent = 'Unexpected server response (HTTP ' + resp.status + '). See browser console for details.';
+            errEl.style.display = 'block';
+            btn.disabled = false; btn.textContent = 'Save Settings';
+            return;
+        }
+        if (data.success) {
+            okEl.textContent = data.message || 'Settings saved.';
+            okEl.style.display = 'block';
+            console.info('[AI Settings] Saved successfully.');
+        } else {
+            // Log the full error (including stack trace) to console
+            console.error('[AI Settings] Save failed:', data.error || data.message);
+            errEl.textContent = 'Failed to save: ' + (data.message || 'Unknown error. See browser console (F12) for full details.');
+            errEl.style.display = 'block';
+        }
+    } catch (ex) {
+        console.error('[AI Settings] Network/fetch error:', ex);
+        errEl.textContent = 'Network error: ' + ex.message + '. Check browser console (F12).';
+        errEl.style.display = 'block';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Save Settings';
+}
+</script>

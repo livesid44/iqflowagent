@@ -1,0 +1,191 @@
+@* Shared App Shell: Header + Sidebar (matching the FlowIQ wireframe theme)
+   Usage: @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "intake" } })
+   ActivePage values: intake, analysis, tasks, report, qc, usermgmt, authsettings, masterdata
+*@
+@{
+    var activePage = (string?)ViewData["ActivePage"] ?? "";
+    string Nav(string page) => activePage.Equals(page, StringComparison.OrdinalIgnoreCase) ? "sidebar-link active" : "sidebar-link";
+    // ActivePage values: dashboard, intake, analysis, tasks, report, qc, usermgmt, authsettings, masterdata
+}
+
+@* Styles are in wwwroot/css/site.css (loaded in _Layout.cshtml <head>) *@
+
+<header class="app-header">
+    <div class="header-left">
+        <div class="app-logo-primary">
+            <a asp-controller="Dashboard" asp-action="Index" style="text-decoration:none;">
+                <img src="~/images/aura.png" alt="IQFlowAgent" />
+            </a>
+        </div>
+        <div class="header-logo-divider" aria-hidden="true"></div>
+        <img src="~/images/techmahindra.svg" class="header-tm-logo" alt="Tech Mahindra" />
+    </div>
+    <div class="header-right">
+        @{
+            var tenantContextService = Context.RequestServices.GetService<IQFlowAgent.Web.Services.ITenantContextService>();
+            var currentTenantId = tenantContextService?.GetCurrentTenantId() ?? 1;
+            List<IQFlowAgent.Web.Models.Tenant>? userTenants = null;
+            if (tenantContextService != null && User.Identity?.IsAuthenticated == true)
+            {
+                var userManager = Context.RequestServices.GetService<Microsoft.AspNetCore.Identity.UserManager<IQFlowAgent.Web.Models.ApplicationUser>>();
+                var userId = userManager?.GetUserId(User);
+                if (userId != null)
+                    userTenants = await tenantContextService.GetUserTenantsAsync(userId);
+            }
+        }
+        @if (userTenants != null && (userTenants.Count > 1 || User.IsInRole("SuperAdmin")))
+        {
+            <div style="position:relative;margin-right:12px;">
+                <button id="tenantToggleBtn" aria-expanded="false" aria-controls="tenantDropdown" aria-haspopup="true"
+                        onclick="toggleTenantDropdown()" style="background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:13px;">
+                    🏢 @(userTenants.FirstOrDefault(t => t.Id == currentTenantId)?.Name ?? "Tenant") ▾
+                </button>
+                <div id="tenantDropdown" role="menu" class="hidden" style="position:absolute;right:0;top:36px;background:#fff;border:1px solid #ddd;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.1);min-width:160px;z-index:200;">
+                    @foreach (var t in userTenants)
+                    {
+                        <form asp-controller="Tenant" asp-action="Switch" method="post" style="margin:0;">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="tenantId" value="@t.Id" />
+                            <input type="hidden" name="returnUrl" value="@Context.Request.Path" />
+                            <button type="submit" role="menuitem" style="display:block;width:100%;text-align:left;padding:8px 16px;background:none;border:none;cursor:pointer;font-size:13px;@(t.Id == currentTenantId ? "font-weight:600;" : "")">
+                                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:@t.Color;margin-right:6px;"></span>@t.Name
+                            </button>
+                        </form>
+                    }
+                </div>
+            </div>
+        }
+        <span class="app-username">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" style="vertical-align:middle;margin-right:4px" aria-label="User profile icon"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            @User.Identity?.Name
+        </span>
+        <form asp-action="Logout" asp-controller="Account" method="post" style="margin:0;">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn-logout">Logout</button>
+        </form>
+    </div>
+</header>
+
+<div class="app-layout" id="appLayout">
+    <aside class="app-sidebar" id="appSidebar">
+        <div class="sidebar-toggle" onclick="toggleAppSidebar()" title="Toggle navigation">
+            <svg class="toggle-arrow" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" width="16" height="16" aria-label="Toggle sidebar navigation"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="sidebar-section-title">Process</div>
+        <a asp-controller="Dashboard" asp-action="Index" class="@Nav("dashboard")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            </span>
+            <span class="sidebar-label">Dashboard</span>
+        </a>
+        <a asp-controller="Intake" asp-action="Index" class="@Nav("intake")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v4H4z"/><path d="M4 12h16v4H4z"/><path d="M4 20h10"/><circle cx="19" cy="20" r="2"/><path d="M19 16v2"/></svg>
+            </span>
+            <span class="sidebar-label">Intake</span>
+        </a>
+        <a asp-controller="Analysis" asp-action="Index" class="@Nav("analysis")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9c0-1.7 1.3-3 3-3s3 1.3 3 3c0 2-3 2-3 4"/><circle cx="12" cy="19" r="0.5" fill="white"/></svg>
+            </span>
+            <span class="sidebar-label">AI Analysis</span>
+        </a>
+        <a asp-controller="Task" asp-action="Index" class="@Nav("tasks")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="11" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg>
+            </span>
+            <span class="sidebar-label">Tasks</span>
+        </a>
+        <a asp-controller="Report" asp-action="Prepare" class="@Nav("report")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+            </span>
+            <span class="sidebar-label">DD Report</span>
+        </a>
+        <a asp-controller="Qc" asp-action="Index" class="@Nav("qc")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            </span>
+            <span class="sidebar-label">QC Check</span>
+        </a>
+        <div class="sidebar-section-title">Admin</div>
+        <a asp-controller="UserManagement" asp-action="Index" class="@Nav("usermgmt")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.85"/></svg>
+            </span>
+            <span class="sidebar-label">User Management</span>
+        </a>
+        <a asp-controller="AuthSettings" asp-action="Index" class="@Nav("authsettings")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="15" r="1" fill="white"/></svg>
+            </span>
+            <span class="sidebar-label">Auth Settings</span>
+        </a>
+        <a asp-controller="MasterData" asp-action="Department" class="@Nav("masterdata")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            </span>
+            <span class="sidebar-label">Master Data</span>
+        </a>
+        <a asp-controller="MasterData" asp-action="Lob" class="@Nav("masterdatalob")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/><path d="M8 7V5a2 2 0 0 0-4 0v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+            </span>
+            <span class="sidebar-label">LOB Master</span>
+        </a>
+        <a asp-controller="TenantAiSettings" asp-action="Index" class="@Nav("tenantaisettings")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+            </span>
+            <span class="sidebar-label">AI Settings</span>
+        </a>
+        @if (User.IsInRole("SuperAdmin"))
+        {
+        <a asp-controller="Tenant" asp-action="Index" class="@Nav("tenants")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            </span>
+            <span class="sidebar-label">Tenants</span>
+        </a>
+        }
+    </aside>
+
+    <script>
+        (function () {
+            // Restore sidebar state from localStorage
+            var open = localStorage.getItem('sidebarOpen') === '1';
+            if (open) {
+                document.getElementById('appSidebar').classList.add('open');
+                document.getElementById('appLayout').classList.add('sidebar-open');
+                var footer = document.getElementById('appFooter');
+                if (footer) footer.style.marginLeft = '265px';
+            }
+        })();
+        function toggleAppSidebar() {
+            var sidebar = document.getElementById('appSidebar');
+            var layout  = document.getElementById('appLayout');
+            var footer  = document.getElementById('appFooter');
+            var isOpen  = sidebar.classList.toggle('open');
+            layout.classList.toggle('sidebar-open', isOpen);
+            if (footer) footer.style.marginLeft = isOpen ? '265px' : '50px';
+            localStorage.setItem('sidebarOpen', isOpen ? '1' : '0');
+        }
+        function toggleTenantDropdown() {
+            var btn = document.getElementById('tenantToggleBtn');
+            var dropdown = document.getElementById('tenantDropdown');
+            if (!btn || !dropdown) return;
+            var isExpanded = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', isExpanded ? 'false' : 'true');
+            dropdown.classList.toggle('hidden', isExpanded);
+        }
+        // Close tenant dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            var btn = document.getElementById('tenantToggleBtn');
+            var dropdown = document.getElementById('tenantDropdown');
+            if (btn && dropdown && !btn.contains(e.target) && !dropdown.contains(e.target)) {
+                btn.setAttribute('aria-expanded', 'false');
+                dropdown.classList.add('hidden');
+            }
+        });
+    </script>
+    @* Main content injected by each page *@

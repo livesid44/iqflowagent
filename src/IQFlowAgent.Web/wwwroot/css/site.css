@@ -1,0 +1,404 @@
+/* =========================================================
+   IQFlowAgent – site-wide styles
+   (loaded in <head> before Bootstrap resolves; no conflicts)
+   ========================================================= */
+
+html { font-size: 14px; position: relative; min-height: 100%; }
+@media (min-width: 768px) { html { font-size: 16px; } }
+
+body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
+
+/* ── Header ─────────────────────────────────────────── */
+.app-header {
+    background: #fff;
+    border-bottom: 2px solid #e0e0e0;
+    padding: 0 20px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.header-left  { display: flex; align-items: center; gap: 14px; }
+.header-right { display: flex; align-items: center; gap: 14px; }
+.app-logo-primary a { display: flex; align-items: center; text-decoration: none; }
+.app-logo-primary img { height: 40px; width: auto; }
+.app-username { font-size: 0.88rem; color: #555; white-space: nowrap; }
+.btn-logout {
+    background: #e31837; border: none; color: #fff;
+    border-radius: 6px; padding: 6px 16px; font-size: 0.82rem; cursor: pointer;
+}
+.btn-logout:hover { background: #c01530; }
+
+/* ── Layout wrapper ──────────────────────────────────── */
+.app-layout {
+    display: flex;
+    margin-top: 60px;
+    min-height: calc(100vh - 60px);
+}
+
+/* ── Sidebar ─────────────────────────────────────────
+   Default: collapsed (50px, icons only). Toggle adds .open → 265px.
+────────────────────────────────────────────────────── */
+.app-sidebar {
+    width: 50px;
+    background: #e31837;
+    padding: 8px 0 25px;
+    position: fixed;
+    top: 60px; left: 0; bottom: 0;
+    z-index: 99;
+    overflow-y: auto;
+    overflow-x: hidden;
+    transition: width 0.35s ease;
+    flex-shrink: 0;
+}
+.app-sidebar.open { width: 265px; }
+
+/* Toggle arrow button */
+.sidebar-toggle {
+    cursor: pointer;
+    padding: 10px 15px;
+    color: #fff;
+    text-align: right;
+    display: flex;
+    justify-content: flex-end;
+}
+.sidebar-toggle .toggle-arrow { transition: transform 0.35s ease; }
+.app-sidebar.open .sidebar-toggle .toggle-arrow { transform: rotate(180deg); }
+
+/* Section headings */
+.sidebar-section-title {
+    padding: 8px 18px 4px;
+    color: rgba(255,255,255,0.65);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-weight: 600;
+    white-space: nowrap;
+    display: none;
+}
+.app-sidebar.open .sidebar-section-title { display: block; }
+
+/* Nav links – flex layout so icon always visible in collapsed state */
+.sidebar-link {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px;
+    color: rgba(255,255,255,0.9);
+    text-decoration: none;
+    font-size: 0.88rem;
+    padding: 11px 0 11px 15px;
+    transition: background 0.2s, border-left 0.2s;
+    border-left: 3px solid transparent;
+    overflow: hidden;
+}
+.sidebar-link:hover,
+.sidebar-link.active {
+    background: rgba(255,255,255,0.18);
+    border-left-color: #fff;
+    color: #fff;
+}
+
+/* Icon – always visible (collapsed + expanded) */
+.sidebar-icon {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+}
+.sidebar-icon svg { opacity: 0.85; display: block !important; }
+.sidebar-link.active .sidebar-icon svg { opacity: 1; }
+.sidebar-link:hover  .sidebar-icon svg { opacity: 1; }
+
+/* Text label – hidden when collapsed, slides in when expanded */
+.sidebar-label {
+    overflow: hidden;
+    max-width: 0;
+    opacity: 0;
+    white-space: nowrap;
+    transition: max-width 0.35s ease, opacity 0.25s ease;
+    display: block !important;
+}
+.app-sidebar.open .sidebar-label { max-width: 200px; opacity: 1; }
+
+/* ── Main content ────────────────────────────────────── */
+.app-main {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    max-width: calc(100% - 50px);
+    padding: 28px 32px;
+    margin-left: 50px;
+    transition: margin-left 0.35s ease, max-width 0.35s ease;
+}
+.app-layout.sidebar-open .app-main {
+    margin-left: 265px;
+    max-width: calc(100% - 265px);
+}
+
+.page-title { font-size: 1.45rem; font-weight: 700; color: #1a2a5e; margin-bottom: 4px; }
+.page-sub   { color: #888; font-size: 0.88rem; margin-bottom: 22px; }
+
+/* ── Multi-select tag-input component ──────────────────── */
+.ms-container {
+    position: relative;
+    border: 1px solid #ddd;
+    border-radius: 7px;
+    padding: 5px 8px;
+    min-height: 42px;
+    background: #fff;
+    cursor: text;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+    width: 100%;
+}
+.ms-container:focus-within { border-color: #1a2a5e; box-shadow: 0 0 0 3px rgba(26,42,94,0.08); }
+.ms-tag {
+    background: #dbeafe;
+    color: #1e40af;
+    border-radius: 12px;
+    padding: 2px 8px 2px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+.ms-tag-remove {
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    color: #1e40af;
+    background: none;
+    border: none;
+    padding: 0;
+}
+.ms-tag-remove:hover { color: #e31837; }
+.ms-input {
+    border: none;
+    outline: none;
+    font-size: 0.88rem;
+    min-width: 120px;
+    flex: 1;
+    padding: 2px 4px;
+    background: transparent;
+}
+.ms-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-top: none;
+    border-radius: 0 0 7px 7px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.ms-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    border-bottom: 1px solid #f5f5f5;
+}
+.ms-option:last-child { border-bottom: none; }
+.ms-option:hover, .ms-option.highlighted { background: #eff6ff; color: #1a2a5e; }
+.ms-option.selected { background: #dbeafe; color: #1e40af; font-weight: 600; }
+.ms-empty { padding: 10px 12px; color: #aaa; font-size: 0.85rem; }
+
+/* ── Utility ─────────────────────────────────────────── */
+.hidden { display: none !important; }
+.page-subtitle { color: #888; font-size: 0.88rem; margin-bottom: 22px; }
+
+/* ── Common card / form / button components ──────────── */
+.data-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    overflow: hidden;
+}
+.card-header {
+    font-weight: 600;
+    font-size: 0.94rem;
+    padding: 14px 20px;
+    border-bottom: 1px solid #eee;
+    color: #1a2a5e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.card-body { padding: 20px; }
+.form-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+.form-grid-2 .full-width { grid-column: 1 / -1; }
+.form-label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #444;
+    margin-bottom: 5px;
+}
+.form-input {
+    width: 100%;
+    border: 1px solid #ddd;
+    border-radius: 7px;
+    padding: 9px 12px;
+    font-size: 0.9rem;
+    color: #333;
+    box-sizing: border-box;
+    background: #fafafa;
+    transition: border-color 0.2s;
+}
+.form-input:focus { border-color: #1a2a5e; outline: none; box-shadow: 0 0 0 3px rgba(26,42,94,0.07); }
+.btn-primary {
+    background: #e31837;
+    border: none;
+    color: #fff;
+    border-radius: 7px;
+    padding: 10px 24px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-primary:hover { background: #c01530; }
+.btn-secondary {
+    background: #f0f0f0;
+    border: 1px solid #ddd;
+    color: #444;
+    border-radius: 7px;
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-secondary:hover { background: #e0e0e0; }
+.btn-sm-outline {
+    background: none;
+    border: 1px solid #ccc;
+    color: #444;
+    border-radius: 5px;
+    padding: 5px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    text-decoration: none;
+    display: inline-block;
+}
+.btn-sm-outline:hover { border-color: #1a2a5e; color: #1a2a5e; }
+.alert-success-bar {
+    background: #d1fae5;
+    border: 1px solid #a7f3d0;
+    color: #065f46;
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 18px;
+    font-size: 0.9rem;
+}
+.alert-error-bar {
+    background: #fee2e2;
+    border: 1px solid #fca5a5;
+    color: #991b1b;
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 18px;
+    font-size: 0.9rem;
+}
+.badge-active   { background: #d1fae5; color: #065f46; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.badge-inactive { background: #fee2e2; color: #991b1b; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.data-table th {
+    background: #f8faff;
+    font-size: 0.78rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 11px 16px;
+    text-align: left;
+    border-bottom: 1px solid #e9ecf5;
+    white-space: nowrap;
+}
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f3f9;
+    vertical-align: middle;
+    color: #333;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: #fafbff; }
+
+/* Common modal */
+.modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal-box {
+    background: #fff;
+    border-radius: 14px;
+    padding: 32px;
+    width: 460px;
+    max-width: 95vw;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+.modal-title { font-size: 1.05rem; font-weight: 700; color: #1a2a5e; margin-bottom: 20px; }
+.modal-field { margin-bottom: 16px; }
+.modal-field label { display: block; font-size: 0.82rem; font-weight: 600; color: #444; margin-bottom: 5px; }
+.modal-field input, .modal-field textarea, .modal-field select {
+    width: 100%; border: 1px solid #ddd; border-radius: 7px;
+    padding: 9px 12px; font-size: 0.9rem; color: #333; box-sizing: border-box;
+}
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+
+/* Info / warning box */
+.info-box {
+    background: #f0f7ff;
+    border: 1px solid #b3d4f5;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 0.82rem;
+    color: #1a5276;
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+.app-footer {
+    background: #1a2a5e;
+    color: rgba(255,255,255,0.75);
+    text-align: center;
+    padding: 12px 24px;
+    font-size: 0.78rem;
+    margin-left: 50px;
+    transition: margin-left 0.35s ease;
+}
+.app-layout.sidebar-open ~ .app-footer,
+.app-footer.sidebar-open { margin-left: 265px; }
+.app-footer a { color: #fff; text-decoration: none; }
+.app-footer a:hover { text-decoration: underline; }
+.footer-tm-logo { height: 16px; width: auto; vertical-align: middle; margin-right: 6px; }
+
+/* ── Header logo divider ─────────────────────────────── */
+.header-logo-divider {
+    width: 1px; height: 32px;
+    background: #ddd;
+    margin: 0 4px;
+}
+.header-tm-logo { height: 32px; width: auto; }

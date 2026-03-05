@@ -1,0 +1,262 @@
+@using System.Text.Json
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Closure Verification";
+    ViewData["ActivePage"] = "tasks";
+
+    int intakeId       = ViewBag.IntakeId is int iv ? iv : 0;
+    int reopenedCount  = ViewBag.ReopenedCount is int rc ? rc : 0;
+    bool canClose      = ViewBag.CanClose is bool cc && cc;
+    string? jsonStr    = ViewBag.VerificationJson as string;
+
+    // Parse verification JSON
+    string overallSummary = "";
+    var taskResults = new List<(string TaskId, string Title, bool CanClose, bool IsNA, string Reason, List<string> Missing)>();
+
+    bool parseError = false;
+    if (!string.IsNullOrWhiteSpace(jsonStr))
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonStr);
+            var root = doc.RootElement;
+            overallSummary = root.TryGetProperty("summary", out var s) ? (s.GetString() ?? "") : "";
+            if (root.TryGetProperty("taskVerifications", out var tvs))
+            {
+                foreach (var tv in tvs.EnumerateArray())
+                {
+                    var tid     = tv.TryGetProperty("taskId",   out var tidEl)  ? (tidEl.GetString()  ?? "") : "";
+                    var title   = tv.TryGetProperty("title",    out var titEl)  ? (titEl.GetString()  ?? "") : "";
+                    var pass    = tv.TryGetProperty("canClose", out var ccEl)   && ccEl.GetBoolean();
+                    var isNA    = tv.TryGetProperty("isNotApplicable", out var naEl) && naEl.GetBoolean();
+                    var reason  = tv.TryGetProperty("reason",   out var rEl)    ? (rEl.GetString()    ?? "") : "";
+                    var missing = tv.TryGetProperty("missingEvidence", out var mEl)
+                        ? mEl.EnumerateArray().Select(m => m.GetString() ?? "").Where(m => m.Length > 0).ToList()
+                        : new List<string>();
+                    taskResults.Add((tid, title, pass, isNA, reason, missing));
+                }
+            }
+        }
+        catch
+        {
+            parseError = true;
+            overallSummary = "The AI returned an unexpected response format. Verification details could not be displayed. Please check application logs and try again.";
+        }
+    }
+
+    int passCount = taskResults.Count(t => t.CanClose && !t.IsNA);
+    int naCount   = taskResults.Count(t => t.IsNA);
+    int failCount = taskResults.Count(t => !t.CanClose);
+}
+
+<style>
+    .vr-header { display:flex; align-items:center; gap:16px; margin-bottom:28px; }
+    .vr-outcome-badge {
+        display:inline-flex; align-items:center; gap:8px;
+        padding:10px 22px; border-radius:30px; font-weight:700; font-size:1rem;
+    }
+    .vr-outcome-pass { background:#d1fae5; color:#065f46; }
+    .vr-outcome-fail { background:#fde8ec; color:#9b1c1c; }
+
+    .vr-summary-card {
+        background:#fff; border-radius:12px; padding:20px 24px;
+        box-shadow:0 2px 10px rgba(0,0,0,0.07); margin-bottom:24px;
+    }
+    .vr-summary-text { font-size:0.92rem; color:#444; line-height:1.6; }
+
+    .vr-stats { display:flex; gap:16px; margin-bottom:24px; flex-wrap:wrap; }
+    .vr-stat-card {
+        background:#fff; border-radius:12px; padding:18px 24px;
+        box-shadow:0 2px 10px rgba(0,0,0,0.07); flex:1; min-width:140px;
+        text-align:center;
+    }
+    .vr-stat-num { font-size:2rem; font-weight:800; }
+    .vr-stat-label { font-size:0.78rem; color:#888; margin-top:4px; }
+    .vr-stat-pass .vr-stat-num { color:#059669; }
+    .vr-stat-fail .vr-stat-num { color:#e31837; }
+    .vr-stat-na .vr-stat-num { color:#15803d; }
+    .vr-stat-total .vr-stat-num { color:#1a2a5e; }
+    .vr-verdict-na { background:#f0fdf4; color:#15803d; }
+
+    .vr-tasks-header {
+        font-size:1rem; font-weight:700; color:#1a2a5e;
+        margin-bottom:14px; display:flex; align-items:center; gap:8px;
+    }
+    .vr-task-row {
+        background:#fff; border-radius:10px; padding:16px 20px;
+        margin-bottom:10px; box-shadow:0 1px 6px rgba(0,0,0,0.06);
+        border-left:4px solid #ccc; display:flex; flex-direction:column; gap:6px;
+    }
+    .vr-task-row.pass { border-left-color:#059669; }
+    .vr-task-row.fail { border-left-color:#e31837; }
+
+    .vr-task-header { display:flex; align-items:center; gap:10px; }
+    .vr-task-id { font-family:monospace; font-size:0.76rem; color:#999; }
+    .vr-task-title { font-size:0.9rem; font-weight:600; color:#1a2a5e; flex:1; }
+    .vr-verdict-chip {
+        font-size:0.72rem; font-weight:700; padding:3px 10px;
+        border-radius:20px; white-space:nowrap;
+    }
+    .vr-verdict-pass { background:#d1fae5; color:#065f46; }
+    .vr-verdict-fail { background:#fde8ec; color:#9b1c1c; }
+    .vr-task-reason { font-size:0.83rem; color:#555; padding-left:2px; }
+    .vr-missing-list { margin:0; padding-left:18px; }
+    .vr-missing-list li { font-size:0.82rem; color:#c0392b; margin-bottom:3px; }
+
+    .vr-actions { display:flex; gap:12px; margin-top:28px; flex-wrap:wrap; }
+    .btn-primary-vr {
+        background:#1a2a5e; color:#fff; border:none; border-radius:8px;
+        padding:11px 24px; font-size:0.88rem; font-weight:600; cursor:pointer;
+        text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+    }
+    .btn-primary-vr:hover { background:#142248; color:#fff; }
+    .btn-outline-vr {
+        background:#fff; color:#1a2a5e; border:1.5px solid #1a2a5e;
+        border-radius:8px; padding:11px 24px; font-size:0.88rem;
+        font-weight:600; cursor:pointer; text-decoration:none;
+        display:inline-flex; align-items:center; gap:6px;
+    }
+    .btn-outline-vr:hover { background:#f0f2f8; color:#1a2a5e; }
+    .btn-danger-vr {
+        background:#e31837; color:#fff; border:none; border-radius:8px;
+        padding:11px 24px; font-size:0.88rem; font-weight:600; cursor:pointer;
+        text-decoration:none; display:inline-flex; align-items:center; gap:6px;
+    }
+    .btn-danger-vr:hover { background:#b71429; color:#fff; }
+</style>
+
+@await Html.PartialAsync("_AppShell")
+
+<main class="app-main">
+    <div class="page-title">
+        <i class="bi bi-shield-check me-2"></i> AI Closure Verification
+    </div>
+    <div class="page-sub">Review the AI's assessment of task closure evidence</div>
+
+    @* ── Overall outcome banner ────────────────────────────────────────────── *@
+    <div class="vr-header">
+        @if (canClose)
+        {
+            <span class="vr-outcome-badge vr-outcome-pass">
+                <i class="bi bi-check-circle-fill"></i> Intake Closed — All tasks verified
+            </span>
+        }
+        else
+        {
+            <span class="vr-outcome-badge vr-outcome-fail">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                @reopenedCount task@(reopenedCount == 1 ? "" : "s") reopened — more evidence required
+            </span>
+        }
+    </div>
+
+    @* ── Summary card ─────────────────────────────────────────────────────── *@
+    @if (!string.IsNullOrWhiteSpace(overallSummary))
+    {
+        <div class="vr-summary-card" style="@(parseError ? "border-left:4px solid #e31837;" : "")">
+            <div style="font-weight:700;color:#1a2a5e;margin-bottom:8px;">
+                <i class="bi @(parseError ? "bi-exclamation-triangle" : "bi-robot") me-2" style="color:#e31837;"></i>
+                @(parseError ? "Verification Error" : "AI Assessment Summary")
+            </div>
+            <div class="vr-summary-text">@overallSummary</div>
+        </div>
+    }
+
+    @* ── Stats row ────────────────────────────────────────────────────────── *@
+    <div class="vr-stats">
+        <div class="vr-stat-card vr-stat-total">
+            <div class="vr-stat-num">@taskResults.Count</div>
+            <div class="vr-stat-label">Total Tasks</div>
+        </div>
+        <div class="vr-stat-card vr-stat-pass">
+            <div class="vr-stat-num">@passCount</div>
+            <div class="vr-stat-label">Verified Closed</div>
+        </div>
+        <div class="vr-stat-card vr-stat-na">
+            <div class="vr-stat-num">@naCount</div>
+            <div class="vr-stat-label">Not Applicable</div>
+        </div>
+        <div class="vr-stat-card vr-stat-fail">
+            <div class="vr-stat-num">@failCount</div>
+            <div class="vr-stat-label">Reopened</div>
+        </div>
+    </div>
+
+    @* ── Per-task results ─────────────────────────────────────────────────── *@
+    @if (taskResults.Count > 0)
+    {
+        <div class="vr-tasks-header">
+            <i class="bi bi-list-check"></i> Task Verification Details
+        </div>
+
+        @foreach (var t in taskResults)
+        {
+            <div class="vr-task-row @(t.CanClose ? "pass" : "fail")">
+                <div class="vr-task-header">
+                    <span class="vr-task-id">@t.TaskId</span>
+                    <span class="vr-task-title">@t.Title</span>
+                    @if (t.IsNA)
+                    {
+                        <span class="vr-verdict-chip vr-verdict-na">
+                            ⊘ N/A — Bypassed
+                        </span>
+                    }
+                    else if (t.CanClose)
+                    {
+                        <span class="vr-verdict-chip vr-verdict-pass">
+                            <i class="bi bi-check-circle-fill"></i> Verified
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="vr-verdict-chip vr-verdict-fail">
+                            <i class="bi bi-arrow-counterclockwise"></i> Reopened
+                        </span>
+                    }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(t.Reason))
+                {
+                    <div class="vr-task-reason">@t.Reason</div>
+                }
+                @if (t.Missing.Count > 0)
+                {
+                    <ul class="vr-missing-list">
+                        @foreach (var m in t.Missing)
+                        {
+                            <li>@m</li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(jsonStr))
+    {
+        <div style="color:#888;font-size:0.88rem;margin-top:16px;">
+            No per-task details were returned by the AI. Check application logs.
+        </div>
+    }
+
+    @* ── Action buttons ───────────────────────────────────────────────────── *@
+    <div class="vr-actions">
+        <a asp-controller="Task" asp-action="Index" asp-route-selectedId="@intakeId"
+           class="btn-primary-vr">
+            <i class="bi bi-kanban"></i> Back to Tasks
+        </a>
+        @if (!canClose && reopenedCount > 0)
+        {
+            <a asp-controller="Task" asp-action="Index" asp-route-selectedId="@intakeId"
+               class="btn-danger-vr">
+                <i class="bi bi-arrow-counterclockwise"></i>
+                Address @reopenedCount reopened task@(reopenedCount == 1 ? "" : "s")
+            </a>
+        }
+        @if (canClose)
+        {
+            <a asp-controller="Intake" asp-action="Index" class="btn-outline-vr">
+                <i class="bi bi-house"></i> Back to Intakes
+            </a>
+        }
+    </div>
+</main>
+</div>

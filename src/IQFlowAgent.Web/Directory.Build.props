@@ -1,0 +1,53 @@
+<!--
+  Directory.Build.props is imported by MSBuild *before* the project file.
+  This allows us to override the intermediate and output paths before any
+  other targets have a chance to use them.
+
+  WHY THIS FILE EXISTS:
+  Windows has a MAX_PATH limit of 260 characters.  When the project is checked
+  out inside a deeply-nested folder (e.g. a GitHub zip extracted into a folder
+  whose full path already exceeds ~200 characters) MSBuild cannot create files
+  inside obj/Debug/net8.0/staticwebassets/ and fails with:
+
+    MSB4018 - GenerateStaticWebAssetsPropsFile task failed unexpectedly.
+    System.IO.DirectoryNotFoundException: Could not find a part of the path '...obj\Debug\net8.0\staticwebassets\...'
+
+  FIX OPTION 1 (recommended, permanent): enable Windows long-path support.
+    See the Troubleshooting section in the README.
+
+  FIX OPTION 2 (no registry change required): set the IQFLOW_SHORT_PATHS
+  environment variable to "1" before opening Visual Studio or running dotnet.
+  This redirects obj/ and bin/ to a short path under %TEMP%:
+
+    Windows cmd:
+      set IQFLOW_SHORT_PATHS=1
+      dotnet build
+
+    PowerShell:
+      $env:IQFLOW_SHORT_PATHS="1"
+      dotnet build
+
+    Permanent (per-user): add IQFLOW_SHORT_PATHS=1 in System Properties →
+      Advanced → Environment Variables → User variables.
+
+  FIX OPTION 3 (simplest): clone/copy the repo to a shorter path,
+    e.g.  C:\dev\iq\   and build from there.
+-->
+<Project>
+  <!--
+    Only activate on Windows – MAX_PATH is a Windows-only limitation.
+    On Linux/macOS paths are never an issue so we leave defaults alone.
+    The $([MSBuild]::IsOSPlatform('Windows')) function is available in MSBuild 15+
+    (Visual Studio 2017+, .NET SDK 2.0+).
+  -->
+  <PropertyGroup Condition="'$(IQFLOW_SHORT_PATHS)' == '1' AND $([MSBuild]::IsOSPlatform('Windows'))">
+    <!--
+      Redirect intermediate and binary output to a short path under %TEMP%.
+      This keeps the MSBuild-generated paths well under 260 characters
+      regardless of where the repo is checked out.
+      Example result: C:\Users\<name>\AppData\Local\Temp\iqflow\IQFlowAgent.Web\obj\
+    -->
+    <BaseIntermediateOutputPath>$(TEMP)\iqflow\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(TEMP)\iqflow\$(MSBuildProjectName)\bin\</BaseOutputPath>
+  </PropertyGroup>
+</Project>
