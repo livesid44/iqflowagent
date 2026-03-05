@@ -73,6 +73,14 @@ public class TenantAiSettingsController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> Save([FromForm] TenantAiSettingsDto model)
     {
+        if (!ModelState.IsValid)
+        {
+            var errors = string.Join("; ", ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage));
+            return Json(new { success = false, message = $"Validation failed: {errors}" });
+        }
+
         try
         {
             var tenantId = _tenantContext.GetCurrentTenantId();
@@ -127,10 +135,8 @@ public class TenantAiSettingsController : Controller
         }
         catch (Exception ex)
         {
-            // Full exception type + message + stack trace returned to admin browser
-            var fullError = $"{ex.GetType().Name}: {ex.Message}\n\n{ex.StackTrace}";
             _logger.LogError(ex, "TenantAiSettings/Save failed");
-            return Json(new { success = false, error = fullError, message = ex.Message });
+            return Json(new { success = false, message = ex.Message });
         }
     }
 

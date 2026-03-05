@@ -106,7 +106,7 @@ async function saveSettings(e) {
     btn.textContent = 'Saving…';
     try {
         const form = document.getElementById('ai-settings-form');
-        const resp = await fetch('/TenantAiSettings/Save', {
+        const resp = await fetch(form.action, {
             method: 'POST',
             body: new FormData(form),
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
