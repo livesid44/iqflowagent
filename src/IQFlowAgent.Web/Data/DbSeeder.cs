@@ -34,13 +34,7 @@ public static class DbSeeder
                 await userManager.AddToRoleAsync(admin, "SuperAdmin");
         }
 
-        if (!db.AuthSettings.Any())
-        {
-            db.AuthSettings.Add(new AuthSettings());
-            await db.SaveChangesAsync();
-        }
-
-        // Seed default "Orange" tenant (let the DB assign the Id automatically)
+        // Seed default "Orange" tenant FIRST (AuthSettings has a FK to Tenants)
         Tenant? orangeTenant = await db.Tenants.FirstOrDefaultAsync(t => t.Slug == "orange");
         if (orangeTenant == null)
         {
@@ -77,6 +71,13 @@ public static class DbSeeder
         if (!db.TenantAiSettings.Any(s => s.TenantId == defaultTenantId))
         {
             db.TenantAiSettings.Add(new TenantAiSettings { TenantId = defaultTenantId });
+            await db.SaveChangesAsync();
+        }
+
+        // Seed AuthSettings AFTER the tenant exists (FK constraint: AuthSettings.TenantId → Tenants.Id)
+        if (!db.AuthSettings.Any(a => a.TenantId == defaultTenantId))
+        {
+            db.AuthSettings.Add(new AuthSettings { TenantId = defaultTenantId });
             await db.SaveChangesAsync();
         }
 
