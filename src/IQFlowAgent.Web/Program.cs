@@ -56,6 +56,18 @@ builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 builder.Services.AddSingleton<IBackgroundJobQueue, BackgroundJobQueue>();
 builder.Services.AddHostedService<RagProcessorService>();
 
+// By default (.NET 6+) an unhandled exception inside any BackgroundService causes the
+// generic host to call IHostApplicationLifetime.StopApplication().  On IIS in-process
+// hosting this produces the dreaded "503 (Application Shutting Down)" response for
+// every subsequent request — the app appears to start, handles a few requests, and
+// then goes dark.  Setting the behavior to Ignore prevents a single background-job
+// crash from taking down the entire web process.
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.BackgroundServiceExceptionBehavior =
+        BackgroundServiceExceptionBehavior.Ignore;
+});
+
 // SignalR for real-time notifications
 builder.Services.AddSignalR();
 builder.Services.AddSession(options =>

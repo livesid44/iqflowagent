@@ -48,6 +48,11 @@ public class RagProcessorService : BackgroundService
     {
         _logger.LogInformation("RagProcessorService started.");
 
+        // The outer try-catch is a safety net: it prevents any unexpected exception
+        // (e.g. from the Channel or from DI resolution) from propagating out of
+        // ExecuteAsync and stopping the host with "503 Application Shutting Down".
+        // BackgroundServiceExceptionBehavior.Ignore is also set in Program.cs as a
+        // second line of defence, but keeping the loop self-contained is best practice.
         while (!stoppingToken.IsCancellationRequested)
         {
             int ragJobId;
@@ -57,7 +62,16 @@ public class RagProcessorService : BackgroundService
             }
             catch (OperationCanceledException)
             {
+                // Normal shutdown — exit the loop cleanly.
                 break;
+            }
+            catch (Exception ex)
+            {
+                // Unexpected error from the queue (should not happen, but guard anyway).
+                _logger.LogError(ex, "Unexpected error dequeueing RAG job — retrying after delay.");
+                try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+                catch (OperationCanceledException) { break; } // Host is shutting down — exit cleanly.
+                continue;
             }
 
             try
