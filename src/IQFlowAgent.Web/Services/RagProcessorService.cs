@@ -46,42 +46,54 @@ public class RagProcessorService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("RagProcessorService started.");
-
-        // The outer try-catch is a safety net: it prevents any unexpected exception
-        // (e.g. from the Channel or from DI resolution) from propagating out of
-        // ExecuteAsync and stopping the host with "503 Application Shutting Down".
-        // BackgroundServiceExceptionBehavior.Ignore is also set in Program.cs as a
-        // second line of defence, but keeping the loop self-contained is best practice.
-        while (!stoppingToken.IsCancellationRequested)
+        // Outermost try-catch: guarantees that no exception can ever escape ExecuteAsync
+        // and propagate back to the host.  BackgroundServiceExceptionBehavior.Ignore is
+        // also set in Program.cs, but keeping this method self-contained is best practice
+        // and covers the rare case of a synchronous throw before the first await (e.g.
+        // if the logger itself fails at startup).
+        try
         {
-            int ragJobId;
-            try
-            {
-                ragJobId = await _queue.DequeueAsync(stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                // Normal shutdown — exit the loop cleanly.
-                break;
-            }
-            catch (Exception ex)
-            {
-                // Unexpected error from the queue (should not happen, but guard anyway).
-                _logger.LogError(ex, "Unexpected error dequeueing RAG job — retrying after delay.");
-                try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
-                catch (OperationCanceledException) { break; } // Host is shutting down — exit cleanly.
-                continue;
-            }
+            _logger.LogInformation("RagProcessorService started.");
 
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await ProcessRagJobAsync(ragJobId, stoppingToken);
+                int ragJobId;
+                try
+                {
+                    ragJobId = await _queue.DequeueAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Normal shutdown — exit the loop cleanly.
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error from the queue (should not happen, but guard anyway).
+                    _logger.LogError(ex, "Unexpected error dequeueing RAG job — retrying after delay.");
+                    try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+                    catch (OperationCanceledException) { break; } // Host is shutting down — exit cleanly.
+                    continue;
+                }
+
+                try
+                {
+                    await ProcessRagJobAsync(ragJobId, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unhandled error processing RAG job {JobId}.", ragJobId);
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unhandled error processing RAG job {JobId}.", ragJobId);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown via CancellationToken — normal, not an error.
+        }
+        catch (Exception ex)
+        {
+            // Should never reach here given the inner guards, but log if it does.
+            _logger.LogCritical(ex, "RagProcessorService encountered an unrecoverable error and has exited.");
         }
 
         _logger.LogInformation("RagProcessorService stopping.");

@@ -98,8 +98,7 @@ var app = builder.Build();
 // Create the IIS stdout-log directory so it exists before the web.config
 // stdoutLogEnabled="true" switch is flipped.  Failure here is non-fatal.
 try { Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "logs")); }
-catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-{ /* Best-effort — logging will still work through the ASP.NET Core pipeline */ }
+catch (Exception ex) { Console.Error.WriteLine($"[Startup] Could not create logs directory: {ex.GetType().Name}: {ex.Message}"); }
 
 // Apply any pending EF migrations and seed initial data.
 // Wrapped in a try-catch so that a transient database error (e.g. connection refused,
