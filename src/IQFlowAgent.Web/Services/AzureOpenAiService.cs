@@ -922,25 +922,108 @@ public class AzureOpenAiService : IAzureOpenAiService
             return GenerateMockSop(transcript, intake);
         }
 
-        const int MaxTranscriptChars = 6000;
+        const int MaxTranscriptChars = 12000;
         var trimmedTranscript = transcript.Length > MaxTranscriptChars
             ? transcript[..MaxTranscriptChars] + "\n[... transcript truncated ...]"
             : transcript;
 
         var systemPrompt = $"""
-            You are a business process analyst. Create a professional Standard Operating Procedure (SOP)
-            document from the provided meeting transcript. Use Markdown formatting.
+            You are a senior business-process documentation specialist. Your task is to produce a
+            COMPREHENSIVE, DETAILED Standard Operating Procedure (SOP) / Training Document from the
+            provided meeting transcript. The document must be ready for immediate use by a new employee
+            as a step-by-step training guide — not a high-level summary.
 
-            Context:
-            - Process: {intake.ProcessName}
+            Process context:
+            - Process Name: {intake.ProcessName}
             - Business Unit: {intake.BusinessUnit}
             - Department: {intake.Department}
+            - Process Owner: {intake.ProcessOwnerName}
+            - Location: {intake.City}, {intake.Country}
+            - Volume / Day: {intake.EstimatedVolumePerDay}
+            - Priority: {intake.Priority}
 
-            Include these sections: Title/metadata, Purpose & scope, Roles & responsibilities,
-            Pre-requisites, Step-by-step procedure (numbered), Exception handling,
-            Key metrics/SLAs, Revision history.
+            OUTPUT FORMAT (Markdown, use all sections below):
 
-            Be concise but thorough. Use plain language.
+            # SOP — <Process Name>
+            (Document header with Version, Effective Date, Owner, Department, Classification)
+
+            ## 1. Purpose & Objectives
+            (Detailed paragraph explaining WHY this process exists, what business outcome it delivers,
+             and how success is measured.)
+
+            ## 2. Scope
+            (Who this applies to, what systems/teams are included, what is explicitly out of scope.)
+
+            ## 3. Definitions & Acronyms
+            (Table: Term | Definition — list every acronym and specialised term used in this process.)
+
+            ## 4. Roles & Responsibilities (RACI)
+            (Table: Role | Name/Team | Responsible | Accountable | Consulted | Informed
+             Include at least 5 roles.)
+
+            ## 5. Pre-requisites & Access Requirements
+            (Numbered list: system accesses, training certifications, tools, data, permissions needed
+             before starting. Include how to request each one.)
+
+            ## 6. Process Overview (Flow Summary)
+            (A short narrative — 3-5 sentences — describing the end-to-end flow before the detailed steps.)
+
+            ## 7. Detailed Step-by-Step Procedure
+            (For EACH step use this sub-structure:
+               ### Step N: <Step Title>
+               **Trigger / Input:** what kicks off this step
+               **Actor:** who performs it
+               **System / Tool:** which application or form to use
+               **Actions (numbered sub-steps):**
+                  1. Navigate to …
+                  2. Enter / select …
+                  3. Click / confirm …
+               **Expected Output / Result:** what a correct completion looks like
+               **Screenshot / Reference:** [Screenshot N — <description>]
+               **Training Tip:** common mistakes and how to avoid them
+             Include a minimum of 8 detailed steps extracted from the transcript.)
+
+            ## 8. Quality Checkpoints & Validation
+            (Numbered checklist of quality gates that must be passed before moving to the next stage.
+             Include field-level validation rules where mentioned.)
+
+            ## 9. Exception Handling & Escalation
+            (Table: Exception Scenario | Likely Cause | Immediate Action | Escalation Path | SLA to Resolve
+             Include at least 6 exception scenarios.)
+
+            ## 10. Compliance & Regulatory Requirements
+            (List any regulatory, audit, data-privacy, or SOX/GDPR requirements that apply to this
+             process. Include record-retention periods if mentioned.)
+
+            ## 11. Key Performance Indicators (KPIs) & SLAs
+            (Table: Metric | Target | Measurement Frequency | Owner
+             Include processing time, error rate, throughput, escalation response time.)
+
+            ## 12. Tools & Systems Reference
+            (Table: System / Tool | Purpose | Access Request Process | Support Contact)
+
+            ## 13. Training & Certification
+            (Describe the onboarding plan for a new team member: self-study, shadowing, supervised
+             practice, sign-off criteria. List any mandatory certifications.)
+
+            ## 14. Frequently Asked Questions (FAQ)
+            (At least 6 Q&A pairs based on common issues mentioned in the transcript.)
+
+            ## 15. Related Documents & References
+            (Bullet list of related SOPs, policy documents, system manuals, or templates.)
+
+            ## 16. Revision History
+            (Table: Version | Date | Author | Change Summary)
+
+            WRITING RULES:
+            - Write in clear, direct language suitable for a new employee with no prior knowledge.
+            - Every step must be actionable (start with a verb: "Open", "Enter", "Select", "Click").
+            - Do NOT use vague phrases like "as appropriate" or "if necessary" without explaining when.
+            - Extract ALL specific details from the transcript (system names, field names, team names,
+              timeframes, thresholds, approval authorities).
+            - Where the transcript is silent on a detail, write a realistic placeholder and mark it
+              [TO CONFIRM] so the process owner knows to fill it in.
+            - Aim for a document that a reader could follow on Day 1 with zero prior knowledge.
             """;
 
         var userMessage = $"Meeting transcript:\n\n{trimmedTranscript}";
@@ -957,8 +1040,8 @@ public class AzureOpenAiService : IAzureOpenAiService
                     new { role = "system", content = systemPrompt },
                     new { role = "user",   content = userMessage }
                 },
-                max_tokens  = Math.Min(maxTokens, 2500),
-                temperature = 0.5
+                max_tokens  = Math.Max(maxTokens, 4000),
+                temperature = 0.3
             };
 
             var client  = _httpClientFactory.CreateClient();
@@ -994,74 +1077,356 @@ public class AzureOpenAiService : IAzureOpenAiService
     }
 
     private static string GenerateMockSop(string transcript, IntakeRecord intake) => $"""
-        # Standard Operating Procedure — {intake.ProcessName}
+        # SOP — {intake.ProcessName}
 
         **Version:** 1.0
-        **Date:** {DateTime.UtcNow:dd MMM yyyy}
+        **Effective Date:** {DateTime.UtcNow:dd MMM yyyy}
         **Business Unit:** {intake.BusinessUnit}
         **Department:** {intake.Department}
         **Process Owner:** {intake.ProcessOwnerName}
+        **Location:** {intake.City}, {intake.Country}
+        **Classification:** Internal Use Only
+        **Document Status:** Draft — Awaiting Process Owner Sign-off
 
         ---
 
-        ## 1. Purpose
+        ## 1. Purpose & Objectives
 
-        This SOP defines the standard procedure for **{intake.ProcessName}** within the {intake.BusinessUnit} business unit.
-        It has been generated from a recorded meeting transcript and captures the agreed process steps, roles, and exception handling.
+        This Standard Operating Procedure defines the end-to-end execution of **{intake.ProcessName}**
+        within the **{intake.BusinessUnit}** business unit, {intake.Department} department.
+        The process has been captured from a recorded team meeting and formalised here as a training
+        document for new and existing team members.
+
+        **Objectives:**
+        - Ensure consistent, accurate execution of {intake.ProcessName} across all team members
+        - Reduce error rates and rework through clear step-level guidance
+        - Meet defined SLA targets and compliance requirements
+        - Provide a self-service training reference for onboarding new staff
+
+        **Success Metrics:** Zero deviation from process steps during audits; error rate below 2%;
+        all transactions completed within the agreed SLA window.
+
+        ---
 
         ## 2. Scope
 
-        Applies to all team members in {intake.Department} responsible for executing or overseeing this process.
+        **In Scope:**
+        - All team members in {intake.Department} who execute or supervise {intake.ProcessName}
+        - Estimated volume: approximately {intake.EstimatedVolumePerDay} transactions per day
+        - Applicable systems, tools, and approval workflows described in this document
 
-        ## 3. Roles & Responsibilities
-
-        | Role | Responsibility |
-        |------|---------------|
-        | Process Owner | {intake.ProcessOwnerName} — overall accountability |
-        | Team Members | Execute daily process steps as defined below |
-        | Manager | Review exceptions and approve deviations |
-
-        ## 4. Pre-requisites
-
-        - Access to relevant systems and tools
-        - Completion of onboarding training
-        - Understanding of compliance requirements
-
-        ## 5. Step-by-Step Procedure
-
-        1. **Initiate** — Receive request or trigger event from upstream system
-        2. **Validate** — Check completeness and accuracy of input data
-        3. **Process** — Apply business rules and execute the core workflow
-        4. **Review** — Quality-check outputs against defined criteria
-        5. **Escalate** — If exceptions arise, follow the escalation path
-        6. **Complete** — Record outcomes and update relevant systems
-        7. **Notify** — Communicate completion to stakeholders
-
-        ## 6. Exception Handling
-
-        | Exception | Action | Escalation |
-        |-----------|--------|------------|
-        | Invalid input data | Return to requestor with guidance | Level 1 Support |
-        | System unavailable | Log ticket and retry after 30 min | IT Support |
-        | SLA breach risk | Notify manager immediately | Process Owner |
-
-        ## 7. Key Metrics / SLAs
-
-        - Target processing time: within defined SLA window
-        - Error rate target: < 2%
-        - Escalation SLA: respond within 4 business hours
-
-        ## 8. Revision History
-
-        | Version | Date | Author | Changes |
-        |---------|------|--------|---------|
-        | 1.0 | {DateTime.UtcNow:dd MMM yyyy} | AI-Generated | Initial version from meeting transcript |
+        **Out of Scope:**
+        - Downstream processes that consume the output of this process [TO CONFIRM]
+        - System administration or configuration changes
+        - Processes handled by external vendors unless explicitly noted
 
         ---
 
-        *This document was auto-generated from a meeting recording. Please review and validate before publishing.*
+        ## 3. Definitions & Acronyms
 
-        [Note: This is a mock SOP — configure Azure Speech + OpenAI in Tenant AI Settings for AI-generated content]
+        | Term / Acronym | Definition |
+        |----------------|-----------|
+        | SOP | Standard Operating Procedure |
+        | SLA | Service Level Agreement — the agreed time target for completing a task |
+        | QC | Quality Control — review step to validate correctness before hand-off |
+        | Intake | The formal submission of a process request into this system |
+        | RAG | Retrieve–Augment–Generate — AI technique used to analyse process documents |
+        | Process Owner | The named individual accountable for the outcome of this process |
+        | Escalation | Raising an unresolved exception to a higher authority for resolution |
+        | [TO CONFIRM] | Placeholder — process owner must supply this detail before publishing |
+
+        ---
+
+        ## 4. Roles & Responsibilities (RACI)
+
+        | Role | Name / Team | Responsible (R) | Accountable (A) | Consulted (C) | Informed (I) |
+        |------|-------------|:-:|:-:|:-:|:-:|
+        | Process Owner | {intake.ProcessOwnerName} | | ✔ | ✔ | ✔ |
+        | Team Member / Operator | {intake.Department} Team | ✔ | | | |
+        | Team Lead / Supervisor | {intake.Department} Lead [TO CONFIRM] | | | ✔ | ✔ |
+        | Quality Controller | QC Team [TO CONFIRM] | ✔ | | | |
+        | IT Support | IT Helpdesk | | | ✔ | |
+        | Compliance / Audit | Risk & Compliance Team | | | ✔ | ✔ |
+
+        ---
+
+        ## 5. Pre-requisites & Access Requirements
+
+        Before executing this process ensure the following are in place:
+
+        1. **System Access** — Active login credentials for all required systems [TO CONFIRM — list systems].
+           Request via IT Service Desk ticket, allow 1–2 business days.
+        2. **Mandatory Training** — Completion of induction training and this SOP read-and-sign-off.
+        3. **Role Assignment** — Your manager must have assigned you the correct role/permission group.
+        4. **Reference Data** — Current approved look-up tables and templates available in the shared drive.
+        5. **Hardware / Tools** — Dual monitors recommended; stable VPN connection if working remotely.
+        6. **Compliance Awareness** — Familiarity with the data-handling policy relevant to {intake.BusinessUnit}.
+
+        ---
+
+        ## 6. Process Overview (Flow Summary)
+
+        The {intake.ProcessName} process begins when a trigger event is received (manual request, system
+        alert, or scheduled batch). The operator validates the incoming data, processes it according to
+        business rules, applies the required quality checks, and then hands off the output to the
+        downstream team or system. Any exception is routed through the escalation path. The process
+        concludes when the outcome is recorded in the system of record and all stakeholders are notified.
+
+        ---
+
+        ## 7. Detailed Step-by-Step Procedure
+
+        ### Step 1: Receive & Log the Incoming Request
+        **Trigger / Input:** Incoming request from upstream system, email, or queue  
+        **Actor:** Operator  
+        **System / Tool:** [Primary system — TO CONFIRM]  
+        **Actions:**
+        1. Open the task queue or inbox in [System Name — TO CONFIRM].
+        2. Identify the new request — check priority flag and submission timestamp.
+        3. Log the request reference number in the tracking register [TO CONFIRM — location].
+        4. Acknowledge receipt by updating the status to "In Progress".
+        **Expected Output:** Request logged with a unique reference number and status "In Progress".
+        **Screenshot / Reference:** [Screenshot 1 — Queue screen with new request highlighted]  
+        **Training Tip:** Do not skip the logging step. Missing entries cause downstream reconciliation failures.
+
+        ### Step 2: Validate Input Data
+        **Trigger / Input:** Logged request from Step 1  
+        **Actor:** Operator  
+        **System / Tool:** [Validation screen — TO CONFIRM]  
+        **Actions:**
+        1. Open the request detail view.
+        2. Check all mandatory fields are populated (highlighted in red if missing).
+        3. Cross-reference the customer/account number against the master data table.
+        4. If data is complete and valid → proceed to Step 3.
+        5. If data is incomplete → flag with status "Returned" and notify the requestor (use template email [TO CONFIRM]).
+        **Expected Output:** Validated record ready for processing, or returned to requestor with clear reason.
+        **Screenshot / Reference:** [Screenshot 2 — Validation screen with field highlights]  
+        **Training Tip:** The most common error is accepting records with a blank "Account Reference". Always verify before proceeding.
+
+        ### Step 3: Apply Business Rules & Process the Transaction
+        **Trigger / Input:** Validated record from Step 2  
+        **Actor:** Operator  
+        **System / Tool:** [Processing module — TO CONFIRM]  
+        **Actions:**
+        1. Open the processing module and load the validated record.
+        2. Select the correct transaction type from the drop-down list.
+        3. Enter all required data fields according to the data-entry guide [TO CONFIRM — ref doc].
+        4. Run the auto-calculation / auto-populate function if available.
+        5. Review calculated values before saving — do not override without supervisor approval.
+        6. Save the draft record (do NOT submit yet).
+        **Expected Output:** Draft transaction record saved with all required fields populated.
+        **Screenshot / Reference:** [Screenshot 3 — Processing form with completed fields]  
+        **Training Tip:** Use the Tab key to move between fields to ensure no field is skipped.
+
+        ### Step 4: Quality Control Review
+        **Trigger / Input:** Draft record from Step 3  
+        **Actor:** Operator (self-check) then QC Reviewer  
+        **System / Tool:** QC checklist / review screen  
+        **Actions:**
+        1. Complete the self-check QC checklist (see Section 8).
+        2. Attach any supporting documents required for audit.
+        3. Route the record to the QC Reviewer via the "Submit for Review" button.
+        4. QC Reviewer: open the review queue, open the record, verify against the QC checklist.
+        5. Approve → proceed to Step 5. Reject → add rejection notes and return to operator.
+        **Expected Output:** Record approved by QC Reviewer; status updated to "QC Passed".
+        **Screenshot / Reference:** [Screenshot 4 — QC review screen with approve/reject buttons]  
+        **Training Tip:** Every rejection must have written notes — vague rejections create rework loops.
+
+        ### Step 5: Obtain Authorisation (if required)
+        **Trigger / Input:** QC-passed record; authorisation threshold: [TO CONFIRM — e.g. >$10,000]  
+        **Actor:** Team Lead / Authoriser  
+        **System / Tool:** Approval workflow module  
+        **Actions:**
+        1. System automatically routes records above the threshold to the authoriser's queue.
+        2. Authoriser reviews the record and supporting documentation.
+        3. Authoriser approves (digital sign-off) or rejects with written justification.
+        4. Operator receives notification of the decision.
+        **Expected Output:** Approved record ready for submission, or rejection returned with reason.
+        **Screenshot / Reference:** [Screenshot 5 — Approval queue and sign-off screen]  
+        **Training Tip:** Records below the threshold skip this step automatically — do not manually escalate unless there is a quality concern.
+
+        ### Step 6: Submit / Finalise the Transaction
+        **Trigger / Input:** Authorised and QC-passed record  
+        **Actor:** Operator  
+        **System / Tool:** [Submission screen — TO CONFIRM]  
+        **Actions:**
+        1. Open the approved record.
+        2. Click "Submit" / "Finalise" — confirm the submission dialog.
+        3. System assigns a final transaction ID — record this in the tracking register.
+        4. Status updates to "Complete" / "Submitted" automatically.
+        **Expected Output:** Transaction successfully submitted; confirmation number generated.
+        **Screenshot / Reference:** [Screenshot 6 — Confirmation screen with transaction ID]  
+        **Training Tip:** Screenshot or note the transaction ID immediately — it is required for all future queries on this record.
+
+        ### Step 7: Update Systems of Record & Notify Stakeholders
+        **Trigger / Input:** Confirmed submission from Step 6  
+        **Actor:** Operator  
+        **System / Tool:** CRM / ERP / tracking register [TO CONFIRM]  
+        **Actions:**
+        1. Update the tracking register with final status, transaction ID, and completion timestamp.
+        2. Send the completion notification to the requestor using the standard template.
+        3. Update any linked systems (CRM, ERP, SharePoint list) with the outcome.
+        4. Attach the final confirmation to the case/ticket.
+        **Expected Output:** All systems updated; requestor notified; case closed.
+        **Screenshot / Reference:** [Screenshot 7 — Updated tracking register row]  
+        **Training Tip:** Notifications must be sent within 30 minutes of submission. Late notifications are a common audit finding.
+
+        ### Step 8: End-of-Day Reconciliation
+        **Trigger / Input:** End of business day or batch close  
+        **Actor:** Team Lead  
+        **System / Tool:** Reconciliation report [TO CONFIRM]  
+        **Actions:**
+        1. Run the daily reconciliation report for {intake.ProcessName}.
+        2. Compare completed count against the queue count at start of day.
+        3. Investigate any discrepancies — identify records in error or pending states.
+        4. Escalate unresolved items to the process owner before close of business.
+        5. Save and distribute the reconciliation report to stakeholders [TO CONFIRM — distribution list].
+        **Expected Output:** Balanced reconciliation report; all exceptions documented.
+        **Screenshot / Reference:** [Screenshot 8 — Reconciliation report balanced]  
+        **Training Tip:** Never close the day with unexplained discrepancies — every open item needs an owner.
+
+        ---
+
+        ## 8. Quality Checkpoints & Validation
+
+        Complete this checklist before progressing past each gate:
+
+        **Pre-Processing Gate (before Step 3):**
+        - [ ] Mandatory fields all populated — no blanks
+        - [ ] Account/reference number verified against master data
+        - [ ] Correct transaction type selected
+        - [ ] No duplicate request already in the system
+
+        **Pre-Submission Gate (before Step 6):**
+        - [ ] QC checklist completed and signed off
+        - [ ] Supporting documents attached
+        - [ ] Authorisation obtained (if above threshold)
+        - [ ] All calculated values reviewed and confirmed
+        - [ ] Audit trail entry completed
+
+        **End-of-Day Gate:**
+        - [ ] Reconciliation report balanced
+        - [ ] All exceptions assigned an owner with a resolution date
+        - [ ] No records left in "Draft" status overnight
+
+        ---
+
+        ## 9. Exception Handling & Escalation
+
+        | Exception Scenario | Likely Cause | Immediate Action | Escalation Path | Resolution SLA |
+        |--------------------|-------------|-----------------|----------------|---------------|
+        | Incomplete / invalid input data | Missing fields at source | Return to requestor with checklist | Level 1: Team Lead | Same business day |
+        | Duplicate record detected | Upstream system error | Hold record; do not process | Level 1: Team Lead | 2 hours |
+        | System unavailable (planned) | Maintenance window | Use offline contingency form | IT Support via helpdesk | Per maintenance schedule |
+        | System unavailable (unplanned) | Outage | Log IT ticket; pause processing | Level 1: IT; Level 2: IT Manager | 4 hours |
+        | Authorisation not received within SLA | Authoriser unavailable | Send reminder; escalate to deputy | Process Owner | 4 business hours |
+        | Data quality failure at QC | Input error by operator | Return to operator for correction | Team Lead if recurring | 1 business day |
+        | SLA breach risk (> 80% of window elapsed) | Volume spike or late start | Notify manager immediately | Process Owner | Immediate |
+        | Regulatory / compliance flag | Data-privacy concern | Halt transaction; do not process | Compliance team | Immediate |
+
+        ---
+
+        ## 10. Compliance & Regulatory Requirements
+
+        - All data processed under this procedure is subject to the organisation's Data Protection Policy [TO CONFIRM — policy ref].
+        - Records must be retained for [TO CONFIRM — e.g. 7 years] in line with statutory requirements.
+        - Any transaction above [TO CONFIRM — threshold] requires a dual-authorisation control.
+        - Audit logs generated by the system are immutable and must not be altered.
+        - Staff must complete annual data-handling refresher training before processing live transactions.
+        - Personal data fields (names, account numbers) must not be copied to unencrypted media.
+
+        ---
+
+        ## 11. Key Performance Indicators (KPIs) & SLAs
+
+        | Metric | Target | Measurement Frequency | Owner |
+        |--------|--------|-----------------------|-------|
+        | End-to-end processing time | ≤ [TO CONFIRM] hours per transaction | Daily | Process Owner |
+        | Error / rework rate | < 2% of daily volume | Weekly | QC Lead |
+        | SLA breach rate | 0% | Daily | Team Lead |
+        | First-time-right rate | ≥ 95% | Weekly | Process Owner |
+        | Authorisation turnaround | ≤ 4 business hours | Daily | Authoriser |
+        | Daily reconciliation completion | 100% by [TO CONFIRM] each day | Daily | Team Lead |
+
+        ---
+
+        ## 12. Tools & Systems Reference
+
+        | System / Tool | Purpose | Access Request | Support Contact |
+        |--------------|---------|---------------|----------------|
+        | [Primary System — TO CONFIRM] | Core transaction processing | IT Service Desk | IT Helpdesk |
+        | Tracking Register (SharePoint / Excel) | Logging and reconciliation | Team Lead | Team Lead |
+        | Email Client | Notifications and communications | IT Service Desk | IT Helpdesk |
+        | QC Review Module | Quality review and approval | Team Lead request | IT Helpdesk |
+        | IQFlow Agent | Process intake and AI analysis | System Administrator | IQFlow Support |
+
+        ---
+
+        ## 13. Training & Certification
+
+        **New Starter Onboarding Plan:**
+
+        | Week | Activity | Delivery | Sign-off Required |
+        |------|----------|----------|------------------|
+        | Week 1 | Read this SOP and all referenced documents | Self-study | Acknowledgement form |
+        | Week 1 | Attend induction session with Team Lead | Classroom / virtual | N/A |
+        | Week 2 | Shadow an experienced team member for full process | On-the-job | Team Lead |
+        | Week 2 | Complete test transactions in sandbox environment | Supervised practice | Team Lead |
+        | Week 3 | Process live transactions with supervisor check | Supervised live | Supervisor |
+        | Week 4 | Independent processing with spot-checks | Independent | Process Owner |
+
+        **Mandatory Certifications:** [TO CONFIRM — list any compliance or system certifications required]
+
+        ---
+
+        ## 14. Frequently Asked Questions (FAQ)
+
+        **Q1: What do I do if a mandatory field is greyed out and I cannot populate it?**  
+        A: This usually means a prerequisite field earlier in the form has not been completed. Scroll up and check for blank required fields. If the issue persists, raise an IT ticket.
+
+        **Q2: Can I process a record even if it has not yet been QC approved?**  
+        A: No. QC approval is a mandatory gate. Processing without approval is a control violation and will be flagged in the next audit.
+
+        **Q3: What happens if I accidentally submit a record with incorrect data?**  
+        A: Contact your Team Lead immediately. Depending on the stage, a reversal or amendment may be possible. Do not attempt to fix it yourself without guidance.
+
+        **Q4: Who do I contact if I cannot reach the authoriser within the SLA?**  
+        A: Escalate to the Process Owner ({intake.ProcessOwnerName}). If unavailable, escalate to the next-level manager. Always document the escalation in the tracking register.
+
+        **Q5: How long should I keep local copies of processed records?**  
+        A: You should not keep local copies. All records must be stored in the designated system of record. Local copies are a data-security risk.
+
+        **Q6: The system is showing a duplicate warning — should I process anyway?**  
+        A: No. Hold the record and consult your Team Lead. Duplicate processing is a frequent audit finding and can cause financial or compliance issues.
+
+        ---
+
+        ## 15. Related Documents & References
+
+        - Data Protection & Privacy Policy [TO CONFIRM — link]
+        - IT Access Request Procedure [TO CONFIRM — link]
+        - Business Continuity / Contingency Plan for {intake.ProcessName} [TO CONFIRM — link]
+        - QC Checklist Template [TO CONFIRM — link]
+        - Escalation Contact Directory [TO CONFIRM — link]
+        - Onboarding Induction Pack — {intake.BusinessUnit} [TO CONFIRM — link]
+
+        ---
+
+        ## 16. Revision History
+
+        | Version | Date | Author | Change Summary |
+        |---------|------|--------|---------------|
+        | 1.0 | {DateTime.UtcNow:dd MMM yyyy} | AI-Generated (IQFlow Agent) | Initial draft generated from meeting transcript |
+
+        ---
+
+        *This document was auto-generated from a meeting recording by IQFlow Agent.
+        It must be reviewed and validated by {intake.ProcessOwnerName} before being published as an official SOP.
+        All [TO CONFIRM] placeholders must be resolved prior to final sign-off.*
+
+        > **Note:** This is a mock SOP generated without Azure Speech + OpenAI credentials.
+        > Configure Azure Speech and Azure OpenAI in Tenant AI Settings to produce AI-generated content
+        > directly extracted from your recorded meeting transcript.
         """;
 
     // ── TestConnectionAsync ────────────────────────────────────────────────────

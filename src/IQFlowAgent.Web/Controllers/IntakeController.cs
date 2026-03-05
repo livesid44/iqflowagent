@@ -293,7 +293,52 @@ public class IntakeController : Controller
         ViewBag.ExistingTaskTitles = existingTitles;
         ViewBag.TaskCount = existingTitles.Count;
 
+        // Load all documents attached to this intake (uploaded files + AI-generated SOP)
+        ViewBag.IntakeDocuments = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == id)
+            .OrderBy(d => d.UploadedAt)
+            .ToListAsync();
+
         return View(record);
+    }
+
+    // GET /Intake/DownloadDocument/5 — stream or redirect a document by its IntakeDocument id
+    public async Task<IActionResult> DownloadDocument(int id)
+    {
+        var doc = await _db.IntakeDocuments.FindAsync(id);
+        if (doc == null) return NotFound();
+
+        // Blob URL — redirect to Azure so the browser can download it directly
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return Redirect(doc.FilePath);
+
+        // Local file — resolve and validate path to prevent directory traversal
+        var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+        var relativePart = doc.FilePath.StartsWith('/')
+            ? doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)
+            : doc.FilePath;
+        var fullPath = Path.GetFullPath(Path.Combine(_env.WebRootPath, relativePart));
+
+        // Reject any path that escapes the uploads directory
+        if (!fullPath.StartsWith(uploadsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !fullPath.Equals(uploadsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("DownloadDocument: path '{Path}' is outside uploads root — blocked.", fullPath);
+            return NotFound();
+        }
+
+        if (!System.IO.File.Exists(fullPath))
+        {
+            _logger.LogWarning("DownloadDocument: file not found at {Path}", fullPath);
+            return NotFound();
+        }
+
+        var contentType = doc.ContentType ?? "application/octet-stream";
+        var fileName = string.IsNullOrWhiteSpace(doc.FileName) ? Path.GetFileName(fullPath) : doc.FileName;
+        // Stream the file directly without loading it fully into memory
+        var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 4096, useAsync: true);
+        return File(stream, contentType, fileName);
     }
 
     // GET /Intake/Edit/5 — edit form (blocked for Closed intakes)
