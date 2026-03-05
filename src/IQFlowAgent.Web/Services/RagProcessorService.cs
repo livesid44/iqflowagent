@@ -120,6 +120,11 @@ public class RagProcessorService : BackgroundService
 
                 if (AudioVideoExtensions.Contains(ext))
                 {
+                    // Ensure audio/video is in blob storage — Azure Batch Transcription requires
+                    // a publicly accessible HTTPS URL. Files saved to local disk during intake
+                    // submission are uploaded here (deferred from the HTTP POST handler).
+                    await EnsureAudioInBlobAsync(doc, intake, db, blobSvc, ct);
+
                     // ── Transcribe audio/video ─────────────────────────────
                     await TranscribeDocumentAsync(doc, intake, db, speechSvc, aiService, blobSvc, aggregatedText, ct);
                 }
@@ -417,4 +422,70 @@ public class RagProcessorService : BackgroundService
             "low"  => "Low",
             _      => "Medium"
         };
+
+    // ─── Blob upload helpers ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// If the audio/video document is stored at a local disk path and blob storage is
+    /// configured, upload it to blob now and update the stored path.  Azure Batch
+    /// Transcription requires a publicly accessible HTTPS URL, so this step must happen
+    /// before <see cref="TranscribeDocumentAsync"/> is called.
+    /// </summary>
+    private async Task EnsureAudioInBlobAsync(
+        IntakeDocument doc,
+        IntakeRecord   intake,
+        ApplicationDbContext db,
+        IBlobStorageService blobSvc,
+        CancellationToken ct)
+    {
+        // Already a blob URL — nothing to do.
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Blob not configured — transcription will fall back to mock, no upload needed.
+        if (!await blobSvc.IsConfiguredAsync())
+            return;
+
+        var physicalPath = MapToPhysicalPath(doc.FilePath);
+        if (!File.Exists(physicalPath))
+        {
+            _logger.LogWarning("Audio file not found on disk for upload to blob: {Path}", physicalPath);
+            return;
+        }
+
+        try
+        {
+            using var fs = File.OpenRead(physicalPath);
+            var blobUrl = await blobSvc.UploadAsync(
+                fs,
+                Path.GetFileName(doc.FilePath),
+                doc.ContentType ?? "application/octet-stream");
+
+            _logger.LogInformation("Uploaded audio/video {FileName} to blob: {Url}", doc.FileName, blobUrl);
+
+            // Update path references in the DB so downstream code (speech service) uses the blob URL.
+            if (string.Equals(intake.UploadedFilePath, doc.FilePath, StringComparison.OrdinalIgnoreCase))
+                intake.UploadedFilePath = blobUrl;
+
+            doc.FilePath = blobUrl;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload audio/video {FileName} to blob — transcription will use mock.", doc.FileName);
+        }
+    }
+
+    /// <summary>Maps a virtual path like <c>/uploads/foo.mp4</c> to its absolute physical path.
+    /// If the path already exists verbatim on disk it is treated as an absolute system path.</summary>
+    private string MapToPhysicalPath(string filePath)
+    {
+        // If the file exists at the given path verbatim, it is already a physical path.
+        if (Path.IsPathRooted(filePath) && File.Exists(filePath))
+            return filePath;
+
+        // Virtual web path like /uploads/filename → map relative to wwwroot.
+        return Path.Combine(_env.WebRootPath,
+            filePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+    }
 }

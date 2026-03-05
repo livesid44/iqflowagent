@@ -101,7 +101,7 @@
         <div class="step active"><span class="num">4</span>Documents</div>
     </div>
 
-    <form asp-action="Create" method="post" enctype="multipart/form-data">
+    <form id="intakeCreateForm" asp-action="Create" method="post" enctype="multipart/form-data">
         @Html.AntiForgeryToken()
 
         <!-- ── SECTION 1: Process Information ───────────────────── -->
@@ -282,14 +282,38 @@
 
         <!-- ── Actions ──────────────────────────────────────────── -->
         <div class="form-actions">
-            <button type="submit" class="btn-submit">
+            <button type="submit" id="intakeSubmitBtn" class="btn-submit">
                 <i class="bi bi-send me-2"></i>Submit &amp; Analyse
             </button>
             <a asp-action="Index" class="btn-cancel">Cancel</a>
         </div>
     </form>
 </main>
-</div><!-- close app-layout -->
+
+<!-- ── Upload Progress Overlay ──────────────────────────────────────── -->
+<div id="uploadOverlay" role="status" aria-live="polite"
+     style="display:none;position:fixed;inset:0;background:rgba(26,42,94,0.88);z-index:9999;
+            align-items:center;justify-content:center;flex-direction:column;">
+    <div style="text-align:center;max-width:420px;width:90%;padding:32px;background:rgba(255,255,255,0.08);
+                border-radius:16px;backdrop-filter:blur(4px);">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5"
+             style="margin-bottom:16px;" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <h2 id="uploadOverlayTitle" style="color:#fff;font-size:1.25rem;margin:0 0 8px;">Saving Files to Server…</h2>
+        <p id="uploadOverlaySubtitle"
+           style="color:rgba(255,255,255,0.7);font-size:0.9rem;margin:0 0 20px;line-height:1.5;">
+            Please keep this tab open. Files are saved to the server<br>and processing will continue in the background.
+        </p>
+        <div style="background:rgba(255,255,255,0.18);border-radius:99px;height:10px;overflow:hidden;">
+            <div id="uploadProgressBar"
+                 style="height:100%;background:#22c55e;border-radius:99px;width:0%;transition:width 0.3s ease;"></div>
+        </div>
+        <p id="uploadProgressPct" style="color:rgba(255,255,255,0.8);font-size:0.9rem;margin-top:10px;">0%</p>
+    </div>
+</div>
 
 @section Scripts {
 <partial name="_ValidationScriptsPartial" />
@@ -454,5 +478,109 @@
             getCitiesForCountries(countryMs.getSelected()), true, null
         );
     });
+</script>
+
+<script>
+// ── XHR upload with progress overlay ─────────────────────────────────────────
+(function () {
+    const form    = document.getElementById('intakeCreateForm');
+    const overlay = document.getElementById('uploadOverlay');
+    const bar     = document.getElementById('uploadProgressBar');
+    const pct     = document.getElementById('uploadProgressPct');
+    const title   = document.getElementById('uploadOverlayTitle');
+    const sub     = document.getElementById('uploadOverlaySubtitle');
+    const btn     = document.getElementById('intakeSubmitBtn');
+
+    function showOverlay() { overlay.style.display = 'flex'; }
+    function hideOverlay() { overlay.style.display = 'none'; }
+
+    function setProgress(value, label) {
+        bar.style.width = value + '%';
+        pct.textContent = label || (value + '%');
+    }
+
+    function showErrors(errors) {
+        hideOverlay();
+        if (btn) btn.disabled = false;
+        const existing = document.getElementById('xhrErrorBanner');
+        if (existing) existing.remove();
+        const banner = document.createElement('div');
+        banner.id = 'xhrErrorBanner';
+        banner.style.cssText = 'background:#fde8ec;border:1px solid #fca5a5;border-radius:8px;' +
+            'padding:12px 16px;margin-bottom:20px;color:#c01530;';
+        const heading = document.createElement('strong');
+        heading.textContent = 'Please fix the following errors:';
+        banner.appendChild(heading);
+        const ul = document.createElement('ul');
+        ul.style.margin = '8px 0 0 0';
+        errors.forEach(function (msg) {
+            const li = document.createElement('li');
+            li.textContent = msg;
+            ul.appendChild(li);
+        });
+        banner.appendChild(ul);
+        form.insertBefore(banner, form.firstChild);
+        banner.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (btn) btn.disabled = true;
+
+        const data = new FormData(form);
+        showOverlay();
+        setProgress(0);
+        title.textContent = 'Saving Files to Server\u2026';
+        sub.textContent   = 'Please keep this tab open. Files are saved to the server and processing continues in the background.';
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', form.action || window.location.href, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.upload.addEventListener('progress', function (e) {
+            if (e.lengthComputable) {
+                const p = Math.round(e.loaded / e.total * 100);
+                setProgress(p);
+                if (p >= 100) {
+                    title.textContent = 'Saving\u2026';
+                    setProgress(100, 'Queuing for processing\u2026');
+                }
+            }
+        });
+
+        xhr.addEventListener('load', function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    if (res.success && res.redirectUrl) {
+                        title.textContent = 'Files Saved!';
+                        setProgress(100, 'Redirecting\u2026');
+                        sub.textContent = 'Files saved. Background processing will notify you when done.';
+                        window.location.href = res.redirectUrl;
+                        return;
+                    }
+                    showErrors(res.errors || [res.message || 'An unexpected error occurred.']);
+                } catch (_) {
+                    showErrors(['An unexpected error occurred. Please try again.']);
+                }
+            } else if (xhr.status === 400) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    showErrors(res.errors || [res.message || 'Validation failed.']);
+                } catch (_) {
+                    showErrors(['Validation failed. Please check all fields.']);
+                }
+            } else {
+                showErrors(['Upload failed (HTTP\u00a0' + xhr.status + '). Please try again.']);
+            }
+        });
+
+        xhr.addEventListener('error', function () {
+            showErrors(['Network error. Please check your connection and try again.']);
+        });
+
+        xhr.send(data);
+    });
+}());
 </script>
 }
