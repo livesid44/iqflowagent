@@ -221,14 +221,14 @@ public class RagProcessorService : BackgroundService
             doc.TranscriptStatus = "Complete";
             await db.SaveChangesAsync(ct);
 
-            // Generate SOP from transcript
-            var sop = await aiService.GenerateSopFromTranscriptAsync(transcript, intake);
+            // Generate SOP from transcript and convert to PDF
+            var sopMarkdown = await aiService.GenerateSopFromTranscriptAsync(transcript, intake);
 
-            // Save SOP as a new IntakeDocument — sanitize source filename for safe path
+            // Convert the SOP markdown to a PDF — sanitize source filename for safe path
             var safeSourceName = System.Text.RegularExpressions.Regex.Replace(
                 Path.GetFileNameWithoutExtension(doc.FileName), @"[^a-zA-Z0-9\-_]", "_");
-            var sopFileName = $"{intake.IntakeId}-SOP-{safeSourceName}.md";
-            var sopBytes    = System.Text.Encoding.UTF8.GetBytes(sop);
+            var sopFileName = $"{intake.IntakeId}-SOP-{safeSourceName}.pdf";
+            var sopBytes    = SopPdfRenderer.Render(sopMarkdown, intake.ProcessName);
 
             string sopPath;
             if (await blobSvc.IsConfiguredAsync())
@@ -236,7 +236,7 @@ public class RagProcessorService : BackgroundService
                 sopPath = await blobSvc.UploadAsync(
                     new MemoryStream(sopBytes),
                     sopFileName,
-                    "text/markdown");
+                    "application/pdf");
             }
             else
             {
@@ -250,13 +250,13 @@ public class RagProcessorService : BackgroundService
             doc.SopDocumentPath = sopPath;
             await db.SaveChangesAsync(ct);
 
-            // Add SOP as a separate document record
+            // Add SOP PDF as a separate document record attached to the intake
             db.IntakeDocuments.Add(new IntakeDocument
             {
                 IntakeRecordId   = intake.Id,
                 FileName         = sopFileName,
                 FilePath         = sopPath,
-                ContentType      = "text/markdown",
+                ContentType      = "application/pdf",
                 FileSize         = sopBytes.Length,
                 DocumentType     = "SopDocument",
                 UploadedAt       = DateTime.UtcNow,

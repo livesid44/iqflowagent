@@ -83,11 +83,36 @@ builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(formO
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+// Create the IIS stdout-log directory so it exists before the web.config
+// stdoutLogEnabled="true" switch is flipped.  Failure here is non-fatal.
+try { Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "logs")); }
+catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+{ /* Best-effort — logging will still work through the ASP.NET Core pipeline */ }
+
+// Apply any pending EF migrations and seed initial data.
+// Wrapped in a try-catch so that a transient database error (e.g. connection refused,
+// a migration conflict on the first deploy of a new schema) does NOT crash the
+// ASP.NET Core in-process host.  On IIS an unhandled startup exception kills the
+// w3wp worker, triggering rapid-fail protection and returning HTTP 503 to every
+// visitor.  By catching here we keep the process alive, log the error clearly, and
+// let the application serve an informative error page instead of a blank 503.
+try
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     await db.Database.MigrateAsync();
     await DbSeeder.SeedAsync(scope.ServiceProvider);
+}
+catch (Exception ex)
+{
+    // Use the framework logger so the message appears in both the ASP.NET Core
+    // log pipeline AND the IIS stdout log (when stdoutLogEnabled="true").
+    var startupLog = app.Services.GetRequiredService<ILogger<Program>>();
+    startupLog.LogCritical(ex,
+        "Startup: database migration or seeding failed. " +
+        "The application will continue but some features may be unavailable. " +
+        "Verify the connection string and database state, then restart the application.");
+    // Do NOT re-throw — re-throwing terminates the process and causes IIS 503.
 }
 
 if (!app.Environment.IsDevelopment())
