@@ -7,10 +7,11 @@
 <main class="app-main">
     <div class="page-title">AI &amp; Storage Settings</div>
     <div class="page-subtitle">Configure Azure OpenAI, Blob Storage and Speech-to-Text for <strong>@tenant?.Name</strong></div>
-    @if (TempData["Success"] != null) { <div class="alert-success-bar">@TempData["Success"]</div> }
-    @if (TempData["Error"] != null)   { <div class="alert-error-bar">@TempData["Error"]</div> }
+    @if (TempData["Success"] != null) { <div class="alert-success-bar" id="save-success">@TempData["Success"]</div> }
+    <div class="alert-error-bar" id="save-error" style="display:none"></div>
+    <div class="alert-success-bar" id="save-ok" style="display:none"></div>
 
-    <form asp-action="Save" method="post">
+    <form id="ai-settings-form" asp-action="Save" method="post" onsubmit="return saveSettings(event)">
         @Html.AntiForgeryToken()
         <input type="hidden" asp-for="Id" />
         <input type="hidden" asp-for="TenantId" />
@@ -88,7 +89,57 @@
             <p style="color:#888;font-size:12px;margin-bottom:16px;">Last updated: @Model.UpdatedAt.ToString("dd MMM yyyy HH:mm") by @Model.UpdatedByUserId</p>
         }
 
-        <button type="submit" class="btn-primary">Save Settings</button>
+        <button type="submit" class="btn-primary" id="save-btn">Save Settings</button>
+        &nbsp;<a href="/TenantAiSettings/Diagnose" target="_blank" class="btn-secondary" style="font-size:12px;">Run Diagnostics</a>
     </form>
 </main>
 </div>
+<script>
+async function saveSettings(e) {
+    e.preventDefault();
+    const btn = document.getElementById('save-btn');
+    const errEl = document.getElementById('save-error');
+    const okEl  = document.getElementById('save-ok');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+        const form = document.getElementById('ai-settings-form');
+        const resp = await fetch('/TenantAiSettings/Save', {
+            method: 'POST',
+            body: new FormData(form),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        let data;
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+            data = await resp.json();
+        } else {
+            // Non-JSON response (e.g. redirect to login, or unexpected error page)
+            const text = await resp.text();
+            console.error('[AI Settings] Unexpected non-JSON response (HTTP ' + resp.status + '):', text);
+            errEl.textContent = 'Unexpected server response (HTTP ' + resp.status + '). See browser console for details.';
+            errEl.style.display = 'block';
+            btn.disabled = false; btn.textContent = 'Save Settings';
+            return;
+        }
+        if (data.success) {
+            okEl.textContent = data.message || 'Settings saved.';
+            okEl.style.display = 'block';
+            console.info('[AI Settings] Saved successfully.');
+        } else {
+            // Log the full error (including stack trace) to console
+            console.error('[AI Settings] Save failed:', data.error || data.message);
+            errEl.textContent = 'Failed to save: ' + (data.message || 'Unknown error. See browser console (F12) for full details.');
+            errEl.style.display = 'block';
+        }
+    } catch (ex) {
+        console.error('[AI Settings] Network/fetch error:', ex);
+        errEl.textContent = 'Network error: ' + ex.message + '. Check browser console (F12).';
+        errEl.style.display = 'block';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Save Settings';
+}
+</script>

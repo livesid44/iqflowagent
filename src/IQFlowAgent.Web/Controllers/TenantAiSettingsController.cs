@@ -5,8 +5,26 @@ using IQFlowAgent.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace IQFlowAgent.Web.Controllers;
+
+// Flat DTO — no EF navigation properties, no complex-type binding issues
+public class TenantAiSettingsDto
+{
+    public int    Id                            { get; set; }
+    public int    TenantId                      { get; set; }
+    public string? AzureOpenAIEndpoint          { get; set; }
+    public string? AzureOpenAIApiKey            { get; set; }
+    public string? AzureOpenAIDeploymentName    { get; set; }
+    public string? AzureOpenAIApiVersion        { get; set; }
+    public int    AzureOpenAIMaxTokens          { get; set; }
+    public string? AzureStorageConnectionString { get; set; }
+    public string? AzureStorageContainerName    { get; set; }
+    public string? AzureSpeechRegion            { get; set; }
+    public string? AzureSpeechApiKey            { get; set; }
+}
 
 [Authorize(Roles = "SuperAdmin,Admin")]
 public class TenantAiSettingsController : Controller
@@ -50,16 +68,11 @@ public class TenantAiSettingsController : Controller
         }
     }
 
+    // Returns JSON so the browser can display the real error in console / inline banner.
+    // Uses a flat DTO to avoid model-binding issues with EF navigation properties.
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Save(TenantAiSettings model)
+    public async Task<IActionResult> Save([FromForm] TenantAiSettingsDto model)
     {
-        // Clear model-binding errors for the navigation property (BindNever skips it but
-        // older model-state entries from complex-type probing may still linger)
-        ModelState.Remove(nameof(TenantAiSettings.Tenant));
-
-        // Wrap EVERYTHING (including tenant lookup) in try/catch so any DB or
-        // infrastructure exception shows the user a meaningful error instead of
-        // the generic ASP.NET Core 500 page.
         try
         {
             var tenantId = _tenantContext.GetCurrentTenantId();
@@ -67,17 +80,9 @@ public class TenantAiSettingsController : Controller
             var tenant = await _db.Tenants.FindAsync(tenantId);
             if (tenant == null)
             {
-                _logger.LogWarning("TenantAiSettings/Save: tenant {TenantId} not found", tenantId);
-                TempData["Error"] = $"Tenant (id={tenantId}) was not found. Please log out and log back in.";
-                ViewBag.Tenant = null;
-                return View("Index", model);
-            }
-
-            if (!ModelState.IsValid)
-            {
-                ViewBag.Tenant = tenant;
-                TempData["Error"] = "Please correct the validation errors below.";
-                return View("Index", model);
+                var msg = $"Tenant (id={tenantId}) not found. Please log out and log in again.";
+                _logger.LogWarning("TenantAiSettings/Save: {Msg}", msg);
+                return Json(new { success = false, error = msg });
             }
 
             var existing = await _db.TenantAiSettings
@@ -85,41 +90,131 @@ public class TenantAiSettingsController : Controller
 
             if (existing == null)
             {
-                model.TenantId        = tenantId;
-                model.UpdatedAt       = DateTime.UtcNow;
-                model.UpdatedByUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                _db.TenantAiSettings.Add(model);
+                _db.TenantAiSettings.Add(new TenantAiSettings
+                {
+                    TenantId                      = tenantId,
+                    AzureOpenAIEndpoint            = model.AzureOpenAIEndpoint ?? string.Empty,
+                    AzureOpenAIApiKey              = model.AzureOpenAIApiKey ?? string.Empty,
+                    AzureOpenAIDeploymentName      = model.AzureOpenAIDeploymentName ?? string.Empty,
+                    AzureOpenAIApiVersion          = model.AzureOpenAIApiVersion ?? "2025-01-01-preview",
+                    AzureOpenAIMaxTokens           = model.AzureOpenAIMaxTokens > 0 ? model.AzureOpenAIMaxTokens : 4096,
+                    AzureStorageConnectionString   = model.AzureStorageConnectionString ?? string.Empty,
+                    AzureStorageContainerName      = model.AzureStorageContainerName ?? "intakes",
+                    AzureSpeechRegion              = model.AzureSpeechRegion ?? string.Empty,
+                    AzureSpeechApiKey              = model.AzureSpeechApiKey ?? string.Empty,
+                    UpdatedAt                      = DateTime.UtcNow,
+                    UpdatedByUserId                = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty,
+                });
             }
             else
             {
-                existing.AzureOpenAIEndpoint          = model.AzureOpenAIEndpoint;
-                existing.AzureOpenAIApiKey             = model.AzureOpenAIApiKey;
-                existing.AzureOpenAIDeploymentName     = model.AzureOpenAIDeploymentName;
-                existing.AzureOpenAIApiVersion         = model.AzureOpenAIApiVersion;
-                existing.AzureOpenAIMaxTokens          = model.AzureOpenAIMaxTokens;
-                existing.AzureStorageConnectionString  = model.AzureStorageConnectionString;
-                existing.AzureStorageContainerName     = model.AzureStorageContainerName;
-                existing.AzureSpeechRegion             = model.AzureSpeechRegion;
-                existing.AzureSpeechApiKey             = model.AzureSpeechApiKey;
+                existing.AzureOpenAIEndpoint          = model.AzureOpenAIEndpoint ?? string.Empty;
+                existing.AzureOpenAIApiKey             = model.AzureOpenAIApiKey ?? string.Empty;
+                existing.AzureOpenAIDeploymentName     = model.AzureOpenAIDeploymentName ?? string.Empty;
+                existing.AzureOpenAIApiVersion         = model.AzureOpenAIApiVersion ?? "2025-01-01-preview";
+                existing.AzureOpenAIMaxTokens          = model.AzureOpenAIMaxTokens > 0 ? model.AzureOpenAIMaxTokens : 4096;
+                existing.AzureStorageConnectionString  = model.AzureStorageConnectionString ?? string.Empty;
+                existing.AzureStorageContainerName     = model.AzureStorageContainerName ?? "intakes";
+                existing.AzureSpeechRegion             = model.AzureSpeechRegion ?? string.Empty;
+                existing.AzureSpeechApiKey             = model.AzureSpeechApiKey ?? string.Empty;
                 existing.UpdatedAt                     = DateTime.UtcNow;
-                existing.UpdatedByUserId               = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                existing.UpdatedByUserId               = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
             }
 
             await _db.SaveChangesAsync();
-            TempData["Success"] = "AI & Storage settings saved successfully.";
-            return RedirectToAction(nameof(Index));
+            _logger.LogInformation("TenantAiSettings saved for tenant {TenantId}", tenantId);
+            return Json(new { success = true, message = "AI & Storage settings saved successfully." });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "TenantAiSettings/Save failed for model {@Model}", new
-            {
-                model.TenantId,
-                HasEndpoint = !string.IsNullOrEmpty(model.AzureOpenAIEndpoint),
-                HasDeployment = !string.IsNullOrEmpty(model.AzureOpenAIDeploymentName)
-            });
-            ViewBag.Tenant = null;
-            TempData["Error"] = $"Failed to save settings: {ex.Message}";
-            return View("Index", model);
+            // Full exception type + message + stack trace returned to admin browser
+            var fullError = $"{ex.GetType().Name}: {ex.Message}\n\n{ex.StackTrace}";
+            _logger.LogError(ex, "TenantAiSettings/Save failed");
+            return Json(new { success = false, error = fullError, message = ex.Message });
         }
+    }
+
+    // Diagnostic endpoint — call GET /TenantAiSettings/Diagnose for DB health JSON
+    [HttpGet]
+    public async Task<IActionResult> Diagnose()
+    {
+        var result = new Dictionary<string, object>();
+        try
+        {
+            var tenantId = _tenantContext.GetCurrentTenantId();
+            result["tenantId"] = tenantId;
+            result["provider"] = _db.Database.ProviderName ?? "unknown";
+
+            // Connection test
+            try
+            {
+                await _db.Database.OpenConnectionAsync();
+                await _db.Database.CloseConnectionAsync();
+                result["canConnect"] = true;
+            }
+            catch (Exception cx)
+            {
+                result["canConnect"] = false;
+                result["connectionError"] = cx.Message;
+            }
+
+            // Migration status
+            try
+            {
+                var migrator = _db.GetInfrastructure().GetRequiredService<IMigrator>();
+                var applied  = (await _db.Database.GetAppliedMigrationsAsync()).ToList();
+                var pending  = (await _db.Database.GetPendingMigrationsAsync()).ToList();
+                result["appliedMigrations"] = applied.Count;
+                result["pendingMigrations"] = pending.Count;
+                result["pendingMigrationNames"] = pending;
+            }
+            catch (Exception mx)
+            {
+                result["migrationError"] = mx.Message;
+            }
+
+            // Table list
+            try
+            {
+                var tables = new List<string>();
+                var conn = _db.Database.GetDbConnection();
+                await conn.OpenAsync();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = _db.Database.ProviderName?.Contains("Sqlite") == true
+                    ? "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                    : "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME";
+                using var rdr = await cmd.ExecuteReaderAsync();
+                while (await rdr.ReadAsync()) tables.Add(rdr.GetString(0));
+                await conn.CloseAsync();
+                result["tables"] = tables;
+            }
+            catch (Exception tx)
+            {
+                result["tableError"] = tx.Message;
+            }
+
+            // TenantAiSettings row
+            try
+            {
+                var settings = await _db.TenantAiSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
+                result["hasSettings"] = settings != null;
+                if (settings != null)
+                {
+                    result["hasEndpoint"]    = !string.IsNullOrEmpty(settings.AzureOpenAIEndpoint);
+                    result["hasDeployment"]  = !string.IsNullOrEmpty(settings.AzureOpenAIDeploymentName);
+                    result["lastUpdated"]    = settings.UpdatedAt;
+                }
+            }
+            catch (Exception sx)
+            {
+                result["settingsError"] = sx.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            result["fatalError"] = ex.Message;
+        }
+
+        return Json(result);
     }
 }
