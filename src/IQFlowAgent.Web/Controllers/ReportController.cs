@@ -422,7 +422,10 @@ public class ReportController : Controller
 
         if (report.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            return Redirect(report.FilePath);
+            var sasUrl = await _blobService.GenerateSasDownloadUrlAsync(report.FilePath);
+            if (string.IsNullOrWhiteSpace(sasUrl))
+                return NotFound();
+            return Redirect(sasUrl);
         }
 
         var fullPath = Path.Combine(_env.WebRootPath, report.FilePath.TrimStart('/'));

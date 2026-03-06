@@ -29,6 +29,11 @@
         if (!analysis.Value.TryGetProperty(key, out var v)) return Array.Empty<string>();
         return v.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
     }
+
+    // Determine whether result came from a real LLM or the mock fallback
+    string analysisSource = "unknown";
+    if (analysis.HasValue && analysis.Value.TryGetProperty("_source", out var srcProp))
+        analysisSource = srcProp.GetString() ?? "unknown";
 }
 
 <style>
@@ -209,6 +214,18 @@
         background: #d1fae5; color: #065f46; border-radius: 6px;
         padding: 4px 12px; font-size: 0.76rem; font-weight: 600; white-space: nowrap;
     }
+
+    /* ── Data source badge ─────────────────────────────── */
+    .source-badge {
+        display:inline-flex; align-items:center; gap:5px;
+        padding:4px 10px; border-radius:20px; font-size:.73rem; font-weight:600;
+        border:1.5px solid transparent;
+    }
+    .source-badge.llm  { background:#d1fae5; color:#065f46; border-color:#6ee7b7; }
+    .source-badge.mock { background:#fef3c7; color:#92400e; border-color:#fcd34d; }
+    .source-badge .dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .source-badge.llm  .dot { background:#059669; }
+    .source-badge.mock .dot { background:#d97706; }
 </style>
 
 @await Html.PartialAsync("_AppShell")
@@ -237,7 +254,17 @@
     </div>
 
     <div class="page-title">AI Analysis</div>
-    <div class="page-sub">LLM-powered process discovery and validation</div>
+    <div class="page-sub" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span>LLM-powered process discovery and validation</span>
+        @if (analysisSource == "llm")
+        {
+            <span class="source-badge llm"><span class="dot"></span>Live LLM</span>
+        }
+        else if (analysisSource == "mock")
+        {
+            <span class="source-badge mock" title="Azure OpenAI is not configured — results are generated locally"><span class="dot"></span>Mock Data</span>
+        }
+    </div>
 
     @if (TempData["Success"] != null)
     {
@@ -688,8 +715,75 @@
             </div>
         </div>
 
-        @if (!string.IsNullOrWhiteSpace(Model.UploadedFileName))
+        var intakeDocs = ViewBag.IntakeDocuments as List<IQFlowAgent.Web.Models.IntakeDocument>
+                         ?? new List<IQFlowAgent.Web.Models.IntakeDocument>();
+
+        if (intakeDocs.Any())
         {
+            <div class="analysis-card" id="all-files-section">
+                <h3 style="margin-bottom:14px;">
+                    <i class="bi bi-folder2-open me-2"></i>All Files
+                    <span style="font-size:0.78rem;font-weight:400;color:#888;margin-left:8px;">
+                        (@intakeDocs.Count file@(intakeDocs.Count == 1 ? "" : "s"))
+                    </span>
+                </h3>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    @foreach (var doc in intakeDocs)
+                    {
+                        var iconCls    = FileIcon(doc.FileName);
+                        var badgeLabel = FileBadge(doc.DocumentType);
+                        var badgeClr   = FileBadgeColor(doc.DocumentType);
+                        var sizeLabel  = doc.FileSize.HasValue
+                            ? (doc.FileSize.Value >= 1_048_576
+                                ? $"{doc.FileSize.Value / 1_048_576.0:F1} MB"
+                                : $"{doc.FileSize.Value / 1024.0:F1} KB")
+                            : "";
+                        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                                    background:#f8f9fb;border:1px solid #e5e9f0;border-radius:8px;
+                                    flex-wrap:wrap;">
+                            <i class="bi @iconCls" style="font-size:1.4rem;color:#e31837;flex-shrink:0;"></i>
+                            <div style="flex:1;min-width:0;">
+                                <div style="font-weight:600;font-size:0.88rem;white-space:nowrap;
+                                            overflow:hidden;text-overflow:ellipsis;"
+                                     title="@doc.FileName">
+                                    @doc.FileName
+                                </div>
+                                <div style="font-size:0.76rem;color:#888;margin-top:2px;">
+                                    @if (!string.IsNullOrEmpty(sizeLabel))
+                                    {
+                                        <span>@sizeLabel</span>
+                                        <span style="margin:0 5px;">·</span>
+                                    }
+                                    <span>@doc.UploadedAt.ToString("dd MMM yyyy HH:mm")</span>
+                                    @if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <span style="margin:0 5px;">·</span>
+                                        <span style="color:#4b7bec;">
+                                            <i class="bi bi-cloud-check-fill me-1"></i>Blob
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                            <span style="font-size:0.72rem;font-weight:600;padding:2px 8px;border-radius:4px;
+                                         background:@badgeClr;color:#fff;flex-shrink:0;">
+                                @badgeLabel
+                            </span>
+                            <a asp-controller="Intake" asp-action="DownloadDocument"
+                               asp-route-id="@doc.Id"
+                               style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;
+                                      background:#1a2a5e;color:#fff;border-radius:6px;text-decoration:none;
+                                      font-size:0.8rem;font-weight:600;flex-shrink:0;white-space:nowrap;"
+                               title="Download @doc.FileName">
+                                <i class="bi bi-download"></i> Download
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(Model.UploadedFileName))
+        {
+            @* Fallback for old intakes where IntakeDocument rows may not exist yet *@
             <div class="analysis-card">
                 <h3><i class="bi bi-file-earmark-check"></i> Uploaded Document</h3>
                 <div style="font-size:0.88rem;">
@@ -794,4 +888,35 @@
         submitNext();
     }
 </script>
+}
+
+@functions {
+    static string FileIcon(string? fileName)
+    {
+        var ext = System.IO.Path.GetExtension(fileName ?? "").ToLowerInvariant();
+        if (ext == ".pdf") return "bi-file-earmark-pdf-fill";
+        if (ext == ".docx" || ext == ".doc") return "bi-file-earmark-word-fill";
+        if (ext == ".xlsx" || ext == ".xls") return "bi-file-earmark-excel-fill";
+        if (ext == ".mp3" || ext == ".mp4" || ext == ".wav" || ext == ".m4a" ||
+            ext == ".ogg" || ext == ".webm" || ext == ".mkv" || ext == ".avi" || ext == ".mov")
+            return "bi-file-earmark-play-fill";
+        if (ext == ".txt" || ext == ".csv" || ext == ".json" || ext == ".xml" ||
+            ext == ".md" || ext == ".log")
+            return "bi-file-earmark-text-fill";
+        return "bi-file-earmark-fill";
+    }
+
+    static string FileBadge(string? docType)
+    {
+        if (docType == "SopDocument")  return "SOP";
+        if (docType == "TaskArtifact") return "Artifact";
+        return "Upload";
+    }
+
+    static string FileBadgeColor(string? docType)
+    {
+        if (docType == "SopDocument")  return "#4b7bec";
+        if (docType == "TaskArtifact") return "#e67e22";
+        return "#1a2a5e";
+    }
 }

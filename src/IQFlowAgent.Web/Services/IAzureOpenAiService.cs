@@ -38,4 +38,10 @@ public interface IAzureOpenAiService
     /// Returns the SOP as a markdown string.
     /// </summary>
     Task<string> GenerateSopFromTranscriptAsync(string transcript, IntakeRecord intake);
+
+    /// <summary>
+    /// Sends a lightweight test prompt to the configured Azure OpenAI endpoint.
+    /// Returns (success, httpStatusCode, message).
+    /// </summary>
+    Task<(bool success, int statusCode, string message)> TestConnectionAsync();
 }

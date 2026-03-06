@@ -1,11 +1,16 @@
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
+using Azure.Storage.Sas;
 
 namespace IQFlowAgent.Web.Services;
 
 public class BlobStorageService : IBlobStorageService
 {
     private const string PlaceholderConnection = "YOUR_STORAGE_CONNECTION_STRING";
+
+    /// <summary>Default lifetime of generated SAS download tokens.</summary>
+    private static readonly TimeSpan DefaultSasExpiry = TimeSpan.FromHours(1);
 
     // Plain-text extensions whose content is read and sent to AI analysis
     private static readonly HashSet<string> TextExtensions =
@@ -83,6 +88,62 @@ public class BlobStorageService : IBlobStorageService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not delete blob at {BlobUrl}", blobUrl);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+
+    public async Task<string> GenerateSasDownloadUrlAsync(string blobUrl, TimeSpan? expiry = null)
+    {
+        try
+        {
+            var (conn, containerName) = await GetStorageConfigAsync();
+            if (string.IsNullOrWhiteSpace(conn))
+                return blobUrl;
+
+            // Parse the blob name from the URL using Uri.Segments for reliability.
+            // Azure Blob Storage URLs have the form:
+            //   https://{account}.blob.core.windows.net/{container}/{blob...}
+            // Segments[0] = "/"  Segments[1] = "{container}/"  Segments[2..] = blob path parts
+            var blobUri = new Uri(blobUrl);
+            if (blobUri.Segments.Length < 3)
+            {
+                _logger.LogWarning("GenerateSasDownloadUrlAsync: unexpected URL structure '{Url}' — returning bare URL.", blobUrl);
+                return blobUrl;
+            }
+
+            // Combine all segments after the container (index 2 onwards) to get the blob name,
+            // then URL-decode to handle any percent-encoded characters.
+            var blobName = Uri.UnescapeDataString(
+                string.Concat(blobUri.Segments[2..]).TrimStart('/'));
+
+            // Build a BlobClient using the connection string (includes the StorageSharedKeyCredential)
+            var blobClient = new BlobClient(conn, containerName, blobName);
+
+            // GenerateSasUri requires the client to have been created with a StorageSharedKeyCredential.
+            // Connection strings that contain AccountName + AccountKey satisfy this requirement.
+            if (!blobClient.CanGenerateSasUri)
+            {
+                _logger.LogWarning("BlobStorageService: cannot generate SAS URI — connection string may not contain a shared key. Returning bare URL.");
+                return blobUrl;
+            }
+
+            var sasBuilder = new BlobSasBuilder
+            {
+                BlobContainerName = containerName,
+                BlobName          = blobName,
+                Resource          = "b",
+                ExpiresOn         = DateTimeOffset.UtcNow.Add(expiry ?? DefaultSasExpiry)
+            };
+            sasBuilder.SetPermissions(BlobSasPermissions.Read);
+
+            var sasUri = blobClient.GenerateSasUri(sasBuilder);
+            return sasUri.ToString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "GenerateSasDownloadUrlAsync failed for {BlobUrl} — returning bare URL.", blobUrl);
+            return blobUrl;
         }
     }
 

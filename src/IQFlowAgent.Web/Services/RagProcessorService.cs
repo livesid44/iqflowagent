@@ -46,28 +46,54 @@ public class RagProcessorService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("RagProcessorService started.");
-
-        while (!stoppingToken.IsCancellationRequested)
+        // Outermost try-catch: guarantees that no exception can ever escape ExecuteAsync
+        // and propagate back to the host.  BackgroundServiceExceptionBehavior.Ignore is
+        // also set in Program.cs, but keeping this method self-contained is best practice
+        // and covers the rare case of a synchronous throw before the first await (e.g.
+        // if the logger itself fails at startup).
+        try
         {
-            int ragJobId;
-            try
-            {
-                ragJobId = await _queue.DequeueAsync(stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+            _logger.LogInformation("RagProcessorService started.");
 
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await ProcessRagJobAsync(ragJobId, stoppingToken);
+                int ragJobId;
+                try
+                {
+                    ragJobId = await _queue.DequeueAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Normal shutdown — exit the loop cleanly.
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error from the queue (should not happen, but guard anyway).
+                    _logger.LogError(ex, "Unexpected error dequeueing RAG job — retrying after delay.");
+                    try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+                    catch (OperationCanceledException) { break; } // Host is shutting down — exit cleanly.
+                    continue;
+                }
+
+                try
+                {
+                    await ProcessRagJobAsync(ragJobId, stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unhandled error processing RAG job {JobId}.", ragJobId);
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Unhandled error processing RAG job {JobId}.", ragJobId);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown via CancellationToken — normal, not an error.
+        }
+        catch (Exception ex)
+        {
+            // Should never reach here given the inner guards, but log if it does.
+            _logger.LogCritical(ex, "RagProcessorService encountered an unrecoverable error and has exited.");
         }
 
         _logger.LogInformation("RagProcessorService stopping.");
@@ -120,6 +146,11 @@ public class RagProcessorService : BackgroundService
 
                 if (AudioVideoExtensions.Contains(ext))
                 {
+                    // Ensure audio/video is in blob storage — Azure Batch Transcription requires
+                    // a publicly accessible HTTPS URL. Files saved to local disk during intake
+                    // submission are uploaded here (deferred from the HTTP POST handler).
+                    await EnsureAudioInBlobAsync(doc, intake, db, blobSvc, ct);
+
                     // ── Transcribe audio/video ─────────────────────────────
                     await TranscribeDocumentAsync(doc, intake, db, speechSvc, aiService, blobSvc, aggregatedText, ct);
                 }
@@ -216,14 +247,14 @@ public class RagProcessorService : BackgroundService
             doc.TranscriptStatus = "Complete";
             await db.SaveChangesAsync(ct);
 
-            // Generate SOP from transcript
-            var sop = await aiService.GenerateSopFromTranscriptAsync(transcript, intake);
+            // Generate SOP from transcript and convert to PDF
+            var sopMarkdown = await aiService.GenerateSopFromTranscriptAsync(transcript, intake);
 
-            // Save SOP as a new IntakeDocument — sanitize source filename for safe path
+            // Convert the SOP markdown to a PDF — sanitize source filename for safe path
             var safeSourceName = System.Text.RegularExpressions.Regex.Replace(
                 Path.GetFileNameWithoutExtension(doc.FileName), @"[^a-zA-Z0-9\-_]", "_");
-            var sopFileName = $"{intake.IntakeId}-SOP-{safeSourceName}.md";
-            var sopBytes    = System.Text.Encoding.UTF8.GetBytes(sop);
+            var sopFileName = $"{intake.IntakeId}-SOP-{safeSourceName}.pdf";
+            var sopBytes    = SopPdfRenderer.Render(sopMarkdown, intake.ProcessName);
 
             string sopPath;
             if (await blobSvc.IsConfiguredAsync())
@@ -231,7 +262,7 @@ public class RagProcessorService : BackgroundService
                 sopPath = await blobSvc.UploadAsync(
                     new MemoryStream(sopBytes),
                     sopFileName,
-                    "text/markdown");
+                    "application/pdf");
             }
             else
             {
@@ -245,13 +276,13 @@ public class RagProcessorService : BackgroundService
             doc.SopDocumentPath = sopPath;
             await db.SaveChangesAsync(ct);
 
-            // Add SOP as a separate document record
+            // Add SOP PDF as a separate document record attached to the intake
             db.IntakeDocuments.Add(new IntakeDocument
             {
                 IntakeRecordId   = intake.Id,
                 FileName         = sopFileName,
                 FilePath         = sopPath,
-                ContentType      = "text/markdown",
+                ContentType      = "application/pdf",
                 FileSize         = sopBytes.Length,
                 DocumentType     = "SopDocument",
                 UploadedAt       = DateTime.UtcNow,
@@ -417,4 +448,70 @@ public class RagProcessorService : BackgroundService
             "low"  => "Low",
             _      => "Medium"
         };
+
+    // ─── Blob upload helpers ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// If the audio/video document is stored at a local disk path and blob storage is
+    /// configured, upload it to blob now and update the stored path.  Azure Batch
+    /// Transcription requires a publicly accessible HTTPS URL, so this step must happen
+    /// before <see cref="TranscribeDocumentAsync"/> is called.
+    /// </summary>
+    private async Task EnsureAudioInBlobAsync(
+        IntakeDocument doc,
+        IntakeRecord   intake,
+        ApplicationDbContext db,
+        IBlobStorageService blobSvc,
+        CancellationToken ct)
+    {
+        // Already a blob URL — nothing to do.
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Blob not configured — transcription will fall back to mock, no upload needed.
+        if (!await blobSvc.IsConfiguredAsync())
+            return;
+
+        var physicalPath = MapToPhysicalPath(doc.FilePath);
+        if (!File.Exists(physicalPath))
+        {
+            _logger.LogWarning("Audio file not found on disk for upload to blob: {Path}", physicalPath);
+            return;
+        }
+
+        try
+        {
+            using var fs = File.OpenRead(physicalPath);
+            var blobUrl = await blobSvc.UploadAsync(
+                fs,
+                Path.GetFileName(doc.FilePath),
+                doc.ContentType ?? "application/octet-stream");
+
+            _logger.LogInformation("Uploaded audio/video {FileName} to blob: {Url}", doc.FileName, blobUrl);
+
+            // Update path references in the DB so downstream code (speech service) uses the blob URL.
+            if (string.Equals(intake.UploadedFilePath, doc.FilePath, StringComparison.OrdinalIgnoreCase))
+                intake.UploadedFilePath = blobUrl;
+
+            doc.FilePath = blobUrl;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload audio/video {FileName} to blob — transcription will use mock.", doc.FileName);
+        }
+    }
+
+    /// <summary>Maps a virtual path like <c>/uploads/foo.mp4</c> to its absolute physical path.
+    /// If the path already exists verbatim on disk it is treated as an absolute system path.</summary>
+    private string MapToPhysicalPath(string filePath)
+    {
+        // If the file exists at the given path verbatim, it is already a physical path.
+        if (Path.IsPathRooted(filePath) && File.Exists(filePath))
+            return filePath;
+
+        // Virtual web path like /uploads/filename → map relative to wwwroot.
+        return Path.Combine(_env.WebRootPath,
+            filePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+    }
 }

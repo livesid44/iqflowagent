@@ -127,7 +127,7 @@
         </div>
     }
 
-    <form asp-action="Edit" asp-route-id="@Model.Id" method="post" enctype="multipart/form-data">
+    <form id="intakeEditForm" asp-action="Edit" asp-route-id="@Model.Id" method="post" enctype="multipart/form-data">
         @Html.AntiForgeryToken()
         <input type="hidden" asp-for="Id" />
         <input type="hidden" asp-for="IntakeId" />
@@ -180,7 +180,7 @@
             <div class="form-section-title">Ownership &amp; Organisation</div>
             <div class="form-row">
                 <div class="form-group">
-                    <label asp-for="BusinessUnit">Business Unit <span class="required">*</span></label>
+                    <label asp-for="BusinessUnit">Business Unit</label>
                     <input asp-for="BusinessUnit" class="form-control" placeholder="e.g. Operations" />
                     <span asp-validation-for="BusinessUnit" class="text-danger"></span>
                 </div>
@@ -210,12 +210,12 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label asp-for="ProcessOwnerName">Process Owner Name <span class="required">*</span></label>
+                    <label asp-for="ProcessOwnerName">Process Owner Name</label>
                     <input asp-for="ProcessOwnerName" class="form-control" placeholder="Full name" />
                     <span asp-validation-for="ProcessOwnerName" class="text-danger"></span>
                 </div>
                 <div class="form-group">
-                    <label asp-for="ProcessOwnerEmail">Process Owner Email <span class="required">*</span></label>
+                    <label asp-for="ProcessOwnerEmail">Process Owner Email</label>
                     <input asp-for="ProcessOwnerEmail" class="form-control" type="email" placeholder="owner@company.com" />
                     <span asp-validation-for="ProcessOwnerEmail" class="text-danger"></span>
                 </div>
@@ -227,7 +227,7 @@
             <div class="form-section-title">Location</div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Country <span class="required">*</span></label>
+                    <label>Country</label>
                     <div class="ms-container" id="countryContainer" style="position:relative;">
                         <input type="text" id="countryInput" class="ms-input" placeholder="Search countries…" autocomplete="off" />
                         <div class="ms-dropdown" id="countryDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;"></div>
@@ -315,7 +315,7 @@
                     </div>
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                         <p><strong>Click to upload</strong> or drag and drop</p>
-                        <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+                        <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 250 MB</p>
                     </div>
                     <input type="file" id="fileInput" asp-for="NewDocument"
                            accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
@@ -334,7 +334,7 @@
                 </p>
                 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                     <p><strong>Click to upload</strong> or drag and drop</p>
-                    <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+                    <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 250 MB</p>
                 </div>
                 <input type="file" id="fileInput" asp-for="NewDocument"
                        accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
@@ -355,11 +355,37 @@
 
         <!-- ── Actions ───────────────────────────────────────────────── -->
         <div class="form-actions">
-            <button type="submit" class="btn-submit">Save Changes</button>
+            <button type="submit" id="editSubmitBtn" class="btn-submit">Save Changes</button>
             <a asp-action="AnalysisResult" asp-route-id="@Model.Id" class="btn-cancel">Cancel</a>
         </div>
     </form>
 </main>
+
+<!-- ── Upload Progress Overlay ──────────────────────────────────────── -->
+<div id="editUploadOverlay" role="status" aria-live="polite"
+     style="display:none;position:fixed;inset:0;background:rgba(26,42,94,0.88);z-index:9999;
+            align-items:center;justify-content:center;flex-direction:column;">
+    <div style="text-align:center;max-width:420px;width:90%;padding:32px;background:rgba(255,255,255,0.08);
+                border-radius:16px;backdrop-filter:blur(4px);">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5"
+             style="margin-bottom:16px;" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <h2 id="editOverlayTitle" style="color:#fff;font-size:1.25rem;margin:0 0 8px;">Saving Changes…</h2>
+        <p id="editOverlaySub"
+           style="color:rgba(255,255,255,0.7);font-size:0.9rem;margin:0 0 20px;line-height:1.5;">
+            Please keep this tab open. Once saved, processing<br>continues in the background and you'll be notified.
+        </p>
+        <div style="background:rgba(255,255,255,0.18);border-radius:99px;height:10px;overflow:hidden;">
+            <div id="editProgressBar"
+                 style="height:100%;background:#22c55e;border-radius:99px;width:0%;transition:width 0.3s ease;"></div>
+        </div>
+        <p id="editProgressPct" style="color:rgba(255,255,255,0.8);font-size:0.9rem;margin-top:10px;">0%</p>
+    </div>
+</div>
+
 </div><!-- close app-layout -->
 
 @section Scripts {
@@ -516,6 +542,116 @@
         let cityMs = buildMultiSelect('cityContainer','cityInput','cityDropdown','cityHidden',
             getCitiesForCountries(countryMs.getSelected()), true, null);
     });
+</script>
+
+<script>
+// ── XHR submit with progress overlay (handles large document replacements) ───
+(function () {
+    const form    = document.getElementById('intakeEditForm');
+    const overlay = document.getElementById('editUploadOverlay');
+    const bar     = document.getElementById('editProgressBar');
+    const pct     = document.getElementById('editProgressPct');
+    const title   = document.getElementById('editOverlayTitle');
+    const sub     = document.getElementById('editOverlaySub');
+    const btn     = document.getElementById('editSubmitBtn');
+
+    function showOverlay() { overlay.style.display = 'flex'; }
+    function hideOverlay() { overlay.style.display = 'none'; }
+
+    function setProgress(value, label) {
+        bar.style.width = value + '%';
+        pct.textContent = label || (value + '%');
+    }
+
+    function showErrors(errors) {
+        hideOverlay();
+        if (btn) btn.disabled = false;
+        const existing = document.getElementById('editXhrErrorBanner');
+        if (existing) existing.remove();
+        const banner = document.createElement('div');
+        banner.id = 'editXhrErrorBanner';
+        banner.style.cssText = 'background:#fde8ec;border:1px solid #fca5a5;border-radius:8px;' +
+            'padding:12px 16px;margin-bottom:20px;color:#c01530;';
+        const heading = document.createElement('strong');
+        heading.textContent = 'Please fix the following errors:';
+        banner.appendChild(heading);
+        const ul = document.createElement('ul');
+        ul.style.margin = '8px 0 0 0';
+        errors.forEach(function (msg) {
+            const li = document.createElement('li');
+            li.textContent = msg;
+            ul.appendChild(li);
+        });
+        banner.appendChild(ul);
+        form.insertBefore(banner, form.firstChild);
+        banner.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (btn) btn.disabled = true;
+
+        const data = new FormData(form);
+        const replacing = document.getElementById('replaceFlag') &&
+                          document.getElementById('replaceFlag').value === 'true' &&
+                          document.getElementById('newDocInput') &&
+                          document.getElementById('newDocInput').files.length > 0;
+
+        showOverlay();
+        setProgress(0);
+        title.textContent = replacing ? 'Saving Replacement File\u2026' : 'Saving Changes\u2026';
+        sub.textContent   = replacing
+            ? 'Please keep this tab open. Once saved, processing continues in the background.'
+            : 'Please wait while your changes are saved.';
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', form.action || window.location.href, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.upload.addEventListener('progress', function (e) {
+            if (e.lengthComputable) {
+                const p = Math.round(e.loaded / e.total * 100);
+                setProgress(p);
+                if (p >= 100) {
+                    title.textContent = 'Saving\u2026';
+                    setProgress(100, 'Almost done\u2026');
+                }
+            }
+        });
+
+        xhr.addEventListener('load', function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    if (res.success && res.redirectUrl) {
+                        title.textContent = 'Saved!';
+                        setProgress(100, 'Redirecting\u2026');
+                        window.location.href = res.redirectUrl;
+                        return;
+                    }
+                    showErrors(res.errors || [res.message || 'An unexpected error occurred.']);
+                } catch (_) {
+                    showErrors(['An unexpected error occurred. Please try again.']);
+                }
+            } else if (xhr.status === 400) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    showErrors(res.errors || [res.message || 'Validation failed.']);
+                } catch (_) {
+                    showErrors(['Validation failed. Please check all fields.']);
+                }
+            } else {
+                showErrors(['Save failed (HTTP\u00a0' + xhr.status + '). Please try again.']);
+            }
+        });
+
+        xhr.addEventListener('error', function () {
+            showErrors(['Network error. Please check your connection and try again.']);
+        });
+
+        xhr.send(data);
+    });
+}());
 </script>
 }
 

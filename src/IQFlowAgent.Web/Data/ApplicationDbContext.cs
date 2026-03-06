@@ -33,6 +33,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .HasForeignKey(s => s.TenantId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.Entity<TenantAiSettings>()
+            .HasIndex(s => s.TenantId)
+            .IsUnique();
+
         builder.Entity<UserTenant>()
             .HasOne(ut => ut.User)
             .WithMany()

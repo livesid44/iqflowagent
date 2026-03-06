@@ -96,21 +96,47 @@ public class IntakeController : Controller
     // POST /Intake/Create — save intake + trigger async RAG analysis
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [RequestSizeLimit(AppConstants.MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AppConstants.MaxUploadBytes)]
     public async Task<IActionResult> Create(IntakeViewModel model)
     {
+        // Disable Kestrel's minimum request-body data-rate for large file uploads so a
+        // slow client connection isn't reset before the server has received the whole body.
+        var rateFeature = HttpContext.Features
+            .Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinRequestBodyDataRateFeature>();
+        if (rateFeature != null) rateFeature.MinDataRate = null;
+
+        var isXhr = Request.Headers["X-Requested-With"] == "XMLHttpRequest";
+
         if (!ModelState.IsValid)
+        {
+            if (isXhr)
+                return BadRequest(new
+                {
+                    success = false,
+                    errors  = ModelState.Values
+                        .SelectMany(v => v.Errors)
+                        .Select(e => e.ErrorMessage)
+                        .ToList()
+                });
             return View(model);
+        }
 
         var tenantId = _tenantContext.GetCurrentTenantId();
         var intakeId = GenerateIntakeId();
 
-        // ── Upload first document (backwards compat: populates IntakeRecord.UploadedFile*) ──
+        // ── Save files to local disk first — blob upload is deferred to background ──
+        // This ensures the HTTP response is returned quickly regardless of file size.
+        // The RagProcessorService uploads to blob storage (if configured) before processing.
         string? savedFilePath = null;
         string? savedFileName = null;
         string? savedContentType = null;
         long? savedFileSize = null;
 
-        // Handle document upload
+        var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
+        Directory.CreateDirectory(uploadsDir);
+
+        // Handle primary document upload
         if (model.Document != null && model.Document.Length > 0)
         {
             var ext = Path.GetExtension(model.Document.FileName);
@@ -118,24 +144,12 @@ public class IntakeController : Controller
             savedContentType = model.Document.ContentType;
             savedFileSize = model.Document.Length;
 
-            if (await _blobService.IsConfiguredAsync())
-            {
-                var blobName = $"{intakeId}{ext}";
-                using var stream = model.Document.OpenReadStream();
-                savedFilePath = await _blobService.UploadAsync(stream, blobName, model.Document.ContentType);
-                _logger.LogInformation("Uploaded document for {IntakeId} to blob: {BlobUrl}", intakeId, savedFilePath);
-            }
-            else
-            {
-                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
-                Directory.CreateDirectory(uploadsDir);
-                var safeFileName = $"{intakeId}{ext}";
-                var fullPath = Path.Combine(uploadsDir, safeFileName);
-                using var stream = new FileStream(fullPath, FileMode.Create);
-                await model.Document.CopyToAsync(stream);
-                savedFilePath = $"/uploads/{safeFileName}";
-                _logger.LogInformation("Saved document for {IntakeId} locally: {Path}", intakeId, savedFilePath);
-            }
+            var safeFileName = $"{intakeId}{ext}";
+            var fullPath = Path.Combine(uploadsDir, safeFileName);
+            using var stream = new FileStream(fullPath, FileMode.Create);
+            await model.Document.CopyToAsync(stream);
+            savedFilePath = $"/uploads/{safeFileName}";
+            _logger.LogInformation("Saved document for {IntakeId} to disk: {Path}", intakeId, savedFilePath);
         }
 
         var record = new IntakeRecord
@@ -196,22 +210,10 @@ public class IntakeController : Controller
         {
             var ext  = Path.GetExtension(file.FileName);
             var name = $"{intakeId}-{docCount + 1:D2}{ext}";
-            string filePath;
-
-            if (await _blobService.IsConfiguredAsync())
-            {
-                using var s = file.OpenReadStream();
-                filePath = await _blobService.UploadAsync(s, name, file.ContentType);
-            }
-            else
-            {
-                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
-                Directory.CreateDirectory(uploadsDir);
-                var fp = Path.Combine(uploadsDir, name);
-                using var s = new FileStream(fp, FileMode.Create);
-                await file.CopyToAsync(s);
-                filePath = $"/uploads/{name}";
-            }
+            var fp   = Path.Combine(uploadsDir, name);
+            using var s = new FileStream(fp, FileMode.Create);
+            await file.CopyToAsync(s);
+            var filePath = $"/uploads/{name}";
 
             _db.IntakeDocuments.Add(new IntakeDocument
             {
@@ -248,7 +250,11 @@ public class IntakeController : Controller
             ragJob.Id, intakeId, docCount);
 
         TempData["Success"] = $"Intake {intakeId} submitted. Processing {docCount} file(s) in the background — you'll be notified when analysis is ready.";
-        return RedirectToAction(nameof(AnalysisResult), new { id = record.Id });
+
+        var redirectUrl = Url.Action(nameof(AnalysisResult), new { id = record.Id })!;
+        if (isXhr)
+            return Ok(new { success = true, redirectUrl });
+        return Redirect(redirectUrl);
     }
 
     // GET /Intake/RagStatus/{id} — JSON endpoint for polling RAG job status
@@ -287,7 +293,55 @@ public class IntakeController : Controller
         ViewBag.ExistingTaskTitles = existingTitles;
         ViewBag.TaskCount = existingTitles.Count;
 
+        // Load all documents attached to this intake (uploaded files + AI-generated SOP)
+        ViewBag.IntakeDocuments = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == id)
+            .OrderBy(d => d.UploadedAt)
+            .ToListAsync();
+
         return View(record);
+    }
+
+    // GET /Intake/DownloadDocument/5 — stream or redirect a document by its IntakeDocument id
+    public async Task<IActionResult> DownloadDocument(int id)
+    {
+        var doc = await _db.IntakeDocuments.FindAsync(id);
+        if (doc == null) return NotFound();
+
+        // Blob URL — generate a short-lived SAS URL so the browser can download without a 403
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            var sasUrl = await _blobService.GenerateSasDownloadUrlAsync(doc.FilePath);
+            return Redirect(sasUrl);
+        }
+
+        // Local file — resolve and validate path to prevent directory traversal
+        var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+        var relativePart = doc.FilePath.StartsWith('/')
+            ? doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)
+            : doc.FilePath;
+        var fullPath = Path.GetFullPath(Path.Combine(_env.WebRootPath, relativePart));
+
+        // Reject any path that escapes the uploads directory
+        if (!fullPath.StartsWith(uploadsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !fullPath.Equals(uploadsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("DownloadDocument: path '{Path}' is outside uploads root — blocked.", fullPath);
+            return NotFound();
+        }
+
+        if (!System.IO.File.Exists(fullPath))
+        {
+            _logger.LogWarning("DownloadDocument: file not found at {Path}", fullPath);
+            return NotFound();
+        }
+
+        var contentType = doc.ContentType ?? "application/octet-stream";
+        var fileName = string.IsNullOrWhiteSpace(doc.FileName) ? Path.GetFileName(fullPath) : doc.FileName;
+        // Stream the file directly without loading it fully into memory
+        var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 4096, useAsync: true);
+        return File(stream, contentType, fileName);
     }
 
     // GET /Intake/Edit/5 — edit form (blocked for Closed intakes)
@@ -353,10 +407,30 @@ public class IntakeController : Controller
     // POST /Intake/Edit/5 — save edits (blocked for Closed intakes)
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [RequestSizeLimit(AppConstants.MaxUploadBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = AppConstants.MaxUploadBytes)]
     public async Task<IActionResult> Edit(int id, IntakeEditViewModel model)
     {
+        // Disable Kestrel minimum data-rate so large document replacements don't time out.
+        var rateFeatureEdit = HttpContext.Features
+            .Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinRequestBodyDataRateFeature>();
+        if (rateFeatureEdit != null) rateFeatureEdit.MinDataRate = null;
+
+        var isXhr = Request.Headers["X-Requested-With"] == "XMLHttpRequest";
+
         if (!ModelState.IsValid)
+        {
+            if (isXhr)
+                return BadRequest(new
+                {
+                    success = false,
+                    errors  = ModelState.Values
+                        .SelectMany(v => v.Errors)
+                        .Select(e => e.ErrorMessage)
+                        .ToList()
+                });
             return View(model);
+        }
 
         var record = await _db.IntakeRecords.FindAsync(id);
         if (record == null) return NotFound();
@@ -400,24 +474,16 @@ public class IntakeController : Controller
 
             if (model.NewDocument != null && model.NewDocument.Length > 0)
             {
+                // Always save to local disk — background job uploads to blob if configured.
                 var ext = Path.GetExtension(model.NewDocument.FileName);
                 var blobName = $"{record.IntakeId}-v{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
-
-                if (await _blobService.IsConfiguredAsync())
-                {
-                    using var stream = model.NewDocument.OpenReadStream();
-                    newFilePath = await _blobService.UploadAsync(stream, blobName, model.NewDocument.ContentType);
-                    _logger.LogInformation("Replaced document for {IntakeId} to blob: {BlobUrl}", record.IntakeId, newFilePath);
-                }
-                else
-                {
-                    var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
-                    Directory.CreateDirectory(uploadsDir);
-                    var fullPath = Path.Combine(uploadsDir, blobName);
-                    using var stream = new FileStream(fullPath, FileMode.Create);
-                    await model.NewDocument.CopyToAsync(stream);
-                    newFilePath = $"/uploads/{blobName}";
-                }
+                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
+                Directory.CreateDirectory(uploadsDir);
+                var fullPath = Path.Combine(uploadsDir, blobName);
+                using var stream = new FileStream(fullPath, FileMode.Create);
+                await model.NewDocument.CopyToAsync(stream);
+                newFilePath = $"/uploads/{blobName}";
+                _logger.LogInformation("Saved replacement document for {IntakeId} to disk: {Path}", record.IntakeId, newFilePath);
 
                 record.UploadedFileName        = model.NewDocument.FileName;
                 record.UploadedFilePath        = newFilePath;
@@ -456,7 +522,10 @@ public class IntakeController : Controller
             TempData["Success"] = $"Intake {record.IntakeId} updated successfully.";
         }
 
-        return RedirectToAction(nameof(AnalysisResult), new { id });
+        var redirectUrl = Url.Action(nameof(AnalysisResult), new { id })!;
+        if (isXhr)
+            return Ok(new { success = true, redirectUrl });
+        return Redirect(redirectUrl);
     }
 
     // GET /Intake/LobsByDepartment?deptName=Finance — AJAX endpoint for cascading LOB dropdown
