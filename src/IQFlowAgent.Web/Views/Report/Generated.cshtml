@@ -58,16 +58,9 @@
         </div>
     </div>
 
-    @if (!string.IsNullOrWhiteSpace(filePath))
+    @if (intake != null && !string.IsNullOrWhiteSpace(filePath))
     {
-        if (filePath.StartsWith("http"))
-        {
-            <a href="@filePath" target="_blank" class="btn-download">⬇️ Download Report (Word)</a>
-        }
-        else
-        {
-            <a href="/Report/Download?intakeId=@intake?.Id" class="btn-download">⬇️ Download Report (Word)</a>
-        }
+        <a href="/Report/Download?intakeId=@intake.Id" class="btn-download">⬇️ Download Report (Word)</a>
     }
     <br/>
     <a href="/Intake/Index" class="btn-intakes">← Back to Intakes</a>

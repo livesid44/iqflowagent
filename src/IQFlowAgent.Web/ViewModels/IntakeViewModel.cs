@@ -12,18 +12,15 @@ public class IntakeViewModel
     [Required(ErrorMessage = "Description is required")]
     public string Description { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Business Unit is required")]
     [Display(Name = "Business Unit")]
     public string BusinessUnit { get; set; } = string.Empty;
 
     public string Department { get; set; } = string.Empty;
     public string Lob { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Process Owner Name is required")]
     [Display(Name = "Process Owner Name")]
     public string ProcessOwnerName { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Process Owner Email is required")]
     [EmailAddress]
     [Display(Name = "Process Owner Email")]
     public string ProcessOwnerEmail { get; set; } = string.Empty;
@@ -38,7 +35,6 @@ public class IntakeViewModel
     public string Priority { get; set; } = "Medium";
 
     // Location
-    [Required(ErrorMessage = "Country is required")]
     public string Country { get; set; } = string.Empty;
 
     public string City { get; set; } = string.Empty;
