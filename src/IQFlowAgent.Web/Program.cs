@@ -10,9 +10,28 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Database provider selection: SQL Server if configured, otherwise SQLite fallback
 var sqlServerCs = builder.Configuration.GetConnectionString("SqlServer") ?? string.Empty;
-var sqliteCs    = builder.Configuration.GetConnectionString("Sqlite") ?? "Data Source=iqflowagent.db";
+var rawSqliteCs = builder.Configuration.GetConnectionString("Sqlite") ?? "Data Source=App_Data/iqflowagent.db";
 var useSqlServer = !string.IsNullOrWhiteSpace(sqlServerCs)
     && !sqlServerCs.Contains("YOUR_SQL_SERVER", StringComparison.OrdinalIgnoreCase);
+
+// Resolve a relative SQLite "Data Source" path against ContentRootPath so the database
+// file is always placed in the same directory regardless of the process working directory.
+// This prevents the file from being recreated empty when IIS changes the working directory,
+// and makes the path predictable across development, staging, and production.
+var sqliteCs = rawSqliteCs;
+if (!useSqlServer && rawSqliteCs.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
+{
+    var dataSource = rawSqliteCs["Data Source=".Length..].Trim();
+    if (!Path.IsPathRooted(dataSource) && !dataSource.StartsWith("|", StringComparison.Ordinal))
+    {
+        // The pipe prefix (e.g. |DataDirectory|) is a special SQLite macro — skip those.
+        dataSource = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, dataSource));
+        var dir = Path.GetDirectoryName(dataSource);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+        sqliteCs = $"Data Source={dataSource}";
+    }
+}
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
