@@ -308,9 +308,12 @@ public class IntakeController : Controller
         var doc = await _db.IntakeDocuments.FindAsync(id);
         if (doc == null) return NotFound();
 
-        // Blob URL — redirect to Azure so the browser can download it directly
+        // Blob URL — generate a short-lived SAS URL so the browser can download without a 403
         if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            return Redirect(doc.FilePath);
+        {
+            var sasUrl = await _blobService.GenerateSasDownloadUrlAsync(doc.FilePath);
+            return Redirect(sasUrl);
+        }
 
         // Local file — resolve and validate path to prevent directory traversal
         var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
