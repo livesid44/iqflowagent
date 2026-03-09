@@ -81,8 +81,15 @@
     <!-- Hero / Start screen -->
     <div class="intake-hero">
         <h1>Start a New Process Intake</h1>
-        <p>Our AI assistant will guide you through capturing all essential information about your business process. Each intake receives a unique ID and is analysed using Azure OpenAI.</p>
-        <a asp-action="Chat" class="btn-begin">Begin Intake</a>
+        <p>Capture essential business process information for AI-powered analysis. Choose your preferred intake style below.</p>
+        <div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap;margin-bottom:24px;">
+            <a asp-action="Create" class="btn-begin" style="display:inline-flex;align-items:center;gap:8px;">
+                <i class="bi bi-ui-checks-grid"></i> Form View
+            </a>
+            <a asp-action="Chat" class="btn-begin" style="background:rgba(255,255,255,0.18);color:#fff;border:2px solid rgba(255,255,255,0.55);display:inline-flex;align-items:center;gap:8px;">
+                <i class="bi bi-robot"></i> Chat Assistant
+            </a>
+        </div>
         <div class="steps-preview">
             <div class="step-item"><span class="step-num">1</span> Process Name &amp; Description</div>
             <div class="step-item"><span class="step-num">2</span> Ownership &amp; Business Unit</div>

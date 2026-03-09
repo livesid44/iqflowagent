@@ -17,6 +17,7 @@ public class IntakeViewModel
 
     public string Department { get; set; } = string.Empty;
     public string Lob { get; set; } = string.Empty;
+    public string SdcLots { get; set; } = string.Empty;
 
     [Display(Name = "Process Owner Name")]
     public string ProcessOwnerName { get; set; } = string.Empty;

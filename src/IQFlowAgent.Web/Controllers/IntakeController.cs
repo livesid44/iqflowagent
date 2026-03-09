@@ -161,6 +161,7 @@ public class IntakeController : Controller
             BusinessUnit = model.BusinessUnit,
             Department = model.Department,
             Lob = model.Lob,
+            SdcLots = model.SdcLots,
             ProcessOwnerName = model.ProcessOwnerName,
             ProcessOwnerEmail = model.ProcessOwnerEmail,
             ProcessType = model.ProcessType,
@@ -387,6 +388,7 @@ public class IntakeController : Controller
             BusinessUnit         = record.BusinessUnit,
             Department           = record.Department,
             Lob                  = record.Lob,
+            SdcLots              = record.SdcLots,
             ProcessOwnerName     = record.ProcessOwnerName,
             ProcessOwnerEmail    = record.ProcessOwnerEmail,
             ProcessType          = record.ProcessType,
@@ -455,6 +457,7 @@ public class IntakeController : Controller
         record.BusinessUnit         = model.BusinessUnit;
         record.Department           = model.Department;
         record.Lob                  = model.Lob;
+        record.SdcLots              = model.SdcLots;
         record.ProcessOwnerName     = model.ProcessOwnerName;
         record.ProcessOwnerEmail    = model.ProcessOwnerEmail;
         record.ProcessType          = model.ProcessType;

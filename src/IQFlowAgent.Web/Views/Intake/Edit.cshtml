@@ -207,6 +207,14 @@
                         <option value="">— Select LOB —</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label asp-for="SdcLots">Lots or SDC <span style="font-size:0.78rem;font-weight:400;color:#888;">(multi-select)</span></label>
+                    <div class="ms-container" id="sdcLotsContainer" style="cursor:pointer;" onclick="document.getElementById('sdcLotsInput').focus()">
+                        <input type="text" id="sdcLotsInput" class="ms-input" placeholder="Select lots…" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" />
+                        <div class="ms-dropdown" id="sdcLotsDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;"></div>
+                    </div>
+                    <input type="hidden" asp-for="SdcLots" id="sdcLotsHidden" />
+                </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -541,6 +549,16 @@
         );
         let cityMs = buildMultiSelect('cityContainer','cityInput','cityDropdown','cityHidden',
             getCitiesForCountries(countryMs.getSelected()), true, null);
+
+        // Lots or SDC multi-select (fixed 4-option list)
+        const SDC_LOTS = [
+            'Lot 1 – Global Customer Support',
+            'Lot 2 – Quote to Bill',
+            'Lot 3 – International Integrator',
+            'Lot 4 – One Post Sales'
+        ];
+        buildMultiSelect('sdcLotsContainer', 'sdcLotsInput', 'sdcLotsDropdown', 'sdcLotsHidden',
+            SDC_LOTS, true, null);
     });
 </script>
 

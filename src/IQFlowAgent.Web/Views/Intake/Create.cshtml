@@ -87,8 +87,16 @@
 @await Html.PartialAsync("_AppShell")
 
 <main class="app-main">
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
         <a asp-action="Index" style="color:#888;text-decoration:none;font-size:0.85rem;"><i class="bi bi-arrow-left"></i> Back to Intakes</a>
+        <div style="display:flex;gap:8px;align-items:center;background:#f1f5f9;border-radius:8px;padding:4px;">
+            <span style="background:#1a2a5e;color:#fff;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;gap:5px;">
+                <i class="bi bi-ui-checks-grid"></i> Form
+            </span>
+            <a asp-action="Chat" style="color:#666;text-decoration:none;padding:6px 14px;font-size:0.82rem;font-weight:500;display:flex;align-items:center;gap:5px;">
+                <i class="bi bi-robot"></i> Chat
+            </a>
+        </div>
     </div>
     <div class="page-title">New Process Intake</div>
     <div class="page-sub">Provide process meta information and optionally upload supporting documents for AI analysis</div>
@@ -174,6 +182,14 @@
                     <select asp-for="Lob" id="lobSelect" class="form-control">
                         <option value="">— Select LOB —</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label asp-for="SdcLots">Lots or SDC <span style="font-size:0.78rem;font-weight:400;color:#888;">(multi-select)</span></label>
+                    <div class="ms-container" id="sdcLotsContainer" style="cursor:pointer;" onclick="document.getElementById('sdcLotsInput').focus()">
+                        <input type="text" id="sdcLotsInput" class="ms-input" placeholder="Select lots…" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" />
+                        <div class="ms-dropdown" id="sdcLotsDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;"></div>
+                    </div>
+                    <input type="hidden" asp-for="SdcLots" id="sdcLotsHidden" />
                 </div>
             </div>
             <div class="form-row">
@@ -477,6 +493,16 @@
         cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
             getCitiesForCountries(countryMs.getSelected()), true, null
         );
+
+        // Lots or SDC multi-select (fixed 4-option list)
+        const SDC_LOTS = [
+            'Lot 1 – Global Customer Support',
+            'Lot 2 – Quote to Bill',
+            'Lot 3 – International Integrator',
+            'Lot 4 – One Post Sales'
+        ];
+        buildMultiSelect('sdcLotsContainer', 'sdcLotsInput', 'sdcLotsDropdown', 'sdcLotsHidden',
+            SDC_LOTS, true, null);
     });
 </script>
 

@@ -312,6 +312,14 @@
     <div class="chat-topbar">
         <a href="/Intake" class="chat-topbar-back"><i class="bi bi-arrow-left"></i> Intakes</a>
         <div class="chat-topbar-title"><i class="bi bi-robot me-2"></i>Process Intake Assistant</div>
+        <div style="display:flex;gap:4px;align-items:center;background:rgba(255,255,255,0.12);border-radius:6px;padding:3px;">
+            <a href="/Intake/Create" style="color:rgba(255,255,255,0.7);text-decoration:none;padding:4px 10px;font-size:0.78rem;display:flex;align-items:center;gap:4px;border-radius:4px;">
+                <i class="bi bi-ui-checks-grid"></i> Form
+            </a>
+            <span style="background:rgba(255,255,255,0.2);color:#fff;padding:4px 10px;font-size:0.78rem;border-radius:4px;display:flex;align-items:center;gap:4px;">
+                <i class="bi bi-robot"></i> Chat
+            </span>
+        </div>
         <div class="chat-topbar-id" id="topbarIntakeId"></div>
     </div>
     <div class="chat-progress-wrap" style="background:#1a2a5e;">
@@ -334,6 +342,7 @@
     <input type="hidden" name="BusinessUnit"         id="f_BusinessUnit" />
     <input type="hidden" name="Department"           id="f_Department" />
     <input type="hidden" name="Lob"                  id="f_Lob" />
+    <input type="hidden" name="SdcLots"              id="f_SdcLots" />
     <input type="hidden" name="ProcessOwnerName"     id="f_ProcessOwnerName" />
     <input type="hidden" name="ProcessOwnerEmail"    id="f_ProcessOwnerEmail" />
     <input type="hidden" name="ProcessType"          id="f_ProcessType" />
@@ -369,14 +378,14 @@ const LOB_BY_DEPT = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
 //  State
 // ─────────────────────────────────────────────────────────────
 const data = {
-    ProcessName: '', Description: '', BusinessUnit: '', Department: '', Lob: '',
+    ProcessName: '', Description: '', BusinessUnit: '', Department: '', Lob: '', SdcLots: '',
     ProcessOwnerName: '', ProcessOwnerEmail: '', ProcessType: 'Manual',
     EstimatedVolumePerDay: 0, Priority: 'Medium',
     Country: '', City: '', SiteLocation: '', TimeZone: '',
     hasFile: false
 };
 let currentStep = 0;
-const TOTAL_STEPS = 15; // 14 questions (steps[]) + 1 summary step
+const TOTAL_STEPS = 16; // 15 questions (steps[]) + 1 summary step
 const LONG_MSG_THRESHOLD = 100;
 const LONG_TYPING_DELAY  = 900;
 const SHORT_TYPING_DELAY = 600;
@@ -425,6 +434,18 @@ const steps = [
             const lobs = LOB_BY_DEPT[data.Department] || [];
             return [['', '— Select LOB —'], ...lobs.map(l => [l, l])];
         },
+        skippable: true
+    },
+    {
+        key: 'SdcLots',
+        ask: () => `Which <span class='highlight'>Lots or SDC</span> apply to this process? (optional — you can select multiple)`,
+        type: 'multichips',
+        chips: [
+            'Lot 1 – Global Customer Support',
+            'Lot 2 – Quote to Bill',
+            'Lot 3 – International Integrator',
+            'Lot 4 – One Post Sales'
+        ],
         skippable: true
     },
     {
@@ -619,6 +640,59 @@ function renderInput(step, index) {
             qr.appendChild(btn);
         });
         inputEl.appendChild(qr);
+
+    } else if (step.type === 'multichips') {
+        // Multi-select chips: each chip toggles selected state; a Done button confirms
+        const selected = new Set();
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;';
+
+        const chipsRow = document.createElement('div');
+        chipsRow.className = 'quick-replies';
+        chipsRow.style.flexWrap = 'wrap';
+
+        function renderChips() {
+            chipsRow.innerHTML = '';
+            (step.chips || []).forEach(label => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                const isSelected = selected.has(label);
+                btn.className = 'qr-chip' + (isSelected ? ' selected-chip' : '');
+                btn.style.cssText = isSelected
+                    ? 'background:#1a2a5e;color:#fff;border-color:#1a2a5e;'
+                    : '';
+                btn.textContent = (isSelected ? '✓ ' : '') + label;
+                btn.onclick = () => {
+                    if (selected.has(label)) selected.delete(label);
+                    else selected.add(label);
+                    renderChips();
+                };
+                chipsRow.appendChild(btn);
+            });
+        }
+        renderChips();
+
+        const doneRow = document.createElement('div');
+        doneRow.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:4px;';
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'chat-send-btn';
+        doneBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+        doneBtn.title = 'Confirm selection';
+        doneBtn.onclick = () => answerStep(step, index, [...selected].join(', ') || '');
+        doneRow.appendChild(doneBtn);
+
+        if (step.skippable) {
+            const skip = document.createElement('button');
+            skip.className = 'btn-skip';
+            skip.textContent = 'Skip';
+            skip.onclick = () => answerStep(step, index, '');
+            doneRow.appendChild(skip);
+        }
+
+        wrapper.appendChild(chipsRow);
+        wrapper.appendChild(doneRow);
+        inputEl.appendChild(wrapper);
 
     } else if (step.type === 'file') {
         const zone = document.createElement('div');
@@ -907,6 +981,7 @@ async function showSummary() {
         ['Business Unit', data.BusinessUnit],
         ['Department', data.Department || '—'],
         ['LOB', data.Lob || '—'],
+        ['Lots / SDC', data.SdcLots || '—'],
         ['Process Owner', `${data.ProcessOwnerName} (${data.ProcessOwnerEmail})`],
         ['Process Type', data.ProcessType],
         ['Volume / Day', data.EstimatedVolumePerDay || '—'],
@@ -947,6 +1022,7 @@ function submitIntake() {
     document.getElementById('f_BusinessUnit').value          = data.BusinessUnit;
     document.getElementById('f_Department').value            = data.Department;
     document.getElementById('f_Lob').value                   = data.Lob;
+    document.getElementById('f_SdcLots').value               = data.SdcLots;
     document.getElementById('f_ProcessOwnerName').value      = data.ProcessOwnerName;
     document.getElementById('f_ProcessOwnerEmail').value     = data.ProcessOwnerEmail;
     document.getElementById('f_ProcessType').value           = data.ProcessType;

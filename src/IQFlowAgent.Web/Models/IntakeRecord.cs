@@ -12,6 +12,7 @@ public class IntakeRecord
     public string BusinessUnit { get; set; } = string.Empty;
     public string Department { get; set; } = string.Empty;
     public string Lob { get; set; } = string.Empty; // Line of Business (maps to Deployment)
+    public string SdcLots { get; set; } = string.Empty; // Lots or SDC (comma-separated multi-select)
     public string ProcessOwnerName { get; set; } = string.Empty;
     public string ProcessOwnerEmail { get; set; } = string.Empty;
     public string ProcessType { get; set; } = string.Empty; // Manual, Semi-Automated, Automated
