@@ -144,8 +144,36 @@
             </div>
             <div class="form-row">
                 <div class="form-group full">
-                    <label asp-for="Description">Description <span class="required">*</span></label>
-                    <textarea asp-for="Description" class="form-control"
+                    <label asp-for="Description">
+                        Description <span class="required">*</span>
+                        <button type="button"
+                                onclick="toggleAiPanel()"
+                                style="margin-left:10px;background:none;border:1px solid #1a2a5e;color:#1a2a5e;border-radius:5px;
+                                       padding:2px 10px;font-size:0.75rem;font-weight:600;cursor:pointer;vertical-align:middle;"
+                                title="Generate description using AI from your key points">
+                            <i class="bi bi-stars me-1"></i>AI Assist
+                        </button>
+                    </label>
+                    <!-- AI Assist panel -->
+                    <div id="aiAssistPanel" style="display:none;background:#f8faff;border:1px solid #c8d5f0;
+                         border-radius:8px;padding:14px 16px;margin-bottom:8px;">
+                        <p style="font-size:0.8rem;color:#444;margin:0 0 8px;">
+                            Enter brief pointers or key notes (one per line). The AI will expand them into a full description.
+                        </p>
+                        <textarea id="aiPointers" rows="4"
+                                  style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 10px;
+                                         font-size:0.87rem;resize:vertical;box-sizing:border-box;"
+                                  placeholder="e.g.&#10;- Process handles inbound customer calls&#10;- Agent verifies identity, logs issue&#10;- Escalates if unresolved in 5 min"></textarea>
+                        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                            <button type="button" id="aiGenerateBtn" onclick="generateDescription('Description','aiPointers','ProcessName','aiGenerateBtn','aiError')"
+                                    style="background:#1a2a5e;color:#fff;border:none;border-radius:6px;
+                                           padding:6px 18px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                <i class="bi bi-stars me-1"></i>Generate Description
+                            </button>
+                            <span id="aiError" style="color:#e31837;font-size:0.8rem;"></span>
+                        </div>
+                    </div>
+                    <textarea asp-for="Description" id="Description" class="form-control"
                               placeholder="Describe the business process in detail…"></textarea>
                     <span asp-validation-for="Description" class="text-danger"></span>
                 </div>
@@ -670,6 +698,53 @@
         xhr.send(data);
     });
 }());
+
+    // ── AI Description Assist ────────────────────────────────────────────────
+    function toggleAiPanel() {
+        const panel = document.getElementById('aiAssistPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function generateDescription(descFieldId, pointersFieldId, nameFieldId, btnId, errId) {
+        const pointers = document.getElementById(pointersFieldId)?.value?.trim();
+        const errEl    = document.getElementById(errId);
+        const btn      = document.getElementById(btnId);
+        if (errEl) errEl.textContent = '';
+
+        if (!pointers) {
+            if (errEl) errEl.textContent = 'Please enter some key points first.';
+            return;
+        }
+
+        const processName = document.getElementById(nameFieldId)?.value?.trim() ?? '';
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Generating…';
+
+        try {
+            const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+            const resp  = await fetch('/Intake/GenerateDescription', {
+                method:  'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify({ processName, pointers })
+            });
+            const json = await resp.json();
+            if (json.success) {
+                document.getElementById(descFieldId).value = json.description;
+                document.getElementById('aiAssistPanel').style.display = 'none';
+            } else {
+                if (errEl) errEl.textContent = json.error ?? 'Generation failed. Please type the description manually.';
+            }
+        } catch (e) {
+            if (errEl) errEl.textContent = 'Network error. Please try again.';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Description';
+        }
+    }
 </script>
 }
 

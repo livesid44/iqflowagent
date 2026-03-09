@@ -543,6 +543,24 @@ public class IntakeController : Controller
         return Json(lobs);
     }
 
+    // POST /Intake/GenerateDescription — AJAX: expand user pointers into a detailed description via LLM
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> GenerateDescription([FromBody] GenerateDescriptionRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req?.Pointers))
+            return Ok(new { success = false, error = "Please provide some key points or pointers." });
+
+        var description = await _aiService.GenerateDescriptionAsync(
+            req.ProcessName ?? string.Empty,
+            req.Pointers);
+
+        if (string.IsNullOrWhiteSpace(description))
+            return Ok(new { success = false, error = "AI service is not configured or returned an empty response. Please type the description manually." });
+
+        return Ok(new { success = true, description });
+    }
+
     private async Task DeleteDocumentAsync(string? filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath)) return;
@@ -743,3 +761,6 @@ public class IntakeController : Controller
         });
     }
 }
+
+/// <summary>Request body for the GenerateDescription AJAX endpoint.</summary>
+public sealed record GenerateDescriptionRequest(string? ProcessName, string? Pointers);

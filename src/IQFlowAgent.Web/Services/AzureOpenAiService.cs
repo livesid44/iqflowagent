@@ -1529,4 +1529,89 @@ public class AzureOpenAiService : IAzureOpenAiService
             return json;
         }
     }
+
+    // ── GenerateDescriptionAsync ───────────────────────────────────────────────
+    /// <summary>
+    /// Expands brief pointers into a detailed, professional process description.
+    /// Returns the generated text, or an empty string when AI is not configured / unavailable.
+    /// </summary>
+    public async Task<string> GenerateDescriptionAsync(string processName, string pointers)
+    {
+        var (endpoint, apiKey, deployment, apiVersion, _) = await GetAiConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Azure OpenAI not configured — cannot generate description for '{ProcessName}'.", processName);
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+        {
+            _logger.LogWarning("Azure OpenAI endpoint '{Endpoint}' is invalid — cannot generate description.", endpoint);
+            return string.Empty;
+        }
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+
+        const string systemPrompt = """
+            You are a business process analyst. The user has provided a process name and brief key points.
+            Expand these points into a comprehensive, professional process description (150-300 words).
+            The description should clearly explain what the process does, who is involved, the key steps
+            and inputs/outputs, and the business value it delivers.
+            Use clear, professional language and flowing prose paragraphs — NOT bullet points.
+            Return ONLY the description text. Do not include headings, labels, or extra commentary.
+            """;
+
+        var userMessage = string.IsNullOrWhiteSpace(processName)
+            ? $"Key points:\n{pointers}"
+            : $"Process Name: {processName}\n\nKey points:\n{pointers}";
+
+        try
+        {
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = userMessage }
+                },
+                max_tokens  = 600,
+                temperature = 0.7,
+                top_p       = 1.0,
+                model       = deployment
+            };
+
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Azure OpenAI description generation returned {Status}: {Body}",
+                    (int)response.StatusCode, errorBody);
+                return string.Empty;
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(responseText);
+            var content = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            return content?.Trim() ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Azure OpenAI description generation threw for process '{ProcessName}'.", processName);
+            return string.Empty;
+        }
+    }
 }

@@ -44,4 +44,10 @@ public interface IAzureOpenAiService
     /// Returns (success, httpStatusCode, message).
     /// </summary>
     Task<(bool success, int statusCode, string message)> TestConnectionAsync();
+
+    /// <summary>
+    /// Expands brief user-supplied pointers into a detailed, professional process description.
+    /// Returns the description as plain text, or an empty string if AI is unavailable.
+    /// </summary>
+    Task<string> GenerateDescriptionAsync(string processName, string pointers);
 }

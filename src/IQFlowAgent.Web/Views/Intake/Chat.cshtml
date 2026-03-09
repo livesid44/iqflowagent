@@ -877,6 +877,9 @@ function renderInput(step, index) {
         searchInp.focus();
 
     } else if (step.type === 'textarea') {
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:6px;width:100%;';
+
         const ta = document.createElement('textarea');
         ta.className = 'chat-text-input';
         ta.rows = 3;
@@ -896,10 +899,95 @@ function renderInput(step, index) {
             answerStep(step, index, ta.value.trim());
         };
         row.appendChild(sendBtn);
-        inputEl.appendChild(row);
+        wrapper.appendChild(row);
         ta.addEventListener('keydown', e => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
         });
+
+        // ── AI Assist button (only shown for the Description step) ──
+        if (step.key === 'Description') {
+            const aiToggleBtn = document.createElement('button');
+            aiToggleBtn.type = 'button';
+            aiToggleBtn.className = 'btn-skip';
+            aiToggleBtn.style.cssText = 'align-self:flex-start;background:rgba(26,42,94,0.08);color:#1a2a5e;border-color:#1a2a5e;';
+            aiToggleBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate with AI';
+
+            const aiPanel = document.createElement('div');
+            aiPanel.style.cssText = 'display:none;background:#f8faff;border:1px solid #c8d5f0;border-radius:10px;padding:12px 14px;';
+
+            const aiHint = document.createElement('p');
+            aiHint.style.cssText = 'font-size:0.78rem;color:#444;margin:0 0 7px;';
+            aiHint.textContent = 'Enter brief key points (one per line) and let AI write a full description:';
+            aiPanel.appendChild(aiHint);
+
+            const pointersTa = document.createElement('textarea');
+            pointersTa.rows = 3;
+            pointersTa.placeholder = 'e.g.\n- Handles inbound calls\n- Logs cases in CRM\n- Escalates unresolved issues';
+            pointersTa.style.cssText = 'width:100%;border:1px solid #ddd;border-radius:8px;padding:8px 10px;font-size:0.83rem;resize:vertical;box-sizing:border-box;';
+            aiPanel.appendChild(pointersTa);
+
+            const aiBottomRow = document.createElement('div');
+            aiBottomRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:7px;';
+
+            const aiGenBtn = document.createElement('button');
+            aiGenBtn.type = 'button';
+            aiGenBtn.className = 'chat-send-btn';
+            aiGenBtn.style.cssText = 'font-size:0.8rem;padding:7px 14px;width:auto;border-radius:8px;';
+            aiGenBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate';
+
+            const aiErrSpan = document.createElement('span');
+            aiErrSpan.style.cssText = 'color:#e31837;font-size:0.78rem;';
+
+            aiGenBtn.onclick = async () => {
+                const pts = pointersTa.value.trim();
+                aiErrSpan.textContent = '';
+                if (!pts) { aiErrSpan.textContent = 'Please enter some key points.'; return; }
+
+                aiGenBtn.disabled = true;
+                aiGenBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Generating…';
+
+                try {
+                    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+                    const resp  = await fetch('/Intake/GenerateDescription', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                        body: JSON.stringify({ processName: data.ProcessName ?? '', pointers: pts })
+                    });
+                    const json = await resp.json();
+                    if (json.success) {
+                        ta.value = json.description;
+                        aiPanel.style.display = 'none';
+                        aiToggleBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate with AI';
+                        ta.focus();
+                    } else {
+                        aiErrSpan.textContent = json.error ?? 'Generation failed — please type manually.';
+                    }
+                } catch (e) {
+                    aiErrSpan.textContent = 'Network error. Please try again.';
+                } finally {
+                    aiGenBtn.disabled = false;
+                    aiGenBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate';
+                }
+            };
+
+            aiBottomRow.appendChild(aiGenBtn);
+            aiBottomRow.appendChild(aiErrSpan);
+            aiPanel.appendChild(aiBottomRow);
+
+            aiToggleBtn.onclick = () => {
+                const open = aiPanel.style.display !== 'none';
+                aiPanel.style.display = open ? 'none' : 'block';
+                aiToggleBtn.innerHTML = open
+                    ? '<i class="bi bi-stars me-1"></i>Generate with AI'
+                    : '<i class="bi bi-x me-1"></i>Close AI Assist';
+                if (!open) pointersTa.focus();
+            };
+
+            wrapper.appendChild(aiToggleBtn);
+            wrapper.appendChild(aiPanel);
+        }
+
+        inputEl.appendChild(wrapper);
         ta.focus();
 
     } else {
