@@ -223,5 +223,143 @@ public class MasterDataController : Controller
         TempData["Success"] = $"LOB '{lob.Name}' {(lob.IsActive ? "activated" : "deactivated")}.";
         return RedirectToAction(nameof(Lob));
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  LOT Country/City Mapping
+    // ═══════════════════════════════════════════════════════════
+
+    private static readonly string[] SdcLotOptions =
+    [
+        "Lot 1 – Global Customer Support",
+        "Lot 2 – Quote to Bill",
+        "Lot 3 – International Integrator",
+        "Lot 4 – One Post Sales"
+    ];
+
+    // GET /MasterData/LotCountryMapping
+    public async Task<IActionResult> LotCountryMapping()
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var mappings = await _db.LotCountryMappings
+            .Where(m => m.TenantId == tenantId)
+            .OrderBy(m => m.LotName)
+            .ThenBy(m => m.Country)
+            .ToListAsync();
+
+        var settings = await _db.TenantAiSettings
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId);
+
+        ViewBag.LotOptions = SdcLotOptions;
+        ViewBag.UseCountryFilterByLot = settings?.UseCountryFilterByLot ?? false;
+        return View(mappings);
+    }
+
+    // POST /MasterData/CreateLotCountryMapping
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> CreateLotCountryMapping(
+        string lotName, string country, string? cities)
+    {
+        if (string.IsNullOrWhiteSpace(lotName) || string.IsNullOrWhiteSpace(country))
+        {
+            TempData["Error"] = "LOT name and Country are required.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var exists = await _db.LotCountryMappings.AnyAsync(m =>
+            m.TenantId == tenantId &&
+            m.LotName == lotName.Trim() &&
+            m.Country.ToLower() == country.Trim().ToLower());
+
+        if (exists)
+        {
+            TempData["Error"] = $"A mapping for '{country.Trim()}' under '{lotName.Trim()}' already exists.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        _db.LotCountryMappings.Add(new LotCountryMapping
+        {
+            TenantId  = tenantId,
+            LotName   = lotName.Trim(),
+            Country   = country.Trim(),
+            Cities    = cities?.Trim() ?? string.Empty,
+            IsActive  = true
+        });
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{country.Trim()}' → '{lotName.Trim()}' created.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/EditLotCountryMapping/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> EditLotCountryMapping(
+        int id, string lotName, string country, string? cities, bool isActive)
+    {
+        var mapping = await _db.LotCountryMappings.FindAsync(id);
+        if (mapping == null) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(lotName) || string.IsNullOrWhiteSpace(country))
+        {
+            TempData["Error"] = "LOT name and Country are required.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        mapping.LotName  = lotName.Trim();
+        mapping.Country  = country.Trim();
+        mapping.Cities   = cities?.Trim() ?? string.Empty;
+        mapping.IsActive = isActive;
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{country.Trim()}' updated.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/DeleteLotCountryMapping/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Roles = "SuperAdmin")]
+    public async Task<IActionResult> DeleteLotCountryMapping(int id)
+    {
+        var mapping = await _db.LotCountryMappings.FindAsync(id);
+        if (mapping == null) return NotFound();
+
+        _db.LotCountryMappings.Remove(mapping);
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{mapping.Country}' deleted.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/ToggleLotCountryMapping/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ToggleLotCountryMapping(int id)
+    {
+        var mapping = await _db.LotCountryMappings.FindAsync(id);
+        if (mapping == null) return NotFound();
+
+        mapping.IsActive = !mapping.IsActive;
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{mapping.Country}' {(mapping.IsActive ? "activated" : "deactivated")}.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/SaveLotFilterSetting — toggle UseCountryFilterByLot
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveLotFilterSetting(bool useCountryFilterByLot)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var settings = await _db.TenantAiSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
+        if (settings != null)
+        {
+            settings.UseCountryFilterByLot = useCountryFilterByLot;
+            await _db.SaveChangesAsync();
+        }
+        TempData["Success"] = useCountryFilterByLot
+            ? "Country/City filter by LOT is now enabled."
+            : "Country/City filter by LOT is now disabled (global master list will be used).";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
 }
 

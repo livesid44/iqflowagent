@@ -73,6 +73,7 @@ public class IntakeController : Controller
             .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
+        await PopulateLotCountryViewBagAsync(tenantId);
         return View();
     }
 
@@ -90,6 +91,7 @@ public class IntakeController : Controller
             .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
+        await PopulateLotCountryViewBagAsync(tenantId);
         return View(new IntakeViewModel());
     }
 
@@ -378,6 +380,7 @@ public class IntakeController : Controller
             .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
+        await PopulateLotCountryViewBagAsync(tenantId);
 
         var vm = new IntakeEditViewModel
         {
@@ -559,6 +562,38 @@ public class IntakeController : Controller
             return Ok(new { success = false, error = "AI service is not configured or returned an empty response. Please type the description manually." });
 
         return Ok(new { success = true, description });
+    }
+
+    /// <summary>
+    /// Populates ViewBag.LotCountryMap (JSON object: lotName → [{country, cities[]}])
+    /// and ViewBag.UseCountryFilterByLot (bool) for the intake Create/Edit/Chat views.
+    /// </summary>
+    private async Task PopulateLotCountryViewBagAsync(int tenantId)
+    {
+        var settings = await _db.TenantAiSettings
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId);
+        ViewBag.UseCountryFilterByLot = settings?.UseCountryFilterByLot ?? false;
+
+        // Build a dictionary: lotName → list of { country, cities[] }
+        var mappings = await _db.LotCountryMappings
+            .Where(m => m.TenantId == tenantId && m.IsActive)
+            .OrderBy(m => m.LotName).ThenBy(m => m.Country)
+            .ToListAsync();
+
+        var map = mappings
+            .GroupBy(m => m.LotName)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(m => new
+                {
+                    country = m.Country,
+                    cities  = string.IsNullOrWhiteSpace(m.Cities)
+                        ? Array.Empty<string>()
+                        : m.Cities.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                }).ToList()
+            );
+
+        ViewBag.LotCountryMapJson = System.Text.Json.JsonSerializer.Serialize(map);
     }
 
     private async Task DeleteDocumentAsync(string? filePath)

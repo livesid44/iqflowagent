@@ -511,17 +511,6 @@
 
     // Country multi-select — initialise after DOM ready
     document.addEventListener('DOMContentLoaded', () => {
-        let cityMs;
-        const countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
-            COUNTRY_LIST, true,
-            function(sel) {
-                const cities = getCitiesForCountries(sel);
-                cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden', cities, true, null);
-            }
-        );
-        cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
-            getCitiesForCountries(countryMs.getSelected()), true, null
-        );
 
         // Lots or SDC multi-select (fixed 4-option list)
         const SDC_LOTS = [
@@ -530,8 +519,61 @@
             'Lot 3 – International Integrator',
             'Lot 4 – One Post Sales'
         ];
-        buildMultiSelect('sdcLotsContainer', 'sdcLotsInput', 'sdcLotsDropdown', 'sdcLotsHidden',
-            SDC_LOTS, true, null);
+
+        // ── LOT-aware country/city filtering ────────────────────────
+        const USE_LOT_FILTER   = @Html.Raw((ViewBag.UseCountryFilterByLot ?? false) ? "true" : "false");
+        const LOT_COUNTRY_MAP  = @Html.Raw(ViewBag.LotCountryMapJson ?? "{}");
+
+        function getCountriesForLots(selectedLots) {
+            if (!USE_LOT_FILTER || !selectedLots || selectedLots.length === 0)
+                return COUNTRY_LIST;
+            const countries = new Set();
+            selectedLots.forEach(lot => {
+                const entries = LOT_COUNTRY_MAP[lot] || [];
+                entries.forEach(e => countries.add(e.country));
+            });
+            return countries.size > 0 ? [...countries].sort() : COUNTRY_LIST;
+        }
+
+        function getCitiesForCountriesAndLots(selectedCountries, selectedLots) {
+            if (!USE_LOT_FILTER || !selectedLots || selectedLots.length === 0)
+                return getCitiesForCountries(selectedCountries);
+            const result = new Set();
+            selectedLots.forEach(lot => {
+                const entries = (LOT_COUNTRY_MAP[lot] || []).filter(e => selectedCountries.includes(e.country));
+                entries.forEach(e => {
+                    if (e.cities && e.cities.length > 0) {
+                        e.cities.forEach(c => result.add(c));
+                    } else {
+                        // empty cities list means "all cities for this country"
+                        (COUNTRY_CITY_MAP[e.country] || []).forEach(c => result.add(c));
+                    }
+                });
+            });
+            return result.size > 0 ? [...result].sort() : getCitiesForCountries(selectedCountries);
+        }
+
+        // Build LOT multiselect first; on change, update country list
+        const lotsMs = buildMultiSelect('sdcLotsContainer', 'sdcLotsInput', 'sdcLotsDropdown', 'sdcLotsHidden',
+            SDC_LOTS, true, function(selLots) {
+                const newCountries = getCountriesForLots(selLots);
+                countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
+                    newCountries, true, function(selCts) {
+                        cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
+                            getCitiesForCountriesAndLots(selCts, lotsMs.getSelected()), true, null);
+                    });
+            });
+
+        let countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
+            getCountriesForLots(lotsMs.getSelected()), true,
+            function(sel) {
+                cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
+                    getCitiesForCountriesAndLots(sel, lotsMs.getSelected()), true, null);
+            }
+        );
+        let cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
+            getCitiesForCountriesAndLots(countryMs.getSelected(), lotsMs.getSelected()), true, null
+        );
     });
 </script>
 

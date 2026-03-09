@@ -20,6 +20,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<FinalReport> FinalReports => Set<FinalReport>();
     public DbSet<MasterDepartment> MasterDepartments => Set<MasterDepartment>();
     public DbSet<MasterLob> MasterLobs => Set<MasterLob>();
+    public DbSet<LotCountryMapping> LotCountryMappings => Set<LotCountryMapping>();
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
     public DbSet<RagJob> RagJobs => Set<RagJob>();
 
