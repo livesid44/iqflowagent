@@ -3,7 +3,11 @@
     Layout = "_Layout";
     ViewData["Title"] = "Intake Field Configuration";
     ViewData["ActivePage"] = "masterdataintakefields";
-    var grouped = Model.GroupBy(f => f.SectionName).OrderBy(g => g.Min(f => f.DisplayOrder));
+    var grouped = Model.GroupBy(f => f.SectionName)
+                       .Select(g => new { Group = g, MinOrder = g.Min(f => f.DisplayOrder) })
+                       .OrderBy(x => x.MinOrder)
+                       .Select(x => x.Group)
+                       .ToList();
 }
 
 @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
