@@ -8,55 +8,71 @@ public class DocxReportService : IDocxReportService
 {
     // ── Static field catalogue ─────────────────────────────────────────────────
     // AutoSource values:
-    //   "<PropertyName>" → resolved from IntakeRecord property
-    //   "AI:summary"     → pulled from AI analysis JSON summary
-    //   ""               → no automatic mapping; AI or user must supply value
+    //   "<PropertyName>" → resolved directly from IntakeRecord property
+    //   "AI:<key>"       → pulled from AI analysis JSON
+    //   ""               → no automatic mapping; user must supply the value manually
+    //
+    // TemplatePlaceholder is the exact text to find-and-replace inside the DOCX.
 
     private static readonly List<FieldDefinition> FieldDefs =
     [
-        // ── Cover / Header ───────────────────────────────────────────────────
-        new("header_process_name",    "Cover",          "Process Name",              "Enter Process Name",        "ProcessName"),
-        new("header_service_line",    "Cover",          "Service Line / LOT",        "Enter Service Line / LOT",  "BusinessUnit"),
-        new("header_reviewer",        "Cover",          "Reviewer Name",             "Enter Reviewer Name",       "ProcessOwnerName"),
-        new("header_review_date",     "Cover",          "Review Date",               "DD MMM YYYY",               "TODAY"),
+        // ── Cover ────────────────────────────────────────────────────────────
+        new("cover_process_name",    "Cover",                    "Process Name",
+            "[Process Name]",
+            "ProcessName"),
 
-        // ── 0. Client Inputs ─────────────────────────────────────────────────
-        new("client_doc1",            "0. Client Inputs & Artefacts",  "Document / Artefact #1",   "Enter document name...",    "UploadedFileName"),
+        new("cover_lot",             "Cover",                    "Lot Number and Name",
+            "[Lot Number and Name]",
+            "SdcLots"),
 
-        // ── 1.1 Process Overview ─────────────────────────────────────────────
-        new("process_summary",        "1.1 Process Overview",          "Process Summary",           "Describe the process in your own words. Cover: what it does, who it serves, how it is triggered, and why it matters to the business. Avoid bullet points here — use complete sentences so this section can be read in isolation by a senior stakeholder.", "AI:summary"),
+        new("cover_date",            "Cover",                    "Document Date",
+            "[Add date in dd-mmm-yyyy format e.g. 01-May-2026]",
+            "TODAY"),
 
-        // ── 1.2 Basic Process Information ────────────────────────────────────
-        new("basic_process_name",     "1.2 Basic Process Information", "Process Name",              "Enter process name...",     "ProcessName"),
-        new("basic_service_line",     "1.2 Basic Process Information", "Service Line / LOT",        "Enter service line...",     "BusinessUnit"),
-        new("basic_sub_process",      "1.2 Basic Process Information", "Sub-process Name",          "If applicable...",          ""),
-        new("basic_process_category", "1.2 Basic Process Information", "Process Category",          "Service Delivery / Service Assurance / Service Management / Billing & Invoicing", "ProcessType"),
-        new("basic_process_owner",    "1.2 Basic Process Information", "Process Owner",             "Name and role...",          "ProcessOwnerName"),
-        new("basic_geo_location",     "1.2 Basic Process Information", "Geo Location(s)",           "India / Brazil / Slovakia / Egypt / Multi-Geo", "GeoLocation"),
-        new("basic_time_zone",        "1.2 Basic Process Information", "Time Zone Coverage",        "e.g. GMT, IST, BRT...",     "TimeZone"),
+        new("cover_author",          "Cover",                    "Process Author",
+            "[Process Author Name | Email]",
+            "ProcessOwnerContact"),
 
-        // ── 1.3 Service & Customer Scope ─────────────────────────────────────
-        new("services_scope",         "1.3 Service & Customer Scope",  "Services Scope",            "List services in scope per customer...", "Description"),
-        new("product_portfolio",      "1.3 Service & Customer Scope",  "Product Portfolio",         "List products covered...",  ""),
-        new("contractual_commits",    "1.3 Service & Customer Scope",  "Contractual Commitments",   "SLAs, CSI targets, governance clauses...", ""),
+        new("cover_approver",        "Cover",                    "Approver",
+            "[Approver Name | Email]",
+            ""),
 
-        // ── 2.1 Operating Model Overview ─────────────────────────────────────
-        new("operating_model",        "2. Operating Model Mapping",    "Operating Model Description", "Describe the team structure, reporting lines, and how the operating model functions across geographies. Note any shared service arrangements, dedicated client teams, or satellite structures. Highlight any named individuals critical to continuity.", "AI:operatingModel"),
+        // ── 1. Purpose and Scope ─────────────────────────────────────────────
+        new("scope_countries",       "1. Purpose and Scope",     "Countries in Scope",
+            "[List all countries where this process operates]",
+            "Country"),
 
-        // ── 2.2 Roles & Responsibilities ─────────────────────────────────────
-        new("named_resources",        "2.2 Roles & Responsibilities",  "Named / Critical Resources", "List names and roles...",   "ProcessOwnerName"),
-        new("skill_gaps",             "2.2 Roles & Responsibilities",  "Skill Gaps Identified",     "Describe gaps...",          ""),
+        // ── 1.2 Inputs & Artefacts ───────────────────────────────────────────
+        new("artefact_doc1",         "1.2 Inputs & Artefacts",   "Document / Artefact #1",
+            "Enter document name...",
+            "UploadedFileName"),
 
-        // ── 3.1 Process Narrative ─────────────────────────────────────────────
-        new("flow_summary",           "3.1 Process Narrative",         "Process Flow Summary",      "Describe the end-to-end flow in plain language. Walk through the process as a story: how is it triggered, what happens in sequence, where are the key decision points, and how does it conclude? Note any parallel workstreams or loops.", "AI:flowSummary"),
+        // ── 2. Process Overview ───────────────────────────────────────────────
+        new("process_description",   "2. Process Overview",      "Process Description",
+            "Detailed description",
+            "AI:summary"),
 
-        // ── 9. Reversibility & Exit ───────────────────────────────────────────
-        new("exit_risks",             "9. Reversibility & Exit",       "Risks from Transition",     "Risks from transition...",  ""),
+        new("process_owner",         "2. Process Overview",      "Process Owner (Name, Role, OB)",
+            "[Name, Role, OB]",
+            "ProcessOwnerName"),
 
-        // ── 10. Reviewer Confidence ───────────────────────────────────────────
-        new("confidence_score",       "10. Reviewer Confidence Score", "Confidence Score (1-5)",    "Rate 1 (low confidence) to 5 (complete and verified)...", "AI:confidenceScore"),
-        new("next_steps",             "10. Reviewer Confidence Score", "Next Steps / Owner",        "Enter next step and owner...", ""),
-        new("unresolved_items",       "10. Reviewer Confidence Score", "Unresolved Items",          "List unresolved items...",  ""),
+        new("peak_volume",           "2. Process Overview",      "Peak Volume",
+            "[Peak volume and period — e.g. month-end, quarter-end]",
+            "AI:peakVolume"),
+
+        new("systems_used",          "2. Process Overview",      "Systems Used",
+            "[Primary systems — ERP, ticketing, reporting tools]",
+            "AI:systemsUsed"),
+
+        // ── 5. Work Instructions ─────────────────────────────────────────────
+        new("work_instructions",     "5. Work Instructions",     "Step 1 Instructions",
+            "[Instruction 1 — system navigation, field entries, validation checks]",
+            "AI:workInstructions"),
+
+        // ── 9. Regulatory and Compliance ─────────────────────────────────────
+        new("control_framework_ref", "9. Regulatory and Compliance", "Control Framework Reference",
+            "[TechM Control Framework Document Reference]",
+            ""),
     ];
 
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();

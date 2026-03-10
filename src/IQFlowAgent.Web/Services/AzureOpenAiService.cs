@@ -518,6 +518,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         sb.AppendLine($"Location: {intake.City}, {intake.Country} ({intake.SiteLocation})");
         sb.AppendLine($"Time Zone: {intake.TimeZone}");
         sb.AppendLine($"Uploaded Document: {intake.UploadedFileName ?? "(none)"}");
+        sb.AppendLine($"Lots / SDC: {(string.IsNullOrWhiteSpace(intake.SdcLots) ? "(none)" : intake.SdcLots)}");
         sb.AppendLine();
 
         if (!string.IsNullOrWhiteSpace(analysisJson))
@@ -579,17 +580,20 @@ public class AzureOpenAiService : IAzureOpenAiService
         // Auto-resolve from intake properties
         var intakeValue = source switch
         {
-            "ProcessName"     => intake.ProcessName,
-            "BusinessUnit"    => intake.BusinessUnit,
-            "Department"      => intake.Department,
-            "ProcessOwnerName" => intake.ProcessOwnerName,
-            "ProcessType"     => intake.ProcessType,
-            "TimeZone"        => intake.TimeZone,
-            "Description"     => intake.Description,
-            "UploadedFileName" => intake.UploadedFileName ?? "",
-            "GeoLocation"     => FormatGeoLocation(intake),
-            "TODAY"           => DateTime.UtcNow.ToString("dd MMM yyyy"),
-            _                 => null
+            "ProcessName"          => intake.ProcessName,
+            "BusinessUnit"         => intake.BusinessUnit,
+            "Department"           => intake.Department,
+            "ProcessOwnerName"     => intake.ProcessOwnerName,
+            "ProcessOwnerContact"  => $"{intake.ProcessOwnerName} | {intake.ProcessOwnerEmail}",
+            "ProcessType"          => intake.ProcessType,
+            "TimeZone"             => intake.TimeZone,
+            "Description"          => intake.Description,
+            "UploadedFileName"     => intake.UploadedFileName ?? "",
+            "Country"              => intake.Country,
+            "SdcLots"              => intake.SdcLots,
+            "GeoLocation"          => FormatGeoLocation(intake),
+            "TODAY"                => DateTime.UtcNow.ToString("dd-MMM-yyyy"),
+            _                      => null
         };
 
         if (intakeValue != null)
@@ -623,6 +627,16 @@ public class AzureOpenAiService : IAzureOpenAiService
                         $"The team follows a {intake.ProcessType} model with an estimated volume of " +
                         $"{intake.EstimatedVolumePerDay} transactions per day.",
                         "Auto-generated from intake metadata.");
+                if (aiProp == "peakVolume")
+                    return ("Available",
+                        $"Est. {intake.EstimatedVolumePerDay} transactions / day. Confirm peak period with process owner.",
+                        "Auto-generated from intake volume data.");
+                if (aiProp == "systemsUsed")
+                    return ("Missing", "",
+                        "Systems used could not be determined from available data. Please specify the primary systems (ERP, ticketing, reporting tools) used in this process.");
+                if (aiProp == "workInstructions")
+                    return ("Missing", "",
+                        "Work instructions require step-level detail. Please document each step's system navigation, field entries and validation checks.");
             }
             catch { /* ignore */ }
         }
