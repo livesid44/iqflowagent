@@ -74,6 +74,7 @@ public class IntakeController : Controller
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
         await PopulateLotCountryViewBagAsync(tenantId);
+        ViewBag.FieldConfigs = await LoadFieldConfigDictAsync(tenantId);
         return View();
     }
 
