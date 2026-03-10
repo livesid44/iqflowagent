@@ -24,6 +24,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<IntakeFieldConfig> IntakeFieldConfigs => Set<IntakeFieldConfig>();
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
     public DbSet<RagJob> RagJobs => Set<RagJob>();
+    public DbSet<TenantPiiSettings> TenantPiiSettings => Set<TenantPiiSettings>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -99,5 +100,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .WithMany()
             .HasForeignKey(r => r.IntakeRecordId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<TenantPiiSettings>()
+            .HasIndex(p => p.TenantId)
+            .IsUnique();
     }
 }

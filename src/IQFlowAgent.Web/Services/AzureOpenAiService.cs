@@ -15,14 +15,17 @@ public class AzureOpenAiService : IAzureOpenAiService
     private readonly ILogger<AzureOpenAiService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ITenantContextService _tenantContext;
+    private readonly IPiiScanService _piiScanner;
 
     public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger,
-        IHttpClientFactory httpClientFactory, ITenantContextService tenantContext)
+        IHttpClientFactory httpClientFactory, ITenantContextService tenantContext,
+        IPiiScanService piiScanner)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _tenantContext = tenantContext;
+        _piiScanner = piiScanner;
     }
 
     private async Task<(string? endpoint, string? apiKey, string? deployment, string apiVersion, int maxTokens)> GetAiConfigAsync()
@@ -119,7 +122,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user",   content = BuildUserMessage(intake, documentText) }
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(BuildUserMessage(intake, documentText), "AnalyzeIntake") }
                 },
                 max_tokens  = maxTokens,
                 temperature = 0.7,
@@ -238,7 +241,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user",   content = BuildVerificationMessage(intake, tasks, aggregatedArtifactText) }
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(BuildVerificationMessage(intake, tasks, aggregatedArtifactText), "VerifyClosure") }
                 },
                 max_tokens  = maxTokens,
                 temperature = 0.3,
@@ -456,7 +459,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             messages = new object[]
             {
                 new { role = "system", content = systemPrompt },
-                new { role = "user",   content = userMessage }
+                new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "AnalyzeReportFields") }
             },
             max_tokens  = maxTokens,
             temperature = 0.3,
@@ -652,6 +655,60 @@ public class AzureOpenAiService : IAzureOpenAiService
         $"{intake.City}, {intake.Country}" +
         (string.IsNullOrWhiteSpace(intake.SiteLocation) ? "" : $" ({intake.SiteLocation})");
 
+    // ── PII scan helper ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Scans <paramref name="userContent"/> for PII/SPII before it is forwarded to the LLM.
+    /// <list type="bullet">
+    ///   <item>If the tenant has PII scanning disabled → the original text is returned unchanged.</item>
+    ///   <item>If PII is found and <c>BlockOnDetection = true</c> → throws <see cref="InvalidOperationException"/>.</item>
+    ///   <item>If PII is found and <c>BlockOnDetection = false</c> → returns the redacted text (PII replaced with placeholders).</item>
+    /// </list>
+    /// </summary>
+    private async Task<string> EnforcePiiPolicyAsync(string userContent, string callSite)
+    {
+        try
+        {
+            var result = await _piiScanner.ScanAsync(userContent);
+
+            if (!result.HasPii)
+                return userContent;
+
+            var types = string.Join(", ", result.Findings.Select(f => f.EntityType).Distinct());
+            _logger.LogWarning(
+                "PII detected before LLM call ({CallSite}) — entity types: {Types}",
+                callSite, types);
+
+            if (result.ShouldBlock)
+                throw new InvalidOperationException(
+                    $"The request was blocked by the PII/SPII safeguard. " +
+                    $"Detected sensitive data: {types}. " +
+                    $"Remove personally identifiable information before submitting.");
+
+            // Redact mode — log that we're continuing with masked content
+            _logger.LogInformation(
+                "PII scan ({CallSite}): redacted {Count} finding(s) before forwarding to LLM",
+                callSite, result.Findings.Count);
+            return result.RedactedText;
+        }
+        catch (InvalidOperationException)
+        {
+            throw; // re-throw block errors
+        }
+        catch (Exception ex)
+        {
+            // PII scanning failed due to an unexpected error.  Log it at WARNING level so
+            // operators are aware, then forward the original content to prevent a total
+            // outage.  If the tenant requires strict PII enforcement, configure
+            // BlockOnDetection=true AND monitor the application logs for this warning.
+            _logger.LogWarning(ex,
+                "PII scan failed unexpectedly ({CallSite}) — forwarding original content. " +
+                "Configure BlockOnDetection=true and monitor logs for repeated failures.",
+                callSite);
+            return userContent;
+        }
+    }
+
     private static string BuildUserMessage(IntakeRecord intake, string? documentText)
     {
         var sb = new System.Text.StringBuilder();
@@ -791,7 +848,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user",   content = userMessage }
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "RunQcCheck") }
                 },
                 max_tokens  = maxTokens,
                 temperature = 0.3
@@ -1052,7 +1109,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user",   content = userMessage }
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "GenerateSop") }
                 },
                 max_tokens  = Math.Max(maxTokens, 4000),
                 temperature = 0.3
@@ -1590,7 +1647,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user",   content = userMessage }
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "GenerateDescription") }
                 },
                 max_tokens  = 600,
                 temperature = 0.7,

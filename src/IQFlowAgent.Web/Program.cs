@@ -68,6 +68,7 @@ builder.Services.AddScoped<IAzureOpenAiService, AzureOpenAiService>();
 builder.Services.AddScoped<IBlobStorageService, BlobStorageService>();
 builder.Services.AddScoped<IDocxReportService, DocxReportService>();
 builder.Services.AddScoped<IAzureSpeechService, AzureSpeechService>();
+builder.Services.AddScoped<IPiiScanService, PiiScanService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 
