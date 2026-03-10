@@ -36,15 +36,15 @@ namespace IQFlowAgent.Web.Migrations
                 name: "IntakeFieldConfigs",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    TenantId = table.Column<int>(type: "INTEGER", nullable: false),
-                    FieldName = table.Column<string>(type: "TEXT", nullable: false),
-                    DisplayName = table.Column<string>(type: "TEXT", nullable: false),
-                    SectionName = table.Column<string>(type: "TEXT", nullable: false),
-                    IsVisible = table.Column<bool>(type: "INTEGER", nullable: false),
-                    IsMandatory = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DisplayOrder = table.Column<int>(type: "INTEGER", nullable: false)
+                    TenantId = table.Column<int>(nullable: false),
+                    FieldName = table.Column<string>(nullable: false),
+                    DisplayName = table.Column<string>(nullable: false),
+                    SectionName = table.Column<string>(nullable: false),
+                    IsVisible = table.Column<bool>(nullable: false),
+                    IsMandatory = table.Column<bool>(nullable: false),
+                    DisplayOrder = table.Column<int>(nullable: false)
                 },
                 constraints: table =>
                 {

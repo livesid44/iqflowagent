@@ -15,22 +15,22 @@ namespace IQFlowAgent.Web.Migrations
                 name: "TenantPiiSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    TenantId = table.Column<int>(type: "INTEGER", nullable: false),
-                    IsEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    BlockOnDetection = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectEmailAddresses = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectPhoneNumbers = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectCreditCardNumbers = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectSsnNumbers = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectIpAddresses = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectPassportNumbers = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectDatesOfBirth = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectUrls = table.Column<bool>(type: "INTEGER", nullable: false),
-                    DetectPersonNames = table.Column<bool>(type: "INTEGER", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedByUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    TenantId = table.Column<int>(nullable: false),
+                    IsEnabled = table.Column<bool>(nullable: false),
+                    BlockOnDetection = table.Column<bool>(nullable: false),
+                    DetectEmailAddresses = table.Column<bool>(nullable: false),
+                    DetectPhoneNumbers = table.Column<bool>(nullable: false),
+                    DetectCreditCardNumbers = table.Column<bool>(nullable: false),
+                    DetectSsnNumbers = table.Column<bool>(nullable: false),
+                    DetectIpAddresses = table.Column<bool>(nullable: false),
+                    DetectPassportNumbers = table.Column<bool>(nullable: false),
+                    DetectDatesOfBirth = table.Column<bool>(nullable: false),
+                    DetectUrls = table.Column<bool>(nullable: false),
+                    DetectPersonNames = table.Column<bool>(nullable: false),
+                    UpdatedAt = table.Column<DateTime>(nullable: false),
+                    UpdatedByUserId = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {

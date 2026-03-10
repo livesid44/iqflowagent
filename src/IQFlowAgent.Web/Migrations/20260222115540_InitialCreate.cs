@@ -15,10 +15,10 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetRoles",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    NormalizedName = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    ConcurrencyStamp = table.Column<string>(type: "TEXT", nullable: true)
+                    Id = table.Column<string>(nullable: false),
+                    Name = table.Column<string>(maxLength: 256, nullable: true),
+                    NormalizedName = table.Column<string>(maxLength: 256, nullable: true),
+                    ConcurrencyStamp = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -29,25 +29,25 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetUsers",
                 columns: table => new
                 {
-                    Id = table.Column<string>(type: "TEXT", nullable: false),
-                    FullName = table.Column<string>(type: "TEXT", nullable: false),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
-                    LastLogin = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UserName = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    NormalizedUserName = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    Email = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    NormalizedEmail = table.Column<string>(type: "TEXT", maxLength: 256, nullable: true),
-                    EmailConfirmed = table.Column<bool>(type: "INTEGER", nullable: false),
-                    PasswordHash = table.Column<string>(type: "TEXT", nullable: true),
-                    SecurityStamp = table.Column<string>(type: "TEXT", nullable: true),
-                    ConcurrencyStamp = table.Column<string>(type: "TEXT", nullable: true),
-                    PhoneNumber = table.Column<string>(type: "TEXT", nullable: true),
-                    PhoneNumberConfirmed = table.Column<bool>(type: "INTEGER", nullable: false),
-                    TwoFactorEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    LockoutEnd = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    LockoutEnabled = table.Column<bool>(type: "INTEGER", nullable: false),
-                    AccessFailedCount = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<string>(nullable: false),
+                    FullName = table.Column<string>(nullable: false),
+                    IsActive = table.Column<bool>(nullable: false),
+                    LastLogin = table.Column<DateTime>(nullable: true),
+                    CreatedAt = table.Column<DateTime>(nullable: false),
+                    UserName = table.Column<string>(maxLength: 256, nullable: true),
+                    NormalizedUserName = table.Column<string>(maxLength: 256, nullable: true),
+                    Email = table.Column<string>(maxLength: 256, nullable: true),
+                    NormalizedEmail = table.Column<string>(maxLength: 256, nullable: true),
+                    EmailConfirmed = table.Column<bool>(nullable: false),
+                    PasswordHash = table.Column<string>(nullable: true),
+                    SecurityStamp = table.Column<string>(nullable: true),
+                    ConcurrencyStamp = table.Column<string>(nullable: true),
+                    PhoneNumber = table.Column<string>(nullable: true),
+                    PhoneNumberConfirmed = table.Column<bool>(nullable: false),
+                    TwoFactorEnabled = table.Column<bool>(nullable: false),
+                    LockoutEnd = table.Column<DateTimeOffset>(nullable: true),
+                    LockoutEnabled = table.Column<bool>(nullable: false),
+                    AccessFailedCount = table.Column<int>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -58,17 +58,17 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AuthSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    AuthMode = table.Column<string>(type: "TEXT", nullable: false),
-                    LdapServer = table.Column<string>(type: "TEXT", nullable: true),
-                    LdapPort = table.Column<int>(type: "INTEGER", nullable: false),
-                    LdapBaseDn = table.Column<string>(type: "TEXT", nullable: true),
-                    LdapBindDn = table.Column<string>(type: "TEXT", nullable: true),
-                    LdapBindPassword = table.Column<string>(type: "TEXT", nullable: true),
-                    LdapUseSsl = table.Column<bool>(type: "INTEGER", nullable: false),
-                    LdapSearchFilter = table.Column<string>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    AuthMode = table.Column<string>(nullable: false),
+                    LdapServer = table.Column<string>(nullable: true),
+                    LdapPort = table.Column<int>(nullable: false),
+                    LdapBaseDn = table.Column<string>(nullable: true),
+                    LdapBindDn = table.Column<string>(nullable: true),
+                    LdapBindPassword = table.Column<string>(nullable: true),
+                    LdapUseSsl = table.Column<bool>(nullable: false),
+                    LdapSearchFilter = table.Column<string>(nullable: true),
+                    UpdatedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -79,32 +79,32 @@ namespace IQFlowAgent.Web.Migrations
                 name: "IntakeRecords",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeId = table.Column<string>(type: "TEXT", nullable: false),
-                    ProcessName = table.Column<string>(type: "TEXT", nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: false),
-                    BusinessUnit = table.Column<string>(type: "TEXT", nullable: false),
-                    Department = table.Column<string>(type: "TEXT", nullable: false),
-                    ProcessOwnerName = table.Column<string>(type: "TEXT", nullable: false),
-                    ProcessOwnerEmail = table.Column<string>(type: "TEXT", nullable: false),
-                    ProcessType = table.Column<string>(type: "TEXT", nullable: false),
-                    EstimatedVolumePerDay = table.Column<int>(type: "INTEGER", nullable: false),
-                    Priority = table.Column<string>(type: "TEXT", nullable: false),
-                    Country = table.Column<string>(type: "TEXT", nullable: false),
-                    City = table.Column<string>(type: "TEXT", nullable: false),
-                    SiteLocation = table.Column<string>(type: "TEXT", nullable: false),
-                    TimeZone = table.Column<string>(type: "TEXT", nullable: false),
-                    UploadedFileName = table.Column<string>(type: "TEXT", nullable: true),
-                    UploadedFilePath = table.Column<string>(type: "TEXT", nullable: true),
-                    UploadedFileContentType = table.Column<string>(type: "TEXT", nullable: true),
-                    UploadedFileSize = table.Column<long>(type: "INTEGER", nullable: true),
-                    Status = table.Column<string>(type: "TEXT", nullable: false),
-                    AnalysisResult = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    SubmittedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    AnalyzedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    CreatedByUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    IntakeId = table.Column<string>(nullable: false),
+                    ProcessName = table.Column<string>(nullable: false),
+                    Description = table.Column<string>(nullable: false),
+                    BusinessUnit = table.Column<string>(nullable: false),
+                    Department = table.Column<string>(nullable: false),
+                    ProcessOwnerName = table.Column<string>(nullable: false),
+                    ProcessOwnerEmail = table.Column<string>(nullable: false),
+                    ProcessType = table.Column<string>(nullable: false),
+                    EstimatedVolumePerDay = table.Column<int>(nullable: false),
+                    Priority = table.Column<string>(nullable: false),
+                    Country = table.Column<string>(nullable: false),
+                    City = table.Column<string>(nullable: false),
+                    SiteLocation = table.Column<string>(nullable: false),
+                    TimeZone = table.Column<string>(nullable: false),
+                    UploadedFileName = table.Column<string>(nullable: true),
+                    UploadedFilePath = table.Column<string>(nullable: true),
+                    UploadedFileContentType = table.Column<string>(nullable: true),
+                    UploadedFileSize = table.Column<long>(nullable: true),
+                    Status = table.Column<string>(nullable: false),
+                    AnalysisResult = table.Column<string>(nullable: true),
+                    CreatedAt = table.Column<DateTime>(nullable: false),
+                    SubmittedAt = table.Column<DateTime>(nullable: true),
+                    AnalyzedAt = table.Column<DateTime>(nullable: true),
+                    CreatedByUserId = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -115,11 +115,11 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetRoleClaims",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    RoleId = table.Column<string>(type: "TEXT", nullable: false),
-                    ClaimType = table.Column<string>(type: "TEXT", nullable: true),
-                    ClaimValue = table.Column<string>(type: "TEXT", nullable: true)
+                    RoleId = table.Column<string>(nullable: false),
+                    ClaimType = table.Column<string>(nullable: true),
+                    ClaimValue = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -136,11 +136,11 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetUserClaims",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    ClaimType = table.Column<string>(type: "TEXT", nullable: true),
-                    ClaimValue = table.Column<string>(type: "TEXT", nullable: true)
+                    UserId = table.Column<string>(nullable: false),
+                    ClaimType = table.Column<string>(nullable: true),
+                    ClaimValue = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -157,10 +157,10 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetUserLogins",
                 columns: table => new
                 {
-                    LoginProvider = table.Column<string>(type: "TEXT", nullable: false),
-                    ProviderKey = table.Column<string>(type: "TEXT", nullable: false),
-                    ProviderDisplayName = table.Column<string>(type: "TEXT", nullable: true),
-                    UserId = table.Column<string>(type: "TEXT", nullable: false)
+                    LoginProvider = table.Column<string>(nullable: false),
+                    ProviderKey = table.Column<string>(nullable: false),
+                    ProviderDisplayName = table.Column<string>(nullable: true),
+                    UserId = table.Column<string>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -177,8 +177,8 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetUserRoles",
                 columns: table => new
                 {
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    RoleId = table.Column<string>(type: "TEXT", nullable: false)
+                    UserId = table.Column<string>(nullable: false),
+                    RoleId = table.Column<string>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -201,10 +201,10 @@ namespace IQFlowAgent.Web.Migrations
                 name: "AspNetUserTokens",
                 columns: table => new
                 {
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    LoginProvider = table.Column<string>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", nullable: false),
-                    Value = table.Column<string>(type: "TEXT", nullable: true)
+                    UserId = table.Column<string>(nullable: false),
+                    LoginProvider = table.Column<string>(nullable: false),
+                    Name = table.Column<string>(nullable: false),
+                    Value = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -221,15 +221,15 @@ namespace IQFlowAgent.Web.Migrations
                 name: "FinalReports",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeRecordId = table.Column<int>(type: "INTEGER", nullable: false),
-                    ReportFileName = table.Column<string>(type: "TEXT", nullable: false),
-                    FilePath = table.Column<string>(type: "TEXT", nullable: false),
-                    FileSizeBytes = table.Column<long>(type: "INTEGER", nullable: false),
-                    GeneratedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    GeneratedByUserId = table.Column<string>(type: "TEXT", nullable: true),
-                    GeneratedByName = table.Column<string>(type: "TEXT", nullable: true)
+                    IntakeRecordId = table.Column<int>(nullable: false),
+                    ReportFileName = table.Column<string>(nullable: false),
+                    FilePath = table.Column<string>(nullable: false),
+                    FileSizeBytes = table.Column<long>(nullable: false),
+                    GeneratedAt = table.Column<DateTime>(nullable: false),
+                    GeneratedByUserId = table.Column<string>(nullable: true),
+                    GeneratedByName = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -246,19 +246,19 @@ namespace IQFlowAgent.Web.Migrations
                 name: "IntakeTasks",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    TaskId = table.Column<string>(type: "TEXT", nullable: false),
-                    IntakeRecordId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Title = table.Column<string>(type: "TEXT", nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: false),
-                    Owner = table.Column<string>(type: "TEXT", nullable: false),
-                    Priority = table.Column<string>(type: "TEXT", nullable: false),
-                    Status = table.Column<string>(type: "TEXT", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    DueDate = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    CreatedByUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    TaskId = table.Column<string>(nullable: false),
+                    IntakeRecordId = table.Column<int>(nullable: false),
+                    Title = table.Column<string>(nullable: false),
+                    Description = table.Column<string>(nullable: false),
+                    Owner = table.Column<string>(nullable: false),
+                    Priority = table.Column<string>(nullable: false),
+                    Status = table.Column<string>(nullable: false),
+                    CreatedAt = table.Column<DateTime>(nullable: false),
+                    DueDate = table.Column<DateTime>(nullable: false),
+                    CompletedAt = table.Column<DateTime>(nullable: true),
+                    CreatedByUserId = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -275,20 +275,20 @@ namespace IQFlowAgent.Web.Migrations
                 name: "ReportFieldStatuses",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeRecordId = table.Column<int>(type: "INTEGER", nullable: false),
-                    FieldKey = table.Column<string>(type: "TEXT", nullable: false),
-                    FieldLabel = table.Column<string>(type: "TEXT", nullable: false),
-                    Section = table.Column<string>(type: "TEXT", nullable: false),
-                    TemplatePlaceholder = table.Column<string>(type: "TEXT", nullable: false),
-                    Status = table.Column<string>(type: "TEXT", nullable: false),
-                    FillValue = table.Column<string>(type: "TEXT", nullable: true),
-                    IsNA = table.Column<bool>(type: "INTEGER", nullable: false),
-                    Notes = table.Column<string>(type: "TEXT", nullable: true),
-                    LinkedTaskId = table.Column<string>(type: "TEXT", nullable: true),
-                    AnalyzedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    IntakeRecordId = table.Column<int>(nullable: false),
+                    FieldKey = table.Column<string>(nullable: false),
+                    FieldLabel = table.Column<string>(nullable: false),
+                    Section = table.Column<string>(nullable: false),
+                    TemplatePlaceholder = table.Column<string>(nullable: false),
+                    Status = table.Column<string>(nullable: false),
+                    FillValue = table.Column<string>(nullable: true),
+                    IsNA = table.Column<bool>(nullable: false),
+                    Notes = table.Column<string>(nullable: true),
+                    LinkedTaskId = table.Column<string>(nullable: true),
+                    AnalyzedAt = table.Column<DateTime>(nullable: true),
+                    UpdatedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -305,18 +305,18 @@ namespace IQFlowAgent.Web.Migrations
                 name: "IntakeDocuments",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeRecordId = table.Column<int>(type: "INTEGER", nullable: false),
-                    IntakeTaskId = table.Column<int>(type: "INTEGER", nullable: true),
-                    FileName = table.Column<string>(type: "TEXT", nullable: false),
-                    FilePath = table.Column<string>(type: "TEXT", nullable: false),
-                    ContentType = table.Column<string>(type: "TEXT", nullable: true),
-                    FileSize = table.Column<long>(type: "INTEGER", nullable: true),
-                    DocumentType = table.Column<string>(type: "TEXT", nullable: false),
-                    UploadedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UploadedByUserId = table.Column<string>(type: "TEXT", nullable: true),
-                    UploadedByName = table.Column<string>(type: "TEXT", nullable: true)
+                    IntakeRecordId = table.Column<int>(nullable: false),
+                    IntakeTaskId = table.Column<int>(nullable: true),
+                    FileName = table.Column<string>(nullable: false),
+                    FilePath = table.Column<string>(nullable: false),
+                    ContentType = table.Column<string>(nullable: true),
+                    FileSize = table.Column<long>(nullable: true),
+                    DocumentType = table.Column<string>(nullable: false),
+                    UploadedAt = table.Column<DateTime>(nullable: false),
+                    UploadedByUserId = table.Column<string>(nullable: true),
+                    UploadedByName = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -338,16 +338,16 @@ namespace IQFlowAgent.Web.Migrations
                 name: "TaskActionLogs",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeTaskId = table.Column<int>(type: "INTEGER", nullable: false),
-                    ActionType = table.Column<string>(type: "TEXT", nullable: false),
-                    OldStatus = table.Column<string>(type: "TEXT", nullable: true),
-                    NewStatus = table.Column<string>(type: "TEXT", nullable: true),
-                    Comment = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    CreatedByUserId = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedByName = table.Column<string>(type: "TEXT", nullable: true)
+                    IntakeTaskId = table.Column<int>(nullable: false),
+                    ActionType = table.Column<string>(nullable: false),
+                    OldStatus = table.Column<string>(nullable: true),
+                    NewStatus = table.Column<string>(nullable: true),
+                    Comment = table.Column<string>(nullable: true),
+                    CreatedAt = table.Column<DateTime>(nullable: false),
+                    CreatedByUserId = table.Column<string>(nullable: true),
+                    CreatedByName = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {

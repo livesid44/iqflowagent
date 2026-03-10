@@ -14,7 +14,6 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<bool>(
                 name: "UseCountryFilterByLot",
                 table: "TenantAiSettings",
-                type: "INTEGER",
                 nullable: false,
                 defaultValue: false);
 
@@ -22,14 +21,14 @@ namespace IQFlowAgent.Web.Migrations
                 name: "LotCountryMappings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    TenantId = table.Column<int>(type: "INTEGER", nullable: false),
-                    LotName = table.Column<string>(type: "TEXT", nullable: false),
-                    Country = table.Column<string>(type: "TEXT", nullable: false),
-                    Cities = table.Column<string>(type: "TEXT", nullable: false),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    TenantId = table.Column<int>(nullable: false),
+                    LotName = table.Column<string>(nullable: false),
+                    Country = table.Column<string>(nullable: false),
+                    Cities = table.Column<string>(nullable: false),
+                    IsActive = table.Column<bool>(nullable: false),
+                    CreatedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {

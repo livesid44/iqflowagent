@@ -14,51 +14,46 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<string>(
                 name: "AzureSpeechApiKey",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "AzureSpeechRegion",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "SopDocumentPath",
                 table: "IntakeDocuments",
-                type: "TEXT",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "TranscriptStatus",
                 table: "IntakeDocuments",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "TranscriptText",
                 table: "IntakeDocuments",
-                type: "TEXT",
                 nullable: true);
 
             migrationBuilder.CreateTable(
                 name: "RagJobs",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeRecordId = table.Column<int>(type: "INTEGER", nullable: false),
-                    Status = table.Column<string>(type: "TEXT", nullable: false),
-                    TotalFiles = table.Column<int>(type: "INTEGER", nullable: false),
-                    ProcessedFiles = table.Column<int>(type: "INTEGER", nullable: false),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    StartedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    NotifyUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    IntakeRecordId = table.Column<int>(nullable: false),
+                    Status = table.Column<string>(nullable: false),
+                    TotalFiles = table.Column<int>(nullable: false),
+                    ProcessedFiles = table.Column<int>(nullable: false),
+                    ErrorMessage = table.Column<string>(nullable: true),
+                    CreatedAt = table.Column<DateTime>(nullable: false),
+                    StartedAt = table.Column<DateTime>(nullable: true),
+                    CompletedAt = table.Column<DateTime>(nullable: true),
+                    NotifyUserId = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {

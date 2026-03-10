@@ -15,12 +15,12 @@ namespace IQFlowAgent.Web.Migrations
                 name: "MasterDepartments",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: true),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Name = table.Column<string>(nullable: false),
+                    Description = table.Column<string>(nullable: true),
+                    IsActive = table.Column<bool>(nullable: false),
+                    CreatedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -31,16 +31,16 @@ namespace IQFlowAgent.Web.Migrations
                 name: "QcChecks",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    IntakeRecordId = table.Column<int>(type: "INTEGER", nullable: false),
-                    OverallScore = table.Column<int>(type: "INTEGER", nullable: false),
-                    ScoreBreakdownJson = table.Column<string>(type: "TEXT", nullable: true),
-                    Status = table.Column<string>(type: "TEXT", nullable: false),
-                    ErrorMessage = table.Column<string>(type: "TEXT", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    CompletedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
-                    RunByUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    IntakeRecordId = table.Column<int>(nullable: false),
+                    OverallScore = table.Column<int>(nullable: false),
+                    ScoreBreakdownJson = table.Column<string>(nullable: true),
+                    Status = table.Column<string>(nullable: false),
+                    ErrorMessage = table.Column<string>(nullable: true),
+                    CreatedAt = table.Column<DateTime>(nullable: false),
+                    CompletedAt = table.Column<DateTime>(nullable: true),
+                    RunByUserId = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {

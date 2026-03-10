@@ -13,7 +13,6 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<string>(
                 name: "SdcLots",
                 table: "IntakeRecords",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
         }
