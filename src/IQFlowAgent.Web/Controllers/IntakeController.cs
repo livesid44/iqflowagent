@@ -92,6 +92,7 @@ public class IntakeController : Controller
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
         await PopulateLotCountryViewBagAsync(tenantId);
+        ViewBag.FieldConfigs = await LoadFieldConfigDictAsync(tenantId);
         return View(new IntakeViewModel());
     }
 
@@ -110,6 +111,11 @@ public class IntakeController : Controller
 
         var isXhr = Request.Headers["X-Requested-With"] == "XMLHttpRequest";
 
+        // ── Validate mandatory fields per tenant field-config ──────────────────
+        var tenantId    = _tenantContext.GetCurrentTenantId();
+        var fieldConfig = await LoadFieldConfigDictAsync(tenantId);
+        ValidateMandatoryFields(model, fieldConfig);
+
         if (!ModelState.IsValid)
         {
             if (isXhr)
@@ -124,7 +130,6 @@ public class IntakeController : Controller
             return View(model);
         }
 
-        var tenantId = _tenantContext.GetCurrentTenantId();
         var intakeId = GenerateIntakeId();
 
         // ── Save files to local disk first — blob upload is deferred to background ──
@@ -562,6 +567,90 @@ public class IntakeController : Controller
             return Ok(new { success = false, error = "AI service is not configured or returned an empty response. Please type the description manually." });
 
         return Ok(new { success = true, description });
+    }
+
+    /// <summary>
+    /// Loads the intake field config dictionary for a tenant. Returns default
+    /// (all-visible) entries for any fields not yet in the database.
+    /// </summary>
+    private async Task<Dictionary<string, Models.IntakeFieldConfig>> LoadFieldConfigDictAsync(int tenantId)
+    {
+        var stored = await _db.IntakeFieldConfigs
+            .Where(f => f.TenantId == tenantId)
+            .ToListAsync();
+
+        // If the tenant has no rows yet, auto-provision defaults
+        if (stored.Count == 0)
+        {
+            stored = Models.IntakeFieldConfig.DefaultFields
+                .Select(d => new Models.IntakeFieldConfig
+                {
+                    TenantId     = tenantId,
+                    FieldName    = d.FieldName,
+                    DisplayName  = d.DisplayName,
+                    SectionName  = d.SectionName,
+                    IsVisible    = true,
+                    IsMandatory  = d.IsMandatory,
+                    DisplayOrder = d.DisplayOrder,
+                })
+                .ToList();
+            _db.IntakeFieldConfigs.AddRange(stored);
+            await _db.SaveChangesAsync();
+        }
+
+        return stored.ToDictionary(f => f.FieldName, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Adds ModelState errors for any visible+mandatory fields that are empty on the model.
+    /// </summary>
+    private void ValidateMandatoryFields(IntakeViewModel model,
+        Dictionary<string, Models.IntakeFieldConfig> fc)
+    {
+        bool IsRequired(string key) =>
+            fc.TryGetValue(key, out var cfg) && cfg.IsVisible && cfg.IsMandatory;
+
+        string Label(string key) =>
+            fc.TryGetValue(key, out var cfg) ? cfg.DisplayName : key;
+
+        if (IsRequired(Models.IntakeFieldConfig.FProcessName) && string.IsNullOrWhiteSpace(model.ProcessName))
+            ModelState.AddModelError(nameof(model.ProcessName), $"{Label(Models.IntakeFieldConfig.FProcessName)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FDescription) && string.IsNullOrWhiteSpace(model.Description))
+            ModelState.AddModelError(nameof(model.Description), $"{Label(Models.IntakeFieldConfig.FDescription)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FBusinessUnit) && string.IsNullOrWhiteSpace(model.BusinessUnit))
+            ModelState.AddModelError(nameof(model.BusinessUnit), $"{Label(Models.IntakeFieldConfig.FBusinessUnit)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FDepartment) && string.IsNullOrWhiteSpace(model.Department))
+            ModelState.AddModelError(nameof(model.Department), $"{Label(Models.IntakeFieldConfig.FDepartment)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FLob) && string.IsNullOrWhiteSpace(model.Lob))
+            ModelState.AddModelError(nameof(model.Lob), $"{Label(Models.IntakeFieldConfig.FLob)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FSdcLots) && string.IsNullOrWhiteSpace(model.SdcLots))
+            ModelState.AddModelError(nameof(model.SdcLots), $"{Label(Models.IntakeFieldConfig.FSdcLots)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FProcessOwnerName) && string.IsNullOrWhiteSpace(model.ProcessOwnerName))
+            ModelState.AddModelError(nameof(model.ProcessOwnerName), $"{Label(Models.IntakeFieldConfig.FProcessOwnerName)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FProcessOwnerEmail) && string.IsNullOrWhiteSpace(model.ProcessOwnerEmail))
+            ModelState.AddModelError(nameof(model.ProcessOwnerEmail), $"{Label(Models.IntakeFieldConfig.FProcessOwnerEmail)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FProcessType) && string.IsNullOrWhiteSpace(model.ProcessType))
+            ModelState.AddModelError(nameof(model.ProcessType), $"{Label(Models.IntakeFieldConfig.FProcessType)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FCountry) && string.IsNullOrWhiteSpace(model.Country))
+            ModelState.AddModelError(nameof(model.Country), $"{Label(Models.IntakeFieldConfig.FCountry)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FCity) && string.IsNullOrWhiteSpace(model.City))
+            ModelState.AddModelError(nameof(model.City), $"{Label(Models.IntakeFieldConfig.FCity)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FSiteLocation) && string.IsNullOrWhiteSpace(model.SiteLocation))
+            ModelState.AddModelError(nameof(model.SiteLocation), $"{Label(Models.IntakeFieldConfig.FSiteLocation)} is required.");
+
+        if (IsRequired(Models.IntakeFieldConfig.FTimeZone) && string.IsNullOrWhiteSpace(model.TimeZone))
+            ModelState.AddModelError(nameof(model.TimeZone), $"{Label(Models.IntakeFieldConfig.FTimeZone)} is required.");
     }
 
     /// <summary>

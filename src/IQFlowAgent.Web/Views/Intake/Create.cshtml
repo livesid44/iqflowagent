@@ -1,8 +1,24 @@
 @model IQFlowAgent.Web.ViewModels.IntakeViewModel
+@using IQFlowAgent.Web.Models
 @{
     Layout = "_Layout";
     ViewData["Title"] = "New Intake";
     ViewData["ActivePage"] = "intake";
+
+    // Field config dictionary — keyed by FieldName.
+    // Falls back to an always-visible, non-mandatory stub when the key is missing.
+    var fcRaw = ViewBag.FieldConfigs as Dictionary<string, IntakeFieldConfig>
+                ?? new Dictionary<string, IntakeFieldConfig>();
+
+    IntakeFieldConfig Fc(string key) =>
+        fcRaw.TryGetValue(key, out var c) ? c
+        : new IntakeFieldConfig { FieldName = key, IsVisible = true, IsMandatory = false };
+
+    // Emit " required" attribute string when field is mandatory
+    // Emit the required asterisk span
+    string ReqStar(string key) => Fc(key).IsMandatory ? "<span class=\"required\">*</span>" : "";
+    // Returns "required" or null — Razor omits null HTML attributes entirely
+    string? ReqAttr(string key) => Fc(key).IsMandatory ? "required" : null;
 }
 
 <style>
@@ -117,17 +133,22 @@
             <div class="form-section-title">
                 <i class="bi bi-diagram-3"></i> Process Information
             </div>
+            @if (Fc(IntakeFieldConfig.FProcessName).IsVisible)
+            {
             <div class="form-row">
                 <div class="form-group full">
-                    <label asp-for="ProcessName">Process Name <span class="required">*</span></label>
-                    <input asp-for="ProcessName" class="form-control" placeholder="e.g. Customer Service Call Handling" />
+                    <label asp-for="ProcessName">Process Name @Html.Raw(ReqStar(IntakeFieldConfig.FProcessName))</label>
+                    <input asp-for="ProcessName" class="form-control" placeholder="e.g. Customer Service Call Handling" required="@ReqAttr(IntakeFieldConfig.FProcessName)" />
                     <span asp-validation-for="ProcessName" class="text-danger"></span>
                 </div>
             </div>
+            }
+            @if (Fc(IntakeFieldConfig.FDescription).IsVisible)
+            {
             <div class="form-row">
                 <div class="form-group full">
                     <label asp-for="Description">
-                        Description <span class="required">*</span>
+                        Description @Html.Raw(ReqStar(IntakeFieldConfig.FDescription))
                         <button type="button" id="toggleAiAssist"
                                 onclick="toggleAiPanel()"
                                 style="margin-left:10px;background:none;border:1px solid #1a2a5e;color:#1a2a5e;border-radius:5px;
@@ -155,50 +176,85 @@
                             <span id="aiError" style="color:#e31837;font-size:0.8rem;"></span>
                         </div>
                     </div>
-                    <textarea asp-for="Description" id="Description" class="form-control"
+                    <textarea asp-for="Description" id="Description" class="form-control" required="@ReqAttr(IntakeFieldConfig.FDescription)"
                               placeholder="Describe the business process in detail — what it does, who it involves, and key inputs/outputs…"></textarea>
                     <span asp-validation-for="Description" class="text-danger"></span>
                 </div>
             </div>
+            }
+            @{
+                var showProcessType = Fc(IntakeFieldConfig.FProcessType).IsVisible;
+                var showPriority    = Fc(IntakeFieldConfig.FPriority).IsVisible;
+                var showVolume      = Fc(IntakeFieldConfig.FEstimatedVolumePerDay).IsVisible;
+            }
+            @if (showProcessType || showPriority || showVolume)
+            {
             <div class="form-row">
+                @if (showProcessType)
+                {
                 <div class="form-group">
-                    <label asp-for="ProcessType">Process Type</label>
-                    <select asp-for="ProcessType" class="form-control">
+                    <label asp-for="ProcessType">Process Type @Html.Raw(ReqStar(IntakeFieldConfig.FProcessType))</label>
+                    <select asp-for="ProcessType" class="form-control" required="@ReqAttr(IntakeFieldConfig.FProcessType)">
                         <option value="Manual">Manual</option>
                         <option value="Semi-Automated">Semi-Automated</option>
                         <option value="Automated">Automated</option>
                     </select>
                 </div>
+                }
+                @if (showPriority)
+                {
                 <div class="form-group">
-                    <label asp-for="Priority">Priority</label>
-                    <select asp-for="Priority" class="form-control">
+                    <label asp-for="Priority">Priority @Html.Raw(ReqStar(IntakeFieldConfig.FPriority))</label>
+                    <select asp-for="Priority" class="form-control" required="@ReqAttr(IntakeFieldConfig.FPriority)">
                         <option value="High">High</option>
                         <option value="Medium" selected>Medium</option>
                         <option value="Low">Low</option>
                     </select>
                 </div>
+                }
+                @if (showVolume)
+                {
                 <div class="form-group">
-                    <label asp-for="EstimatedVolumePerDay">Est. Volume / Day</label>
-                    <input asp-for="EstimatedVolumePerDay" class="form-control" type="number" min="0" placeholder="e.g. 500" />
+                    <label asp-for="EstimatedVolumePerDay">Est. Volume / Day @Html.Raw(ReqStar(IntakeFieldConfig.FEstimatedVolumePerDay))</label>
+                    <input asp-for="EstimatedVolumePerDay" class="form-control" type="number" min="0" placeholder="e.g. 500" required="@ReqAttr(IntakeFieldConfig.FEstimatedVolumePerDay)" />
                     <span asp-validation-for="EstimatedVolumePerDay" class="text-danger"></span>
                 </div>
+                }
             </div>
+            }
         </div>
 
         <!-- ── SECTION 2: Ownership ──────────────────────────────── -->
+        @{
+            var showBU    = Fc(IntakeFieldConfig.FBusinessUnit).IsVisible;
+            var showDept  = Fc(IntakeFieldConfig.FDepartment).IsVisible;
+            var showLob   = Fc(IntakeFieldConfig.FLob).IsVisible;
+            var showLots  = Fc(IntakeFieldConfig.FSdcLots).IsVisible;
+            var showOwner = Fc(IntakeFieldConfig.FProcessOwnerName).IsVisible;
+            var showEmail = Fc(IntakeFieldConfig.FProcessOwnerEmail).IsVisible;
+        }
+        @if (showBU || showDept || showLob || showLots || showOwner || showEmail)
+        {
         <div class="form-card">
             <div class="form-section-title">
                 <i class="bi bi-people"></i> Ownership &amp; Organisation
             </div>
+            @if (showBU || showDept || showLob || showLots)
+            {
             <div class="form-row">
+                @if (showBU)
+                {
                 <div class="form-group">
-                    <label asp-for="BusinessUnit">Business Unit</label>
-                    <input asp-for="BusinessUnit" class="form-control" placeholder="e.g. Operations" />
+                    <label asp-for="BusinessUnit">Business Unit @Html.Raw(ReqStar(IntakeFieldConfig.FBusinessUnit))</label>
+                    <input asp-for="BusinessUnit" class="form-control" placeholder="e.g. Operations" required="@ReqAttr(IntakeFieldConfig.FBusinessUnit)" />
                     <span asp-validation-for="BusinessUnit" class="text-danger"></span>
                 </div>
+                }
+                @if (showDept)
+                {
                 <div class="form-group">
-                    <label asp-for="Department">Department</label>
-                    <select asp-for="Department" id="deptSelect" class="form-control" onchange="onDeptChange(this.value)">
+                    <label asp-for="Department">Department @Html.Raw(ReqStar(IntakeFieldConfig.FDepartment))</label>
+                    <select asp-for="Department" id="deptSelect" class="form-control" onchange="onDeptChange(this.value)" required="@ReqAttr(IntakeFieldConfig.FDepartment)">
                         <option value="">— Select Department —</option>
                         @foreach (var dept in (ViewBag.Departments as List<string> ?? new()))
                         {
@@ -206,43 +262,73 @@
                         }
                     </select>
                 </div>
+                }
+                @if (showLob)
+                {
                 <div class="form-group">
-                    <label asp-for="Lob">Line of Business (LOB)</label>
-                    <select asp-for="Lob" id="lobSelect" class="form-control">
+                    <label asp-for="Lob">Line of Business (LOB) @Html.Raw(ReqStar(IntakeFieldConfig.FLob))</label>
+                    <select asp-for="Lob" id="lobSelect" class="form-control" required="@ReqAttr(IntakeFieldConfig.FLob)">
                         <option value="">— Select LOB —</option>
                     </select>
                 </div>
+                }
+                @if (showLots)
+                {
                 <div class="form-group">
-                    <label asp-for="SdcLots">Lots or SDC <span style="font-size:0.78rem;font-weight:400;color:#888;">(multi-select)</span></label>
+                    <label asp-for="SdcLots">Lots or SDC @Html.Raw(ReqStar(IntakeFieldConfig.FSdcLots)) <span style="font-size:0.78rem;font-weight:400;color:#888;">(multi-select)</span></label>
                     <div class="ms-container" id="sdcLotsContainer" style="cursor:pointer;" onclick="document.getElementById('sdcLotsInput').focus()">
                         <input type="text" id="sdcLotsInput" class="ms-input" placeholder="Select lots…" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" />
                         <div class="ms-dropdown" id="sdcLotsDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;"></div>
                     </div>
                     <input type="hidden" asp-for="SdcLots" id="sdcLotsHidden" />
                 </div>
+                }
             </div>
+            }
+            @if (showOwner || showEmail)
+            {
             <div class="form-row">
+                @if (showOwner)
+                {
                 <div class="form-group">
-                    <label asp-for="ProcessOwnerName">Process Owner Name</label>
-                    <input asp-for="ProcessOwnerName" class="form-control" placeholder="Full name" />
+                    <label asp-for="ProcessOwnerName">Process Owner Name @Html.Raw(ReqStar(IntakeFieldConfig.FProcessOwnerName))</label>
+                    <input asp-for="ProcessOwnerName" class="form-control" placeholder="Full name" required="@ReqAttr(IntakeFieldConfig.FProcessOwnerName)" />
                     <span asp-validation-for="ProcessOwnerName" class="text-danger"></span>
                 </div>
+                }
+                @if (showEmail)
+                {
                 <div class="form-group">
-                    <label asp-for="ProcessOwnerEmail">Process Owner Email</label>
-                    <input asp-for="ProcessOwnerEmail" class="form-control" type="email" placeholder="owner@company.com" />
+                    <label asp-for="ProcessOwnerEmail">Process Owner Email @Html.Raw(ReqStar(IntakeFieldConfig.FProcessOwnerEmail))</label>
+                    <input asp-for="ProcessOwnerEmail" class="form-control" type="email" placeholder="owner@company.com" required="@ReqAttr(IntakeFieldConfig.FProcessOwnerEmail)" />
                     <span asp-validation-for="ProcessOwnerEmail" class="text-danger"></span>
                 </div>
+                }
             </div>
+            }
         </div>
+        }
 
         <!-- ── SECTION 3: Location ───────────────────────────────── -->
+        @{
+            var showCountry  = Fc(IntakeFieldConfig.FCountry).IsVisible;
+            var showCity     = Fc(IntakeFieldConfig.FCity).IsVisible;
+            var showSiteLoc  = Fc(IntakeFieldConfig.FSiteLocation).IsVisible;
+            var showTimeZone = Fc(IntakeFieldConfig.FTimeZone).IsVisible;
+        }
+        @if (showCountry || showCity || showSiteLoc || showTimeZone)
+        {
         <div class="form-card">
             <div class="form-section-title">
                 <i class="bi bi-geo-alt"></i> Location
             </div>
+            @if (showCountry || showCity)
+            {
             <div class="form-row">
+                @if (showCountry)
+                {
                 <div class="form-group">
-                    <label>Country</label>
+                    <label>Country @Html.Raw(ReqStar(IntakeFieldConfig.FCountry))</label>
                     <div class="ms-container" id="countryContainer">
                         <input type="text" id="countryInput" class="ms-input" placeholder="Search countries…" autocomplete="off" />
                         <div class="ms-dropdown" id="countryDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;"></div>
@@ -250,23 +336,35 @@
                     <input type="hidden" asp-for="Country" id="countryHidden" />
                     <span asp-validation-for="Country" class="text-danger"></span>
                 </div>
+                }
+                @if (showCity)
+                {
                 <div class="form-group">
-                    <label>City</label>
+                    <label>City @Html.Raw(ReqStar(IntakeFieldConfig.FCity))</label>
                     <div class="ms-container" id="cityContainer">
                         <input type="text" id="cityInput" class="ms-input" placeholder="Search cities…" autocomplete="off" />
                         <div class="ms-dropdown" id="cityDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;"></div>
                     </div>
                     <input type="hidden" asp-for="City" id="cityHidden" />
                 </div>
+                }
             </div>
+            }
+            @if (showSiteLoc || showTimeZone)
+            {
             <div class="form-row">
+                @if (showSiteLoc)
+                {
                 <div class="form-group">
-                    <label asp-for="SiteLocation">Site / Office Location</label>
-                    <input asp-for="SiteLocation" class="form-control" placeholder="Building / floor / campus" />
+                    <label asp-for="SiteLocation">Site / Office Location @Html.Raw(ReqStar(IntakeFieldConfig.FSiteLocation))</label>
+                    <input asp-for="SiteLocation" class="form-control" placeholder="Building / floor / campus" required="@ReqAttr(IntakeFieldConfig.FSiteLocation)" />
                 </div>
+                }
+                @if (showTimeZone)
+                {
                 <div class="form-group">
-                    <label asp-for="TimeZone">Time Zone</label>
-                    <select asp-for="TimeZone" class="form-control">
+                    <label asp-for="TimeZone">Time Zone @Html.Raw(ReqStar(IntakeFieldConfig.FTimeZone))</label>
+                    <select asp-for="TimeZone" class="form-control" required="@ReqAttr(IntakeFieldConfig.FTimeZone)">
                         <option value="">— Select —</option>
                         <option value="UTC-12:00">UTC-12:00 (Baker Island)</option>
                         <option value="UTC-11:00">UTC-11:00 (Samoa)</option>
@@ -292,10 +390,15 @@
                         <option value="UTC+12:00">UTC+12:00 (Auckland)</option>
                     </select>
                 </div>
+                }
             </div>
+            }
         </div>
+        }
 
         <!-- ── SECTION 4: Document Upload ───────────────────────── -->
+        @if (Fc(IntakeFieldConfig.FDocument).IsVisible)
+        {
         <div class="form-card">
             <div class="form-section-title">
                 <i class="bi bi-file-earmark-arrow-up"></i> Document Upload <span style="font-weight:400;color:#999;font-size:0.8rem;">(optional — multiple files supported)</span>
@@ -324,6 +427,7 @@
                 + Add more files
             </button>
         </div>
+        }
 
         <!-- ── Actions ──────────────────────────────────────────── -->
         <div class="form-actions">

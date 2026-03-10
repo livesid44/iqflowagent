@@ -21,6 +21,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<MasterDepartment> MasterDepartments => Set<MasterDepartment>();
     public DbSet<MasterLob> MasterLobs => Set<MasterLob>();
     public DbSet<LotCountryMapping> LotCountryMappings => Set<LotCountryMapping>();
+    public DbSet<IntakeFieldConfig> IntakeFieldConfigs => Set<IntakeFieldConfig>();
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
     public DbSet<RagJob> RagJobs => Set<RagJob>();
 

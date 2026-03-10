@@ -1,0 +1,169 @@
+@model List<IQFlowAgent.Web.Models.IntakeFieldConfig>
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Intake Field Configuration";
+    ViewData["ActivePage"] = "masterdataintakefields";
+    var grouped = Model.GroupBy(f => f.SectionName).OrderBy(g => g.Min(f => f.DisplayOrder));
+}
+
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
+
+<main class="app-main">
+<style>
+.config-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+.config-card { background:#fff; border-radius:12px; padding:24px; box-shadow:0 2px 10px rgba(0,0,0,.07); margin-bottom:20px; }
+.section-title { font-size:0.88rem; font-weight:700; color:#1a2a5e; padding-bottom:10px; border-bottom:2px solid #e31837; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+.config-table { width:100%; border-collapse:collapse; font-size:0.88rem; }
+.config-table th { background:#f8faff; color:#1a2a5e; font-weight:700; padding:10px 14px; border-bottom:2px solid #e5e9f2; text-align:left; }
+.config-table td { padding:10px 14px; border-bottom:1px solid #f0f2f8; vertical-align:middle; }
+.config-table tr:last-child td { border-bottom:none; }
+.field-name { font-weight:600; color:#222; }
+.field-section { font-size:0.78rem; color:#888; }
+.badge-required { background:#fee2e2; color:#991b1b; border-radius:12px; padding:2px 9px; font-size:0.75rem; font-weight:600; }
+.badge-optional { background:#f1f5f9; color:#64748b; border-radius:12px; padding:2px 9px; font-size:0.75rem; font-weight:600; }
+/* Toggle switch */
+.toggle-switch { position:relative; display:inline-block; width:42px; height:24px; flex-shrink:0; }
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; cursor:pointer; inset:0; background:#ccc; border-radius:24px; transition:.25s; }
+.toggle-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.25s; }
+.toggle-switch input:checked + .toggle-slider { background:#1a2a5e; }
+.toggle-switch input:checked + .toggle-slider:before { transform:translateX(18px); }
+.toggle-switch.mandatory input:checked + .toggle-slider { background:#e31837; }
+.toggle-label { font-size:0.78rem; color:#555; margin-left:6px; }
+.toggle-cell { display:flex; align-items:center; gap:4px; }
+.btn-save { background:#e31837; color:#fff; border:none; border-radius:8px; padding:10px 28px; font-size:0.9rem; font-weight:600; cursor:pointer; }
+.btn-save:hover { background:#c01530; }
+.breadcrumbs { font-size:0.82rem; color:#888; margin-bottom:14px; }
+.breadcrumbs a { color:#1a2a5e; text-decoration:none; }
+.breadcrumbs a:hover { text-decoration:underline; }
+.info-bar { background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px 16px; margin-bottom:20px; font-size:0.84rem; color:#1e40af; display:flex; align-items:flex-start; gap:10px; }
+.info-bar svg { flex-shrink:0; margin-top:1px; }
+.mandatory-note { font-size:0.78rem; color:#888; font-style:italic; margin-left:4px; }
+</style>
+
+<div class="breadcrumbs">
+    <a asp-controller="MasterData" asp-action="Department">Master Data</a> /
+    <strong>Intake Field Configuration</strong>
+</div>
+
+<div class="config-header">
+    <div>
+        <div class="page-title">Intake Form Field Configuration</div>
+        <div class="page-sub">Show or hide each field on the intake form, and mark which fields are mandatory.</div>
+    </div>
+</div>
+
+@if (TempData["Success"] is string success)
+{
+    <div style="background:#d1fae5;color:#065f46;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:0.88rem;">
+        <strong>✓</strong> @success
+    </div>
+}
+@if (TempData["Error"] is string error)
+{
+    <div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:0.88rem;">
+        <strong>✗</strong> @error
+    </div>
+}
+
+<div class="info-bar">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span>
+        <strong>Visible</strong> controls whether a field appears on the intake form.
+        <strong>Mandatory</strong> makes the field required on submit (only applies when the field is visible).
+        Changes take effect immediately after saving.
+    </span>
+</div>
+
+<form asp-action="SaveIntakeFields" method="post">
+    @Html.AntiForgeryToken()
+
+    @foreach (var grp in grouped)
+    {
+        <div class="config-card">
+            <div class="section-title">
+                @grp.Key
+            </div>
+            <table class="config-table">
+                <thead>
+                    <tr>
+                        <th style="width:50%">Field</th>
+                        <th style="width:25%">Visible</th>
+                        <th style="width:25%">Mandatory</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var field in grp.OrderBy(f => f.DisplayOrder))
+                    {
+                        <tr id="row_@field.FieldName">
+                            <td>
+                                <span class="field-name">@field.DisplayName</span>
+                            </td>
+                            <td>
+                                <div class="toggle-cell">
+                                    <label class="toggle-switch">
+                                        <input type="checkbox"
+                                               name="visible_@field.FieldName"
+                                               id="vis_@field.FieldName"
+                                               value="true"
+                                               @(field.IsVisible ? "checked" : "")
+                                               onchange="onVisibleChange('@field.FieldName', this.checked)" />
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <span class="toggle-label" id="visLabel_@field.FieldName">@(field.IsVisible ? "On" : "Off")</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="toggle-cell">
+                                    <label class="toggle-switch mandatory">
+                                        <input type="checkbox"
+                                               name="mandatory_@field.FieldName"
+                                               id="mand_@field.FieldName"
+                                               value="true"
+                                               @(field.IsMandatory ? "checked" : "")
+                                               @(!field.IsVisible ? "disabled" : "") />
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                    <span class="toggle-label" id="mandLabel_@field.FieldName">@(field.IsMandatory ? "Required" : "Optional")</span>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div style="display:flex;gap:12px;align-items:center;margin-top:8px;">
+        <button type="submit" class="btn-save">Save Configuration</button>
+        <a asp-action="Department" style="color:#888;font-size:0.88rem;text-decoration:none;">Cancel</a>
+    </div>
+</form>
+</main>
+
+<script>
+function onVisibleChange(fieldName, isVisible) {
+    const mandCb    = document.getElementById('mand_'      + fieldName);
+    const visLabel  = document.getElementById('visLabel_'  + fieldName);
+    const mandLabel = document.getElementById('mandLabel_' + fieldName);
+
+    visLabel.textContent = isVisible ? 'On' : 'Off';
+
+    if (mandCb) {
+        mandCb.disabled = !isVisible;
+        if (!isVisible) {
+            mandCb.checked = false;
+            mandLabel.textContent = 'Optional';
+        }
+    }
+}
+
+// Keep mandatory label in sync when toggled directly
+document.querySelectorAll('[id^="mand_"]').forEach(cb => {
+    cb.addEventListener('change', function () {
+        const fieldName = this.id.replace('mand_', '');
+        const label = document.getElementById('mandLabel_' + fieldName);
+        if (label) label.textContent = this.checked ? 'Required' : 'Optional';
+    });
+});
+</script>

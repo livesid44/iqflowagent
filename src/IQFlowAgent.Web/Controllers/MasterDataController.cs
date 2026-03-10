@@ -440,5 +440,73 @@ public class MasterDataController : Controller
             : "Country/City filter by LOT is now disabled (global master list will be used).";
         return RedirectToAction(nameof(LotCountryMapping));
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Intake Field Configuration
+    // ═══════════════════════════════════════════════════════════
+
+    // GET /MasterData/IntakeFields
+    public async Task<IActionResult> IntakeFields()
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var configs  = await EnsureIntakeFieldConfigsAsync(tenantId);
+        return View(configs);
+    }
+
+    // POST /MasterData/SaveIntakeFields — bulk save visibility / mandatory toggles
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveIntakeFields(IFormCollection form)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var configs  = await _db.IntakeFieldConfigs
+            .Where(f => f.TenantId == tenantId)
+            .ToListAsync();
+
+        foreach (var config in configs)
+        {
+            config.IsVisible  = form.ContainsKey($"visible_{config.FieldName}");
+            // Mandatory only makes sense when the field is visible
+            config.IsMandatory = config.IsVisible && form.ContainsKey($"mandatory_{config.FieldName}");
+        }
+
+        await _db.SaveChangesAsync();
+        TempData["Success"] = "Intake field configuration saved successfully.";
+        return RedirectToAction(nameof(IntakeFields));
+    }
+
+    /// <summary>
+    /// Returns the intake field configs for a tenant, creating the default set
+    /// if none exist yet (e.g. for tenants created before this feature was added).
+    /// </summary>
+    private async Task<List<IntakeFieldConfig>> EnsureIntakeFieldConfigsAsync(int tenantId)
+    {
+        var existing = await _db.IntakeFieldConfigs
+            .Where(f => f.TenantId == tenantId)
+            .OrderBy(f => f.DisplayOrder)
+            .ToListAsync();
+
+        if (existing.Count > 0)
+            return existing;
+
+        // Provision defaults for this tenant
+        var defaults = IntakeFieldConfig.DefaultFields
+            .Select(d => new IntakeFieldConfig
+            {
+                TenantId    = tenantId,
+                FieldName   = d.FieldName,
+                DisplayName = d.DisplayName,
+                SectionName = d.SectionName,
+                IsVisible   = true,
+                IsMandatory = d.IsMandatory,
+                DisplayOrder = d.DisplayOrder,
+            })
+            .ToList();
+
+        _db.IntakeFieldConfigs.AddRange(defaults);
+        await _db.SaveChangesAsync();
+        return defaults;
+    }
 }
+
 
