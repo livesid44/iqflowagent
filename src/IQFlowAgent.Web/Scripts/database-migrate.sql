@@ -9,7 +9,7 @@
 --   sqlcmd -S <server> -d <database> -i database-migrate.sql
 --
 -- This script is the authoritative source for the database schema.
--- It covers all migrations up to: 20260310155450_AddTenantPiiSettings
+-- It covers all migrations up to: 20260311000000_FixAllTablesIdentity
 -- =============================================================================
 
 IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
@@ -820,6 +820,451 @@ GO
 
 IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260310155450_AddTenantPiiSettings')
     INSERT INTO [__EFMigrationsHistory] VALUES (N'20260310155450_AddTenantPiiSettings', N'8.0.13');
+GO
+
+COMMIT;
+GO
+-- =============================================================================
+-- 20260311000000_FixAllTablesIdentity
+-- Repairs ALL int-PK tables that were created without IDENTITY(1,1) on SQL
+-- Server because early migrations only carried Sqlite:Autoincrement.
+-- Each block is a no-op when IDENTITY already exists on the table.
+-- This migration is NEW — it will run even on databases that already have all
+-- previous migrations in __EFMigrationsHistory.
+-- =============================================================================
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260311000000_FixAllTablesIdentity')
+BEGIN
+    -- AuthSettings
+    IF OBJECT_ID(N'[AuthSettings]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='AuthSettings' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [AuthSettings];
+        CREATE TABLE [AuthSettings] (
+            [Id]               int           NOT NULL IDENTITY(1,1),
+            [AuthMode]         nvarchar(max) NOT NULL,
+            [LdapServer]       nvarchar(max) NULL,
+            [LdapPort]         int           NOT NULL,
+            [LdapBaseDn]       nvarchar(max) NULL,
+            [LdapBindDn]       nvarchar(max) NULL,
+            [LdapBindPassword] nvarchar(max) NULL,
+            [LdapUseSsl]       bit           NOT NULL,
+            [LdapSearchFilter] nvarchar(max) NULL,
+            [TenantId]         int           NOT NULL DEFAULT 1,
+            [UpdatedAt]        datetime2     NOT NULL,
+            CONSTRAINT [PK_AuthSettings] PRIMARY KEY ([Id])
+        );
+    END
+
+    -- MasterDepartments
+    IF OBJECT_ID(N'[MasterDepartments]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='MasterDepartments' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [MasterDepartments];
+        CREATE TABLE [MasterDepartments] (
+            [Id]          int           NOT NULL IDENTITY(1,1),
+            [TenantId]    int           NOT NULL DEFAULT 1,
+            [Name]        nvarchar(max) NOT NULL,
+            [Description] nvarchar(max) NULL,
+            [IsActive]    bit           NOT NULL,
+            [CreatedAt]   datetime2     NOT NULL,
+            CONSTRAINT [PK_MasterDepartments] PRIMARY KEY ([Id])
+        );
+    END
+
+    -- MasterLobs
+    IF OBJECT_ID(N'[MasterLobs]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='MasterLobs' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [MasterLobs];
+        CREATE TABLE [MasterLobs] (
+            [Id]             int           NOT NULL IDENTITY(1,1),
+            [TenantId]       int           NOT NULL,
+            [DepartmentName] nvarchar(max) NOT NULL,
+            [Name]           nvarchar(max) NOT NULL,
+            [Description]    nvarchar(max) NULL,
+            [IsActive]       bit           NOT NULL,
+            [CreatedAt]      datetime2     NOT NULL,
+            CONSTRAINT [PK_MasterLobs] PRIMARY KEY ([Id])
+        );
+    END
+
+    -- Tenants (the table currently causing the reported failure)
+    IF OBJECT_ID(N'[Tenants]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='Tenants' AND ic.name='Id')
+    BEGIN
+        -- Drop dependent tables first
+        IF OBJECT_ID(N'[UserTenants]',      N'U') IS NOT NULL DROP TABLE [UserTenants];
+        IF OBJECT_ID(N'[TenantAiSettings]', N'U') IS NOT NULL DROP TABLE [TenantAiSettings];
+        IF OBJECT_ID(N'[TenantPiiSettings]',N'U') IS NOT NULL DROP TABLE [TenantPiiSettings];
+        DROP TABLE [Tenants];
+        CREATE TABLE [Tenants] (
+            [Id]          int           NOT NULL IDENTITY(1,1),
+            [Name]        nvarchar(max) NOT NULL,
+            [Slug]        nvarchar(max) NOT NULL,
+            [Color]       nvarchar(max) NOT NULL,
+            [Description] nvarchar(max) NULL,
+            [IsActive]    bit           NOT NULL,
+            [CreatedAt]   datetime2     NOT NULL,
+            CONSTRAINT [PK_Tenants] PRIMARY KEY ([Id])
+        );
+        CREATE TABLE [TenantAiSettings] (
+            [Id]                           int           NOT NULL IDENTITY(1,1),
+            [TenantId]                     int           NOT NULL,
+            [AzureOpenAIEndpoint]          nvarchar(max) NOT NULL,
+            [AzureOpenAIApiKey]            nvarchar(max) NOT NULL,
+            [AzureOpenAIDeploymentName]    nvarchar(max) NOT NULL,
+            [AzureOpenAIApiVersion]        nvarchar(max) NOT NULL,
+            [AzureOpenAIMaxTokens]         int           NOT NULL,
+            [AzureStorageConnectionString] nvarchar(max) NOT NULL,
+            [AzureStorageContainerName]    nvarchar(max) NOT NULL,
+            [AzureSpeechApiKey]            nvarchar(max) NOT NULL DEFAULT N'',
+            [AzureSpeechRegion]            nvarchar(max) NOT NULL DEFAULT N'',
+            [UseCountryFilterByLot]        bit           NOT NULL DEFAULT CAST(0 AS bit),
+            [UpdatedAt]                    datetime2     NOT NULL,
+            [UpdatedByUserId]              nvarchar(max) NULL,
+            CONSTRAINT [PK_TenantAiSettings] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_TenantAiSettings_Tenants_TenantId]
+                FOREIGN KEY ([TenantId]) REFERENCES [Tenants] ([Id]) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX [IX_TenantAiSettings_TenantId] ON [TenantAiSettings] ([TenantId]);
+        CREATE TABLE [UserTenants] (
+            [Id]         int           NOT NULL IDENTITY(1,1),
+            [UserId]     nvarchar(450) NOT NULL,
+            [TenantId]   int           NOT NULL,
+            [TenantRole] nvarchar(max) NOT NULL,
+            [IsDefault]  bit           NOT NULL,
+            [AssignedAt] datetime2     NOT NULL,
+            CONSTRAINT [PK_UserTenants] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_UserTenants_AspNetUsers_UserId]
+                FOREIGN KEY ([UserId])   REFERENCES [AspNetUsers] ([Id]) ON DELETE CASCADE,
+            CONSTRAINT [FK_UserTenants_Tenants_TenantId]
+                FOREIGN KEY ([TenantId]) REFERENCES [Tenants] ([Id]) ON DELETE NO ACTION
+        );
+        CREATE INDEX [IX_UserTenants_TenantId] ON [UserTenants] ([TenantId]);
+        CREATE INDEX [IX_UserTenants_UserId]   ON [UserTenants] ([UserId]);
+        CREATE TABLE [TenantPiiSettings] (
+            [Id]                      int           NOT NULL IDENTITY(1,1),
+            [TenantId]                int           NOT NULL,
+            [IsEnabled]               bit           NOT NULL,
+            [BlockOnDetection]        bit           NOT NULL,
+            [DetectEmailAddresses]    bit           NOT NULL,
+            [DetectPhoneNumbers]      bit           NOT NULL,
+            [DetectCreditCardNumbers] bit           NOT NULL,
+            [DetectSsnNumbers]        bit           NOT NULL,
+            [DetectIpAddresses]       bit           NOT NULL,
+            [DetectPassportNumbers]   bit           NOT NULL,
+            [DetectDatesOfBirth]      bit           NOT NULL,
+            [DetectUrls]              bit           NOT NULL,
+            [DetectPersonNames]       bit           NOT NULL,
+            [UpdatedAt]               datetime2     NOT NULL,
+            [UpdatedByUserId]         nvarchar(max) NULL,
+            CONSTRAINT [PK_TenantPiiSettings] PRIMARY KEY ([Id])
+        );
+        CREATE UNIQUE INDEX [IX_TenantPiiSettings_TenantId] ON [TenantPiiSettings] ([TenantId]);
+    END
+
+    -- TenantAiSettings (fix independently if Tenants was already correct)
+    IF OBJECT_ID(N'[TenantAiSettings]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='TenantAiSettings' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [TenantAiSettings];
+        CREATE TABLE [TenantAiSettings] (
+            [Id]                           int           NOT NULL IDENTITY(1,1),
+            [TenantId]                     int           NOT NULL,
+            [AzureOpenAIEndpoint]          nvarchar(max) NOT NULL,
+            [AzureOpenAIApiKey]            nvarchar(max) NOT NULL,
+            [AzureOpenAIDeploymentName]    nvarchar(max) NOT NULL,
+            [AzureOpenAIApiVersion]        nvarchar(max) NOT NULL,
+            [AzureOpenAIMaxTokens]         int           NOT NULL,
+            [AzureStorageConnectionString] nvarchar(max) NOT NULL,
+            [AzureStorageContainerName]    nvarchar(max) NOT NULL,
+            [AzureSpeechApiKey]            nvarchar(max) NOT NULL DEFAULT N'',
+            [AzureSpeechRegion]            nvarchar(max) NOT NULL DEFAULT N'',
+            [UseCountryFilterByLot]        bit           NOT NULL DEFAULT CAST(0 AS bit),
+            [UpdatedAt]                    datetime2     NOT NULL,
+            [UpdatedByUserId]              nvarchar(max) NULL,
+            CONSTRAINT [PK_TenantAiSettings] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_TenantAiSettings_Tenants_TenantId]
+                FOREIGN KEY ([TenantId]) REFERENCES [Tenants] ([Id]) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX [IX_TenantAiSettings_TenantId] ON [TenantAiSettings] ([TenantId]);
+    END
+
+    -- UserTenants (fix independently if Tenants was already correct)
+    IF OBJECT_ID(N'[UserTenants]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='UserTenants' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [UserTenants];
+        CREATE TABLE [UserTenants] (
+            [Id]         int           NOT NULL IDENTITY(1,1),
+            [UserId]     nvarchar(450) NOT NULL,
+            [TenantId]   int           NOT NULL,
+            [TenantRole] nvarchar(max) NOT NULL,
+            [IsDefault]  bit           NOT NULL,
+            [AssignedAt] datetime2     NOT NULL,
+            CONSTRAINT [PK_UserTenants] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_UserTenants_AspNetUsers_UserId]
+                FOREIGN KEY ([UserId])   REFERENCES [AspNetUsers] ([Id]) ON DELETE CASCADE,
+            CONSTRAINT [FK_UserTenants_Tenants_TenantId]
+                FOREIGN KEY ([TenantId]) REFERENCES [Tenants] ([Id]) ON DELETE NO ACTION
+        );
+        CREATE INDEX [IX_UserTenants_TenantId] ON [UserTenants] ([TenantId]);
+        CREATE INDEX [IX_UserTenants_UserId]   ON [UserTenants] ([UserId]);
+    END
+
+    -- TenantPiiSettings (fix independently if Tenants was already correct)
+    IF OBJECT_ID(N'[TenantPiiSettings]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='TenantPiiSettings' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [TenantPiiSettings];
+        CREATE TABLE [TenantPiiSettings] (
+            [Id]                      int           NOT NULL IDENTITY(1,1),
+            [TenantId]                int           NOT NULL,
+            [IsEnabled]               bit           NOT NULL,
+            [BlockOnDetection]        bit           NOT NULL,
+            [DetectEmailAddresses]    bit           NOT NULL,
+            [DetectPhoneNumbers]      bit           NOT NULL,
+            [DetectCreditCardNumbers] bit           NOT NULL,
+            [DetectSsnNumbers]        bit           NOT NULL,
+            [DetectIpAddresses]       bit           NOT NULL,
+            [DetectPassportNumbers]   bit           NOT NULL,
+            [DetectDatesOfBirth]      bit           NOT NULL,
+            [DetectUrls]              bit           NOT NULL,
+            [DetectPersonNames]       bit           NOT NULL,
+            [UpdatedAt]               datetime2     NOT NULL,
+            [UpdatedByUserId]         nvarchar(max) NULL,
+            CONSTRAINT [PK_TenantPiiSettings] PRIMARY KEY ([Id])
+        );
+        CREATE UNIQUE INDEX [IX_TenantPiiSettings_TenantId] ON [TenantPiiSettings] ([TenantId]);
+    END
+
+    -- AspNetRoleClaims
+    IF OBJECT_ID(N'[AspNetRoleClaims]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='AspNetRoleClaims' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [AspNetRoleClaims];
+        CREATE TABLE [AspNetRoleClaims] (
+            [Id]         int           NOT NULL IDENTITY(1,1),
+            [RoleId]     nvarchar(450) NOT NULL,
+            [ClaimType]  nvarchar(max) NULL,
+            [ClaimValue] nvarchar(max) NULL,
+            CONSTRAINT [PK_AspNetRoleClaims] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_AspNetRoleClaims_AspNetRoles_RoleId]
+                FOREIGN KEY ([RoleId]) REFERENCES [AspNetRoles] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_AspNetRoleClaims_RoleId] ON [AspNetRoleClaims] ([RoleId]);
+    END
+
+    -- AspNetUserClaims
+    IF OBJECT_ID(N'[AspNetUserClaims]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='AspNetUserClaims' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [AspNetUserClaims];
+        CREATE TABLE [AspNetUserClaims] (
+            [Id]         int           NOT NULL IDENTITY(1,1),
+            [UserId]     nvarchar(450) NOT NULL,
+            [ClaimType]  nvarchar(max) NULL,
+            [ClaimValue] nvarchar(max) NULL,
+            CONSTRAINT [PK_AspNetUserClaims] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_AspNetUserClaims_AspNetUsers_UserId]
+                FOREIGN KEY ([UserId]) REFERENCES [AspNetUsers] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_AspNetUserClaims_UserId] ON [AspNetUserClaims] ([UserId]);
+    END
+
+    -- IntakeRecords + all child tables in one block
+    IF OBJECT_ID(N'[IntakeRecords]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='IntakeRecords' AND ic.name='Id')
+    BEGIN
+        IF OBJECT_ID(N'[IntakeDocuments]',     N'U') IS NOT NULL DROP TABLE [IntakeDocuments];
+        IF OBJECT_ID(N'[TaskActionLogs]',      N'U') IS NOT NULL DROP TABLE [TaskActionLogs];
+        IF OBJECT_ID(N'[IntakeTasks]',         N'U') IS NOT NULL DROP TABLE [IntakeTasks];
+        IF OBJECT_ID(N'[ReportFieldStatuses]', N'U') IS NOT NULL DROP TABLE [ReportFieldStatuses];
+        IF OBJECT_ID(N'[FinalReports]',        N'U') IS NOT NULL DROP TABLE [FinalReports];
+        IF OBJECT_ID(N'[QcChecks]',            N'U') IS NOT NULL DROP TABLE [QcChecks];
+        IF OBJECT_ID(N'[RagJobs]',             N'U') IS NOT NULL DROP TABLE [RagJobs];
+        DROP TABLE [IntakeRecords];
+        CREATE TABLE [IntakeRecords] (
+            [Id]                      int           NOT NULL IDENTITY(1,1),
+            [IntakeId]                nvarchar(max) NOT NULL,
+            [ProcessName]             nvarchar(max) NOT NULL,
+            [Description]             nvarchar(max) NOT NULL,
+            [BusinessUnit]            nvarchar(max) NOT NULL,
+            [Department]              nvarchar(max) NOT NULL,
+            [ProcessOwnerName]        nvarchar(max) NOT NULL,
+            [ProcessOwnerEmail]       nvarchar(max) NOT NULL,
+            [ProcessType]             nvarchar(max) NOT NULL,
+            [EstimatedVolumePerDay]   int           NOT NULL,
+            [Priority]                nvarchar(max) NOT NULL,
+            [Country]                 nvarchar(max) NOT NULL,
+            [City]                    nvarchar(max) NOT NULL,
+            [SiteLocation]            nvarchar(max) NOT NULL,
+            [TimeZone]                nvarchar(max) NOT NULL,
+            [UploadedFileName]        nvarchar(max) NULL,
+            [UploadedFilePath]        nvarchar(max) NULL,
+            [UploadedFileContentType] nvarchar(max) NULL,
+            [UploadedFileSize]        bigint        NULL,
+            [Status]                  nvarchar(max) NOT NULL,
+            [AnalysisResult]          nvarchar(max) NULL,
+            [CreatedAt]               datetime2     NOT NULL,
+            [SubmittedAt]             datetime2     NULL,
+            [AnalyzedAt]              datetime2     NULL,
+            [CreatedByUserId]         nvarchar(max) NULL,
+            [TenantId]                int           NOT NULL DEFAULT 1,
+            [Lob]                     nvarchar(max) NOT NULL DEFAULT N'',
+            [SdcLots]                 nvarchar(max) NOT NULL DEFAULT N'',
+            CONSTRAINT [PK_IntakeRecords] PRIMARY KEY ([Id])
+        );
+        CREATE TABLE [FinalReports] (
+            [Id]                int           NOT NULL IDENTITY(1,1),
+            [IntakeRecordId]    int           NOT NULL,
+            [ReportFileName]    nvarchar(max) NOT NULL,
+            [FilePath]          nvarchar(max) NOT NULL,
+            [FileSizeBytes]     bigint        NOT NULL,
+            [GeneratedAt]       datetime2     NOT NULL,
+            [GeneratedByUserId] nvarchar(max) NULL,
+            [GeneratedByName]   nvarchar(max) NULL,
+            CONSTRAINT [PK_FinalReports] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_FinalReports_IntakeRecords_IntakeRecordId]
+                FOREIGN KEY ([IntakeRecordId]) REFERENCES [IntakeRecords] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_FinalReports_IntakeRecordId] ON [FinalReports] ([IntakeRecordId]);
+        CREATE TABLE [IntakeTasks] (
+            [Id]              int           NOT NULL IDENTITY(1,1),
+            [TaskId]          nvarchar(max) NOT NULL,
+            [IntakeRecordId]  int           NOT NULL,
+            [Title]           nvarchar(max) NOT NULL,
+            [Description]     nvarchar(max) NOT NULL,
+            [Owner]           nvarchar(max) NOT NULL,
+            [Priority]        nvarchar(max) NOT NULL,
+            [Status]          nvarchar(max) NOT NULL,
+            [CreatedAt]       datetime2     NOT NULL,
+            [DueDate]         datetime2     NOT NULL,
+            [CompletedAt]     datetime2     NULL,
+            [CreatedByUserId] nvarchar(max) NULL,
+            [IsNotApplicable] bit           NOT NULL DEFAULT CAST(0 AS bit),
+            [NaReason]        nvarchar(max) NULL,
+            CONSTRAINT [PK_IntakeTasks] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_IntakeTasks_IntakeRecords_IntakeRecordId]
+                FOREIGN KEY ([IntakeRecordId]) REFERENCES [IntakeRecords] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_IntakeTasks_IntakeRecordId] ON [IntakeTasks] ([IntakeRecordId]);
+        CREATE TABLE [IntakeDocuments] (
+            [Id]               int           NOT NULL IDENTITY(1,1),
+            [IntakeRecordId]   int           NOT NULL,
+            [IntakeTaskId]     int           NULL,
+            [FileName]         nvarchar(max) NOT NULL,
+            [FilePath]         nvarchar(max) NOT NULL,
+            [ContentType]      nvarchar(max) NULL,
+            [FileSize]         bigint        NULL,
+            [DocumentType]     nvarchar(max) NOT NULL,
+            [UploadedAt]       datetime2     NOT NULL,
+            [UploadedByUserId] nvarchar(max) NULL,
+            [UploadedByName]   nvarchar(max) NULL,
+            [SopDocumentPath]  nvarchar(max) NULL,
+            [TranscriptStatus] nvarchar(max) NOT NULL DEFAULT N'',
+            [TranscriptText]   nvarchar(max) NULL,
+            CONSTRAINT [PK_IntakeDocuments] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_IntakeDocuments_IntakeRecords_IntakeRecordId]
+                FOREIGN KEY ([IntakeRecordId]) REFERENCES [IntakeRecords] ([Id]) ON DELETE CASCADE,
+            CONSTRAINT [FK_IntakeDocuments_IntakeTasks_IntakeTaskId]
+                FOREIGN KEY ([IntakeTaskId]) REFERENCES [IntakeTasks] ([Id])
+        );
+        CREATE INDEX [IX_IntakeDocuments_IntakeRecordId] ON [IntakeDocuments] ([IntakeRecordId]);
+        CREATE INDEX [IX_IntakeDocuments_IntakeTaskId]   ON [IntakeDocuments] ([IntakeTaskId]);
+        CREATE TABLE [TaskActionLogs] (
+            [Id]              int           NOT NULL IDENTITY(1,1),
+            [IntakeTaskId]    int           NOT NULL,
+            [ActionType]      nvarchar(max) NOT NULL,
+            [OldStatus]       nvarchar(max) NULL,
+            [NewStatus]       nvarchar(max) NULL,
+            [Comment]         nvarchar(max) NULL,
+            [CreatedAt]       datetime2     NOT NULL,
+            [CreatedByUserId] nvarchar(max) NULL,
+            [CreatedByName]   nvarchar(max) NULL,
+            CONSTRAINT [PK_TaskActionLogs] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_TaskActionLogs_IntakeTasks_IntakeTaskId]
+                FOREIGN KEY ([IntakeTaskId]) REFERENCES [IntakeTasks] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_TaskActionLogs_IntakeTaskId] ON [TaskActionLogs] ([IntakeTaskId]);
+        CREATE TABLE [ReportFieldStatuses] (
+            [Id]                  int           NOT NULL IDENTITY(1,1),
+            [IntakeRecordId]      int           NOT NULL,
+            [FieldKey]            nvarchar(max) NOT NULL,
+            [FieldLabel]          nvarchar(max) NOT NULL,
+            [Section]             nvarchar(max) NOT NULL,
+            [TemplatePlaceholder] nvarchar(max) NOT NULL,
+            [Status]              nvarchar(max) NOT NULL,
+            [FillValue]           nvarchar(max) NULL,
+            [IsNA]                bit           NOT NULL,
+            [Notes]               nvarchar(max) NULL,
+            [LinkedTaskId]        nvarchar(max) NULL,
+            [AnalyzedAt]          datetime2     NULL,
+            [UpdatedAt]           datetime2     NOT NULL,
+            CONSTRAINT [PK_ReportFieldStatuses] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_ReportFieldStatuses_IntakeRecords_IntakeRecordId]
+                FOREIGN KEY ([IntakeRecordId]) REFERENCES [IntakeRecords] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_ReportFieldStatuses_IntakeRecordId] ON [ReportFieldStatuses] ([IntakeRecordId]);
+        CREATE TABLE [QcChecks] (
+            [Id]                 int           NOT NULL IDENTITY(1,1),
+            [TenantId]           int           NOT NULL DEFAULT 1,
+            [IntakeRecordId]     int           NOT NULL,
+            [OverallScore]       int           NOT NULL,
+            [ScoreBreakdownJson] nvarchar(max) NULL,
+            [Status]             nvarchar(max) NOT NULL,
+            [ErrorMessage]       nvarchar(max) NULL,
+            [CreatedAt]          datetime2     NOT NULL,
+            [CompletedAt]        datetime2     NULL,
+            [RunByUserId]        nvarchar(max) NULL,
+            CONSTRAINT [PK_QcChecks] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_QcChecks_IntakeRecords_IntakeRecordId]
+                FOREIGN KEY ([IntakeRecordId]) REFERENCES [IntakeRecords] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_QcChecks_IntakeRecordId] ON [QcChecks] ([IntakeRecordId]);
+        CREATE TABLE [RagJobs] (
+            [Id]             int           NOT NULL IDENTITY(1,1),
+            [IntakeRecordId] int           NOT NULL,
+            [Status]         nvarchar(max) NOT NULL,
+            [TotalFiles]     int           NOT NULL,
+            [ProcessedFiles] int           NOT NULL,
+            [ErrorMessage]   nvarchar(max) NULL,
+            [CreatedAt]      datetime2     NOT NULL,
+            [StartedAt]      datetime2     NULL,
+            [CompletedAt]    datetime2     NULL,
+            [NotifyUserId]   nvarchar(max) NULL,
+            CONSTRAINT [PK_RagJobs] PRIMARY KEY ([Id]),
+            CONSTRAINT [FK_RagJobs_IntakeRecords_IntakeRecordId]
+                FOREIGN KEY ([IntakeRecordId]) REFERENCES [IntakeRecords] ([Id]) ON DELETE CASCADE
+        );
+        CREATE INDEX [IX_RagJobs_IntakeRecordId] ON [RagJobs] ([IntakeRecordId]);
+    END
+
+    -- IntakeFieldConfigs
+    IF OBJECT_ID(N'[IntakeFieldConfigs]', N'U') IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM sys.identity_columns ic JOIN sys.tables t ON ic.object_id=t.object_id WHERE t.name='IntakeFieldConfigs' AND ic.name='Id')
+    BEGIN
+        DROP TABLE [IntakeFieldConfigs];
+        CREATE TABLE [IntakeFieldConfigs] (
+            [Id]           int           NOT NULL IDENTITY(1,1),
+            [TenantId]     int           NOT NULL,
+            [FieldName]    nvarchar(max) NOT NULL,
+            [DisplayName]  nvarchar(max) NOT NULL,
+            [SectionName]  nvarchar(max) NOT NULL,
+            [IsVisible]    bit           NOT NULL,
+            [IsMandatory]  bit           NOT NULL,
+            [DisplayOrder] int           NOT NULL,
+            CONSTRAINT [PK_IntakeFieldConfigs] PRIMARY KEY ([Id])
+        );
+    END
+END;
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260311000000_FixAllTablesIdentity')
+    INSERT INTO [__EFMigrationsHistory] VALUES (N'20260311000000_FixAllTablesIdentity', N'8.0.13');
 GO
 
 COMMIT;
