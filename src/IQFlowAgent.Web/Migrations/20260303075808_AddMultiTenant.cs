@@ -87,7 +87,7 @@ namespace IQFlowAgent.Web.Migrations
                 {
                     Id = table.Column<int>(nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<string>(nullable: false),
+                    UserId = table.Column<string>(maxLength: 450, nullable: false),
                     TenantId = table.Column<int>(nullable: false),
                     TenantRole = table.Column<string>(nullable: false),
                     IsDefault = table.Column<bool>(nullable: false),
