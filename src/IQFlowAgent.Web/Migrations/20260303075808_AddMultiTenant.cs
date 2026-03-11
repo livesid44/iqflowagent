@@ -40,6 +40,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     Name = table.Column<string>(nullable: false),
                     Slug = table.Column<string>(nullable: false),
@@ -58,6 +59,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     TenantId = table.Column<int>(nullable: false),
                     AzureOpenAIEndpoint = table.Column<string>(nullable: false),
@@ -86,6 +88,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<string>(maxLength: 450, nullable: false),
                     TenantId = table.Column<int>(nullable: false),

@@ -59,6 +59,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     AuthMode = table.Column<string>(nullable: false),
                     LdapServer = table.Column<string>(nullable: true),
@@ -80,6 +81,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     IntakeId = table.Column<string>(nullable: false),
                     ProcessName = table.Column<string>(nullable: false),
@@ -116,6 +118,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     RoleId = table.Column<string>(maxLength: 450, nullable: false),
                     ClaimType = table.Column<string>(nullable: true),
@@ -137,6 +140,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<string>(maxLength: 450, nullable: false),
                     ClaimType = table.Column<string>(nullable: true),
@@ -222,6 +226,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     IntakeRecordId = table.Column<int>(nullable: false),
                     ReportFileName = table.Column<string>(nullable: false),
@@ -247,6 +252,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     TaskId = table.Column<string>(nullable: false),
                     IntakeRecordId = table.Column<int>(nullable: false),
@@ -276,6 +282,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     IntakeRecordId = table.Column<int>(nullable: false),
                     FieldKey = table.Column<string>(nullable: false),
@@ -306,6 +313,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     IntakeRecordId = table.Column<int>(nullable: false),
                     IntakeTaskId = table.Column<int>(nullable: true),
@@ -339,6 +347,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     IntakeTaskId = table.Column<int>(nullable: false),
                     ActionType = table.Column<string>(nullable: false),

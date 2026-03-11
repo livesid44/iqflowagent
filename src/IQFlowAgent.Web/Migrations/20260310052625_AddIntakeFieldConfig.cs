@@ -37,6 +37,7 @@ namespace IQFlowAgent.Web.Migrations
                 columns: table => new
                 {
                     Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
                     TenantId = table.Column<int>(nullable: false),
                     FieldName = table.Column<string>(nullable: false),
