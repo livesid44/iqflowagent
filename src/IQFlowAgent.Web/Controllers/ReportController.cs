@@ -19,7 +19,7 @@ public class ReportController : Controller
     private readonly IWebHostEnvironment _env;
     private readonly ITenantContextService _tenantContext;
 
-    private const string TemplateName = "BARTOK_DD_Template_v2.docx";
+    private const string TemplateName = "BARTOK_S8_SOP_Template_v2.docx";
     private const int MaxArtifactCharsPerFile = 1500;
 
     private static string GenerateTaskId() =>

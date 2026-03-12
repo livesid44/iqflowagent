@@ -437,27 +437,46 @@ public class AzureOpenAiService : IAzureOpenAiService
         _logger.LogInformation("Calling Azure OpenAI for report field analysis — url: {RequestUrl}", requestUrl);
 
         var systemPrompt = """
-            You are an expert BARTOK Due Diligence documentation specialist at TechM.
-            You will be given structured intake data about a business process and a list of template fields
-            that need to be filled in the BARTOK DD document.
+            You are an expert BARTOK / Schedule 8 SOP documentation specialist at TechM.
+            You will be given structured intake data about a business process and a list of fields
+            from the new BARTOK S8 SOP template that must be filled in.
 
-            Your goal: fill EVERY SINGLE field in the list with a meaningful, professional value.
-            This is a full document revalidation — every field must contain real content.
+            The template covers these sections:
+            - Document Control (process name, lot, date, author, approver)
+            - 1. Purpose and Scope (countries in scope, input artefacts)
+            - 2. Process Overview (description, owner, volumes, hours of operation, systems used)
+            - 3. RACI (4 tasks × 4 roles — generate specific task names and role titles)
+            - 4. Standard Operating Procedure (step actions, roles, systems, outputs, decision point, automation assessment)
+            - 5. Work Instructions (step-by-step instructions for each SOP step)
+            - 6. Escalation and Exception Handling (triggers, paths, timeframes, exception types)
+            - 7. Service Levels and Performance (SLA metrics, measurement methods, historical actuals)
+            - 8. Volumetrics (transaction volumes, peak notes, forecast)
+            - 9. Regulatory and Compliance (applicable regulations, controls, evidence)
+            - 10. Training Materials (modules, delivery methods, competency verification)
+            - 11. Orange Customer Contract Obligations (OCC references, obligations, controls)
+
+            Your goal: fill EVERY SINGLE field with meaningful, professional content.
+            This is a full document generation — every field must contain specific, relevant content.
 
             Rules:
-            1. For fields explicitly present in the intake (ProcessName, Country, ProcessOwner, etc.) — use them directly.
-            2. For narrative/descriptive fields — write professional, complete sentences appropriate for a Due Diligence
-               report. Use the process description, AI analysis summary, and any artifact text to construct meaningful content.
-            3. For "Yes/No" style fields — make a reasonable inference and provide a brief explanation.
-            4. For fields about transition/WITO impact — base on general outsourcing best practices combined with the specific process.
-            5. For fields about risks, governance, and compliance — provide standard DD language adapted to this process.
-            6. NEVER use "Missing" status. For EVERY field, always use "Available" status. If the exact value is
-               not available, write professional DD language such as "To be confirmed with the process owner during
-               the DD walkthrough." or "Exact details to be reviewed with the commercial/legal team." or similar.
-               A due-diligence document must never have blank or empty sections.
-            7. Keep fill values concise: narratives 2-4 sentences, lists use line-separated entries.
-            8. NEVER return the original placeholder text as the fill value.
-            9. You MUST return a JSON entry for EVERY field key provided — do not omit any field from your response.
+            1. For fields directly from intake (process name, owner, country, etc.) — use them exactly.
+            2. For process description, SOP steps, work instructions, and SLA metrics — generate complete,
+               professional S8 SOP language specific to this process. Be concrete, not generic.
+            3. For RACI tasks and roles — generate 4 specific task names and 4 specific role titles
+               appropriate for this process type and business unit.
+            4. For SOP steps — generate 3-4 concrete step actions that describe how this process actually
+               runs. Include the role, system used, and expected output for each step.
+            5. For work instructions — write step-by-step instructions a new operative can follow,
+               including system navigation and error handling.
+            6. For SLA metrics — generate specific KPIs appropriate for this process type (e.g.
+               resolution time, first contact resolution, accuracy rate).
+            7. For regulatory/compliance — identify the most relevant regulations for this process
+               type and geography.
+            8. NEVER use "Missing" status. For EVERY field, always return "Available" with real content.
+               If exact data is not available, write professional placeholder text that a reviewer
+               can easily update (e.g. "To be confirmed with process owner — estimated X").
+            9. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
+            10. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -958,6 +977,211 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "workInstructions" =>
                     Placeholder(label, extra: $"Document step-by-step system navigation, field entries, decision rules, and validation checks for each step of {procName}. Request existing SOPs or runbooks from {owner}."),
+
+                // ── New S8 SOP template keys ─────────────────────────────────
+                "approver" =>
+                    string.IsNullOrWhiteSpace(owner)
+                        ? Placeholder(label, extra: "Provide approver name and email.")
+                        : ("Available", $"{owner} | {intake.ProcessOwnerEmail}", "Defaulted to process owner — update with formal approver."),
+
+                "processDescription" =>
+                    ("Available",
+                     $"{procName} is a {ptype?.ToLower()} process operated by the {bu} team in {location}. " +
+                     $"{desc} The process handles approximately {vol} transactions per day under the oversight of {owner}.",
+                     "Synthesised from intake metadata."),
+
+                "monthlyVolumes" =>
+                    ("Available",
+                     vol > 0 ? $"Estimated {vol} transactions per day (approx. {vol * 22} per month). Confirm exact monthly figures for the past 12 months with the process owner."
+                             : "Monthly volume data to be confirmed with the process owner. Provide actuals for the past 12 months.",
+                     "Inferred from intake daily volume estimate."),
+
+                "hoursWeekday" =>
+                    tz?.Contains("IST", StringComparison.OrdinalIgnoreCase) == true
+                        ? ("Available", "09:00–18:00 IST", "Inferred from IST time zone.")
+                        : tz?.Contains("GMT", StringComparison.OrdinalIgnoreCase) == true
+                            ? ("Available", "09:00–17:30 GMT", "Inferred from GMT time zone.")
+                            : ("Available", "09:00–18:00 local time", "Inferred from intake time zone."),
+
+                "hoursWeekend" =>
+                    ("Available", "Not Operational", "Standard business hours assumption — confirm with process owner."),
+
+                "hoursHoliday" =>
+                    ("Available", "On-call cover only — escalate to manager", "Standard holiday cover assumption — confirm with process owner."),
+
+                "raciTask1" =>
+                    ("Available", $"Receive and log incoming {procName} request", "Synthesised from process name."),
+
+                "raciTask2" =>
+                    ("Available", $"Process and validate {procName} transaction", "Synthesised from process type."),
+
+                "raciTask3" =>
+                    ("Available", $"Approve or escalate {procName} outcome", "Synthesised from process type."),
+
+                "raciTask4" =>
+                    ("Available", $"Close and report {procName} completion", "Synthesised from process name."),
+
+                "raciRole1" =>
+                    ("Available", $"{bu} Analyst", "Inferred from business unit."),
+
+                "raciRole2" =>
+                    string.IsNullOrWhiteSpace(owner)
+                        ? ("Available", "Process Manager", "Standard role name.")
+                        : ("Available", owner, "Sourced from intake process owner."),
+
+                "raciRole3" =>
+                    ("Available", $"{bu} Team Lead", "Inferred from business unit."),
+
+                "raciRole4" =>
+                    ("Available", $"Service Delivery Manager", "Standard governance role."),
+
+                "sopAction" =>
+                    ("Available",
+                     $"Receive, validate, and process the {procName} transaction according to the standard procedure. Log all actions in the ticketing system.",
+                     "Synthesised from process name and type."),
+
+                "sopRole" =>
+                    ("Available", $"{bu} Analyst", "Inferred from business unit."),
+
+                "sopSystem" =>
+                    ("Available", "Ticketing system / ERP — confirm with process owner", "Standard system placeholder."),
+
+                "sopOutput" =>
+                    ("Available", $"Processed and validated {procName} transaction record", "Synthesised from process name."),
+
+                "sopDecision" =>
+                    ("Available",
+                     $"Is the {procName} request complete and within SLA? If Yes → proceed to completion. If No → escalate to Team Lead.",
+                     "Synthesised from process name."),
+
+                "sopDecisionOutput" =>
+                    ("Available", "Proceed / Escalate to Team Lead", "Standard decision outcome."),
+
+                "sopAutoStatus" =>
+                    ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true
+                        ? ("Available", "Partially Automated", "Inferred from process type.")
+                        : ("Available", "Manual", "Inferred from process type."),
+
+                "sopOppRating" =>
+                    ("Available", "Medium", "Standard automation opportunity assessment."),
+
+                "sopAutoType" =>
+                    ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true
+                        ? ("Available", "Workflow / Integration", "Inferred from process type.")
+                        : ("Available", "RPA", "Highest-value automation type for manual processes."),
+
+                "sopExtraStep" =>
+                    ("Available", $"Complete documentation and notify stakeholders of {procName} closure", "Standard closing step."),
+
+                "wiStepName" =>
+                    ("Available", $"{procName} Processing", "Synthesised from process name."),
+
+                "wiInstruction1a" =>
+                    ("Available",
+                     $"Log in to the ticketing system and navigate to the {procName} queue. Select the new request and open the intake form.",
+                     "Synthesised from process name."),
+
+                "wiInstruction1b" =>
+                    ("Available",
+                     $"Validate all mandatory fields in the request. If any field is blank or incorrect, return the request to the originator with a clear error note.",
+                     "Standard validation instruction."),
+
+                "wiErrorInstruction" =>
+                    ("Available",
+                     $"If a system error occurs, take a screenshot and raise an incident ticket immediately. Notify the Team Lead and log the error in the exception register. Do not proceed until the system is confirmed stable.",
+                     "Standard error handling instruction."),
+
+                "wiInstruction2a" =>
+                    ("Available",
+                     $"Open the {procName} processing screen and enter all required data fields. Cross-reference against the source document before saving.",
+                     "Synthesised from process name."),
+
+                "escalationTrigger" =>
+                    ("Available", $"SLA breach risk — {procName} request approaching {(vol > 0 ? (vol / 10) + "-hour" : "agreed")} SLA threshold", "Inferred from process volume."),
+
+                "escalationPath" =>
+                    ("Available", $"Notify {bu} Team Lead via email and phone. Raise priority ticket in the ticketing system. CC Service Delivery Manager.", "Standard escalation path."),
+
+                "escalationTimeframe" =>
+                    ("Available", "Within 2 hours of breach detection", "Standard escalation SLA."),
+
+                "escalationTarget" =>
+                    ("Available", $"Resolve within 4 hours of escalation; confirm outcome with {bu} Team Lead", "Standard resolution target."),
+
+                "exceptionType" =>
+                    ("Available", $"Incomplete or invalid input data for {procName} request", "Most common exception type."),
+
+                "exceptionHandling" =>
+                    ("Available", "Return to originator with clear guidance. Log in exception register. Re-enter queue once corrected.", "Standard exception procedure."),
+
+                "exceptionApproval" =>
+                    ("Available", $"Yes — Team Lead approval required for any exceptions beyond standard handling", "Standard governance control."),
+
+                "slaMetric" =>
+                    ("Available", $"{procName} Processing Time", "Synthesised from process name."),
+
+                "slaMeasurement" =>
+                    ("Available", "Time from receipt of request to confirmed completion, measured in the ticketing system", "Standard SLA measurement."),
+
+                "slaFrequency" =>
+                    ("Available", vol > 100 ? "Daily" : "Weekly", "Inferred from transaction volume."),
+
+                "slaTool" =>
+                    ("Available", "Ticketing system / Service management platform — confirm with process owner", "Standard tooling."),
+
+                "perfMetric" =>
+                    ("Available", $"{procName} SLA Adherence (%)", "Synthesised from process name."),
+
+                "perfActual" =>
+                    ("Available", "Actual performance data to be confirmed with process owner — provide figures for the past 6 months", "Placeholder — confirm actuals."),
+
+                "volumeTransaction" =>
+                    ("Available",
+                     vol > 0 ? $"{vol} {procName} transactions (daily average)"
+                             : $"{procName} transaction type and volume to be confirmed with process owner",
+                     "Inferred from intake volume data."),
+
+                "volumeNote" =>
+                    ("Available", "Confirm any peak periods (e.g. month-end, quarter-end) with process owner. Identify seasonal demand fluctuations.", "Standard volume note."),
+
+                "volumeForecast" =>
+                    ("Available",
+                     vol > 0 ? $"Expected average: {vol} transactions/day ({vol * 22} per month). Review trend with process owner."
+                             : "Forecast volume to be agreed with process owner based on historical trend.",
+                     "Inferred from intake daily volume."),
+
+                "regulation" =>
+                    ("Available", "GDPR / Data Protection Act 2018 — applicable to any personal data processed in this workflow", "Standard regulatory framework."),
+
+                "regObligation" =>
+                    ("Available", $"Data minimisation, purpose limitation, and accuracy obligations apply to all {procName} records", "Standard GDPR obligation."),
+
+                "regControl" =>
+                    ("Available", $"Access controls, data retention policy, and audit logging implemented within the {procName} workflow", "Standard control description."),
+
+                "regEvidence" =>
+                    ("Available", "Data Protection Impact Assessment (DPIA) / Access control log / Retention schedule", "Standard evidence artefacts."),
+
+                "techMFramework" =>
+                    ("Available", "BARTOK-TCF-v1 (TechM BARTOK Control Framework — available on SharePoint)", "Standard TechM reference."),
+
+                "trainingModule" =>
+                    ("Available", $"{procName} Process Induction and Refresher", "Synthesised from process name."),
+
+                "trainingDelivery" =>
+                    ("Available", "On-the-job shadowing + e-learning module", "Standard TechM delivery method."),
+
+                "trainingVerification" =>
+                    ("Available", "Competency sign-off by Team Lead after 2-week shadowing period", "Standard verification approach."),
+
+                "occRef" =>
+                    Placeholder(label, "the OBI commercial team", "OCC references must be provided by OBI (Orange Business International) before this section can be completed."),
+
+                "occObligation" =>
+                    Placeholder(label, "the OBI commercial team", $"Orange Customer Contract obligations relevant to {procName} to be confirmed with OBI (Orange Business International)."),
+
+                "occControl" =>
+                    ("Available", $"{procName} includes controls aligned to standard TechM service delivery obligations. Specific OCC controls to be mapped once OCC schedules are received from OBI.", "Standard OCC control placeholder."),
 
                 _ =>
                     Placeholder(label, extra: $"(Field key: {aiProp})")

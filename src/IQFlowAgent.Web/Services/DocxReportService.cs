@@ -16,306 +16,281 @@ public class DocxReportService : IDocxReportService
 
     private static readonly List<FieldDefinition> FieldDefs =
     [
-        // ── Cover page header fields ─────────────────────────────────────────
-        // TemplatePlaceholder must exactly match the text inside BARTOK_DD_Template_v2.docx.
-        new("cover_process_name",    "Cover",                         "Process Name",
-            "Enter Process Name",
+        // ── Document Control (Table 0 / Table 1) ──────────────────────────────
+        // TemplatePlaceholder must exactly match text inside BARTOK_S8_SOP_Template_v2.docx.
+        new("dc_process_name",    "Document Control",            "Process Name",
+            "[Process Name]",
             "ProcessName"),
 
-        new("cover_lot",             "Cover",                         "Service Line / LOT",
-            "Enter Service Line / LOT",
+        new("dc_lot",             "Document Control",            "Lot Number and Name",
+            "[Lot Number and Name]",
             "SdcLots"),
 
-        new("cover_reviewer",        "Cover",                         "Reviewed By",
-            "Enter Reviewer Name",
-            "ProcessOwnerName"),
-
-        new("cover_date",            "Cover",                         "Review Date",
-            "DD MMM YYYY",
+        new("dc_date",            "Document Control",            "Document Date",
+            "[Add date in dd-mmm-yyyy format e.g. 01-May-2026]",
             "TODAY"),
 
-        new("cover_location",        "Cover",                         "Location(s)",
-            "India / Egypt / Brazil / Slovakia",
+        new("dc_author",          "Document Control",            "Process Author",
+            "[Process Author Name | Email]",
+            "ProcessOwnerContact"),
+
+        new("dc_approver",        "Document Control",            "Approver",
+            "[Approver Name | Email]",
+            "AI:approver"),
+
+        // ── 1.2 Scope ─────────────────────────────────────────────────────────
+        new("dc_countries",       "1.2 Scope",                   "Countries in Scope",
+            "[List all countries where this process operates]",
             "Country"),
 
-        // ── 0. Client Inputs & Artefacts ─────────────────────────────────────
-        new("artefact_doc1",         "0. Client Inputs & Artefacts",  "Document / Artefact #1",
+        // ── 1.2 Inputs & Artefacts ────────────────────────────────────────────
+        new("artefact_doc1",      "1.2 Inputs & Artefacts",      "Document / Artefact #1",
             "Enter document name...",
             "UploadedFileName"),
 
-        // ── 1.1 Process Overview ─────────────────────────────────────────────
-        new("process_summary",       "1.1 Process Overview",          "Process Summary",
-            "Describe the process in your own words. Cover: what it does, who it serves, how it is triggered, and why it matters to the business. Avoid bullet points here — use complete sentences so this section can be read in isolation by a senior stakeholder.",
-            "AI:summary"),
+        // ── 2. Process Overview ────────────────────────────────────────────────
+        new("po_description",     "2. Process Overview",         "Process Description",
+            "Detailed description",
+            "AI:processDescription"),
 
-        new("process_context",       "1.1 Process Overview",          "Process Context",
-            "Include any important context about the process history, recent changes, or known pain points at a high level.",
-            "AI:processContext"),
-
-        // ── 1.2 Basic Process Information ────────────────────────────────────
-        new("s12_process_name",      "1.2 Basic Process Information", "Process Name",
-            "Enter process name...",
-            "ProcessName"),
-
-        new("s12_service_line",      "1.2 Basic Process Information", "Service Line / LOT",
-            "Enter service line...",
-            "SdcLots"),
-
-        new("s12_sub_process",       "1.2 Basic Process Information", "Sub-process Name",
-            "If applicable...",
-            "AI:subProcess"),
-
-        new("s12_process_category",  "1.2 Basic Process Information", "Process Category",
-            "Service Delivery / Service Assurance / Service Management / Billing & Invoicing",
-            "AI:processCategory"),
-
-        new("s12_process_owner",     "1.2 Basic Process Information", "Process Owner",
-            "Name and role...",
+        new("po_owner",           "2. Process Overview",         "Process Owner",
+            "[Name, Role, OB]",
             "ProcessOwnerContact"),
 
-        new("s12_geo_location",      "1.2 Basic Process Information", "Geo Location(s)",
-            "India / Brazil / Slovakia / Egypt / Multi-Geo",
-            "Country"),
+        new("po_volumes",         "2. Process Overview",         "Monthly Volumes",
+            "Enter actual transaction volume for each of the past 12 months:",
+            "AI:monthlyVolumes"),
 
-        new("s12_timezone",          "1.2 Basic Process Information", "Time Zone Coverage",
-            "e.g. GMT, IST, BRT...",
-            "TimeZone"),
-
-        new("s12_shift_model",       "1.2 Basic Process Information", "Shift Model",
-            "24x7 / Business hours / Follow-the-sun",
-            "AI:shiftModel"),
-
-        new("s12_team_size",         "1.2 Basic Process Information", "Team Size (FTE)",
-            "Total FTE count...",
-            "AI:teamSize"),
-
-        new("s12_skill_profile",     "1.2 Basic Process Information", "Skill Profile",
-            "L1 / L2 / L3 / SME / Architect — describe mix",
-            "AI:skillProfile"),
-
-        // ── 1.3 Service & Customer Scope ─────────────────────────────────────
-        new("s13_services_scope",    "1.3 Service & Customer Scope",  "Services Scope",
-            "List services in scope per customer...",
-            "AI:servicesScope"),
-
-        new("s13_products",          "1.3 Service & Customer Scope",  "Product Portfolio",
-            "List products covered...",
-            "AI:productPortfolio"),
-
-        new("s13_sla_commitments",   "1.3 Service & Customer Scope",  "Contractual Commitments",
-            "SLAs, CSI targets, governance clauses...",
-            "AI:slaCommitments"),
-
-        new("s13_customer_type",     "1.3 Service & Customer Scope",  "Customer Type",
-            "Strategic / Non-strategic",
-            "AI:customerType"),
-
-        new("s13_renewal_timelines", "1.3 Service & Customer Scope",  "Contract Renewal Timelines",
-            "Enter dates or timeframes...",
-            "AI:renewalTimelines"),
-
-        new("s13_exit_projects",     "1.3 Service & Customer Scope",  "Customer Exit Projects",
-            "Any ongoing exits — describe...",
-            "AI:exitProjects"),
-
-        // ── 2.1 Operating Model Overview ─────────────────────────────────────
-        new("operating_model",       "2.1 Operating Model Overview",  "Operating Model",
-            "Describe the team structure, reporting lines, and how the operating model functions across geographies. Note any shared service arrangements, dedicated client teams, or satellite structures. Highlight any named individuals critical to continuity.",
-            "AI:operatingModel"),
-
-        // ── 2.2 Roles & Responsibilities ─────────────────────────────────────
-        new("s22_named_resources",   "2.2 Roles & Responsibilities",  "Named / Critical Resources",
-            "List names and roles...",
-            "AI:namedResources"),
-
-        new("s22_key_personnel",     "2.2 Roles & Responsibilities",  "Contractual Key Personnel",
-            "As per contract schedule...",
-            "AI:keyPersonnel"),
-
-        new("s22_skill_gaps",        "2.2 Roles & Responsibilities",  "Skill Gaps Identified",
-            "Describe gaps...",
-            "AI:skillGaps"),
-
-        new("s22_seed_team",         "2.2 Roles & Responsibilities",  "Seed Team Requirement",
-            "Post-transition seed team need...",
-            "AI:seedTeam"),
-
-        new("s22_escalation",        "2.2 Roles & Responsibilities",  "Escalation Hierarchy",
-            "L1 → L2 → L3 → Management path...",
-            "AI:escalationHierarchy"),
-
-        new("s22_org_hierarchy",     "2.2 Roles & Responsibilities",  "Org Hierarchy",
-            "Map to current org structure...",
-            "AI:orgHierarchy"),
-
-        // ── 2.5 Geo Distribution ──────────────────────────────────────────────
-        new("s25_follow_sun",        "2.5 Geo Distribution",         "Follow-the-Sun Model?",
-            "Yes / No — describe handoff points",
-            "AI:followSunModel"),
-
-        new("s25_regional_variations", "2.5 Geo Distribution",       "Regional Variations",
-            "Any process differences by country?",
-            "AI:regionalVariations"),
-
-        new("s25_delivery_model",    "2.5 Geo Distribution",         "Delivery Model",
-            "Shared / Dedicated / Satellite",
-            "AI:deliveryModel"),
-
-        new("s25_geo_risks",         "2.5 Geo Distribution",         "Geo Dependency Risks",
-            "Single-location risks...",
-            "AI:geoDependencyRisks"),
-
-        new("s25_bcp",               "2.5 Geo Distribution",         "Business Continuity per Geo",
-            "Describe BCP per geo...",
-            "AI:bcpPerGeo"),
-
-        // ── 3.1 Process Narrative ─────────────────────────────────────────────
-        new("flow_summary",          "3.1 Process Narrative",         "Flow Summary",
-            "Describe the end-to-end flow in plain language. Walk through the process as a story: how is it triggered, what happens in sequence, where are the key decision points, and how does it conclude? Note any parallel workstreams or loops.",
-            "AI:flowSummary"),
-
-        // ── 3.2 Inputs ───────────────────────────────────────────────────────
-        new("s32_input_source",      "3.2 Inputs",                   "Input Source",
-            "Customer / Monitoring / Partner / Internal",
-            "AI:inputSource"),
-
-        new("s32_input_format",      "3.2 Inputs",                   "Input Format",
-            "API / Email / Portal / E-bonding / Manual",
-            "AI:inputFormat"),
-
-        new("s32_frequency",         "3.2 Inputs",                   "Frequency",
-            "Real-time / Hourly / Daily / Weekly",
-            "AI:processFrequency"),
-
-        new("input_volume",          "3.2 Inputs",                   "Volume",
-            "Typical volume per day/week...",
+        new("po_peak_volume",     "2. Process Overview",         "Peak Volume",
+            "[Peak volume and period \u2014 e.g. month-end, quarter-end]",
             "AI:peakVolume"),
 
-        new("s32_data_issues",       "3.2 Inputs",                   "Data Completeness Issues",
-            "Known gaps or quality issues...",
-            "AI:dataQualityIssues"),
+        new("po_hours_weekday",   "2. Process Overview",         "Weekday Hours",
+            "[Hours, e.g. 08:00\u201318:00 local time]",
+            "AI:hoursWeekday"),
 
-        // ── 3.4 Outputs ───────────────────────────────────────────────────────
-        new("s34_output",            "3.4 Outputs",                  "Output Generated",
-            "Describe the output...",
-            "AI:processOutput"),
+        new("po_hours_weekend",   "2. Process Overview",         "Weekend Hours",
+            "[Hours \u2014 or \u2014 Not Operational]",
+            "AI:hoursWeekend"),
 
-        new("s34_recipient",         "3.4 Outputs",                  "Recipient",
-            "Who receives it?",
-            "AI:outputRecipient"),
+        new("po_hours_holiday",   "2. Process Overview",         "Public Holiday Cover",
+            "[Cover arrangements]",
+            "AI:hoursHoliday"),
 
-        // ── 3.6 Controls & Governance ─────────────────────────────────────────
-        new("s36_governance_forum",  "3.6 Controls & Governance",    "Governance Forum",
-            "Name, frequency...",
-            "AI:governanceForum"),
+        new("po_systems",         "2. Process Overview",         "Systems Used",
+            "[Primary systems \u2014 ERP, ticketing, reporting tools]",
+            "AI:systemsUsed"),
 
-        new("s36_control_checkpoints", "3.6 Controls & Governance",  "Control Checkpoints",
-            "List checkpoints...",
-            "AI:controlCheckpoints"),
+        // ── 3. RACI ───────────────────────────────────────────────────────────
+        new("raci_task1",         "3. RACI",                     "RACI Task 1",
+            "[Task 1]",
+            "AI:raciTask1"),
 
-        // ── 3.7 Exceptions & Variations ──────────────────────────────────────
-        new("s37_exceptions",        "3.7 Exceptions & Variations",  "Known Exceptions",
-            "Describe common exceptions...",
-            "AI:knownExceptions"),
+        new("raci_task2",         "3. RACI",                     "RACI Task 2",
+            "[Task 2]",
+            "AI:raciTask2"),
 
-        new("s37_exception_volume",  "3.7 Exceptions & Variations",  "Exception Volume (%)",
-            "Approx % of total volume...",
-            "AI:exceptionVolume"),
+        new("raci_task3",         "3. RACI",                     "RACI Task 3",
+            "[Task 3]",
+            "AI:raciTask3"),
 
-        // ── 4.1 Baseline Commentary ───────────────────────────────────────────
-        new("s41_baseline_commentary", "4.1 Baseline Commentary",    "Reviewer Commentary",
-            "Comment on the quality and reliability of the baseline data. Note whether figures are system-generated or estimated, any recent performance trends, and whether there are disputes about SLA measurement methodology.",
-            "AI:baselineCommentary"),
+        new("raci_task4",         "3. RACI",                     "RACI Task 4",
+            "[Task 4]",
+            "AI:raciTask4"),
 
-        // ── 5.1 Tool Landscape ────────────────────────────────────────────────
-        new("s51_tools",             "5.1 Tool Landscape",           "Global vs Regional Tools",
-            "List tools and scope...",
-            "AI:toolLandscape"),
+        new("raci_role1",         "3. RACI",                     "RACI Role 1",
+            "[Role 1]",
+            "AI:raciRole1"),
 
-        new("s51_api_maturity",      "5.1 Tool Landscape",           "API Maturity",
-            "Low / Medium / High — describe...",
-            "AI:apiMaturity"),
+        new("raci_role2",         "3. RACI",                     "RACI Role 2",
+            "[Role 2]",
+            "AI:raciRole2"),
 
-        // ── 5.2 Digital Platform & Automation ────────────────────────────────
-        new("s52_automation_opps",   "5.2 Digital Platform & Automation Requirements", "Automation Opportunities",
-            "Describe feasible automations...",
-            "AI:automationOpps"),
+        new("raci_role3",         "3. RACI",                     "RACI Role 3",
+            "[Role 3]",
+            "AI:raciRole3"),
 
-        new("s52_ai_use_cases",      "5.2 Digital Platform & Automation Requirements", "AI Use Cases Identified",
-            "Describe...",
-            "AI:aiUseCases"),
+        new("raci_role4",         "3. RACI",                     "RACI Role 4",
+            "[Role 4]",
+            "AI:raciRole4"),
 
-        // ── 6.1 Data Sources & Quality ────────────────────────────────────────
-        new("s61_data_platform",     "6.1 Data Sources & Quality",   "Data Platform Usage",
-            "EDH / other — describe...",
-            "AI:dataPlatform"),
+        // ── 4. Standard Operating Procedure ───────────────────────────────────
+        new("sop_action",         "4. SOP",                      "Step Action",
+            "[Describe action]",
+            "AI:sopAction"),
 
-        new("s61_data_quality",      "6.1 Data Sources & Quality",   "Known Data Quality Issues",
-            "High / Medium / Low — gaps...",
-            "AI:dataQualityRating"),
+        new("sop_role",           "4. SOP",                      "Step Role",
+            "[Role]",
+            "AI:sopRole"),
 
-        new("s61_data_ownership",    "6.1 Data Sources & Quality",   "Data Ownership",
-            "Who owns each source?",
-            "AI:dataOwnership"),
+        new("sop_system",         "4. SOP",                      "Step System",
+            "[System / Manual]",
+            "AI:sopSystem"),
 
-        // ── 7. WITO Impact Assessment ─────────────────────────────────────────
-        new("wito_summary",          "7. WITO Impact Assessment",     "WITO Summary",
-            "Summarise the overall impact of the transition on this process. What changes fundamentally, what stays the same, and where are the highest-risk change points? This section is read by transition leadership.",
-            "AI:witoSummary"),
+        new("sop_output",         "4. SOP",                      "Step Output",
+            "[Expected output]",
+            "AI:sopOutput"),
 
-        new("s71_resolver_changes",  "7. WITO Impact Assessment",     "Resolver Group Restructuring",
-            "Changes expected...",
-            "AI:resolverChanges"),
+        new("sop_decision",       "4. SOP",                      "Decision Point",
+            "[Decision point \u2014 describe condition and Yes/No paths]",
+            "AI:sopDecision"),
 
-        new("s71_transition_risk",   "7. WITO Impact Assessment",     "Contractual Performance Risk",
-            "Risks from transition...",
-            "AI:transitionRisk"),
+        new("sop_decision_out",   "4. SOP",                      "Decision Outcome",
+            "[Go / No-Go / Escalate]",
+            "AI:sopDecisionOutput"),
 
-        // ── 9. Reversibility & Exit Assessment ───────────────────────────────
-        new("s91_active_exits",      "9. Reversibility & Exit Assessment", "Ongoing Customer Exit Projects",
-            "Describe active exits...",
-            "AI:activeExits"),
+        new("sop_auto_status",    "4. SOP",                      "Automation Status",
+            "Manual / Partially Automated / Fully Automated",
+            "AI:sopAutoStatus"),
 
-        new("s91_asset_billing",     "9. Reversibility & Exit Assessment", "Asset-based Invoicing Impact",
-            "Describe asset billing risk...",
-            "AI:assetBilling"),
+        new("sop_opp_rating",     "4. SOP",                      "Opportunity Rating",
+            "Low / Medium / High / Prime",
+            "AI:sopOppRating"),
 
-        new("s91_exit_obligations",  "9. Reversibility & Exit Assessment", "Exit Obligations",
-            "Contractual exit clauses...",
-            "AI:exitObligations"),
+        new("sop_auto_type",      "4. SOP",                      "Automation Type",
+            "RPA / AI / Workflow / Integration / N/A",
+            "AI:sopAutoType"),
 
-        new("s91_kt_risk",           "9. Reversibility & Exit Assessment", "Knowledge Transfer Risk",
-            "Key person dependencies...",
-            "AI:ktRisk"),
+        new("sop_extra_step",     "4. SOP",                      "Additional Step",
+            "[Add rows as required]",
+            "AI:sopExtraStep"),
 
-        new("s91_reversibility",     "9. Reversibility & Exit Assessment", "Reversibility Clauses",
-            "Any in-scope? Describe...",
-            "AI:reversibilityClauses"),
+        // ── 5. Work Instructions ──────────────────────────────────────────────
+        new("wi_step_name",       "5. Work Instructions",         "Step Name",
+            "[Step Name]",
+            "AI:wiStepName"),
 
-        // ── 10. Reviewer Confidence Score ─────────────────────────────────────
-        new("confidence_score",      "10. Reviewer Confidence Score", "Completeness Score",
-            "Rate 1 (low confidence) to 5 (complete and verified)...",
-            "AI:confidenceScore"),
+        new("wi_instr1a",         "5. Work Instructions",         "Step 1 — Instruction 1",
+            "[Instruction 1 \u2014 system navigation, field entries, validation checks]",
+            "AI:wiInstruction1a"),
 
-        new("reviewer_name_date",    "10. Reviewer Confidence Score", "Reviewer Name & Date",
-            "Name / Date...",
-            "ProcessOwnerContact"),
+        new("wi_instr1b",         "5. Work Instructions",         "Step 1 — Instruction 2",
+            "[Instruction 2]",
+            "AI:wiInstruction1b"),
 
-        new("pending_documents",     "10. Reviewer Confidence Score", "Documents Pending",
-            "List outstanding documents...",
-            "AI:pendingDocuments"),
+        new("wi_instr1c",         "5. Work Instructions",         "Step 1 — Error Handling",
+            "[Instruction 3 \u2014 what to do if an error occurs]",
+            "AI:wiErrorInstruction"),
 
-        new("open_questions",        "10. Reviewer Confidence Score", "Open Questions",
-            "List unresolved items...",
-            ""),
+        new("wi_instr2a",         "5. Work Instructions",         "Step 2 — Instruction 1",
+            "[Instruction 1]",
+            "AI:wiInstruction2a"),
 
-        new("sign_off_status",       "10. Reviewer Confidence Score", "Sign-off Status",
-            "Draft / Reviewed / Approved",
-            ""),
+        // ── 6.1 Escalation Matrix ─────────────────────────────────────────────
+        new("esc_trigger",        "6.1 Escalation",               "Escalation Trigger",
+            "[Trigger]",
+            "AI:escalationTrigger"),
 
-        new("next_action",           "10. Reviewer Confidence Score", "Next Action",
-            "Enter next step and owner...",
-            ""),
+        new("esc_path",           "6.1 Escalation",               "Escalation Path",
+            "[Who to notify and how]",
+            "AI:escalationPath"),
+
+        new("esc_timeframe",      "6.1 Escalation",               "Escalation Timeframe",
+            "[Within X hours]",
+            "AI:escalationTimeframe"),
+
+        new("esc_target",         "6.1 Escalation",               "Resolution Target",
+            "[Target]",
+            "AI:escalationTarget"),
+
+        // ── 6.2 Exception Handling ────────────────────────────────────────────
+        new("exc_type",           "6.2 Exceptions",               "Exception Type",
+            "[Exception type]",
+            "AI:exceptionType"),
+
+        new("exc_handling",       "6.2 Exceptions",               "Handling Approach",
+            "[How to handle]",
+            "AI:exceptionHandling"),
+
+        new("exc_approval",       "6.2 Exceptions",               "Approval Required",
+            "[Yes/No \u2014 who approves]",
+            "AI:exceptionApproval"),
+
+        // ── 7.1 Service Level Agreements ──────────────────────────────────────
+        new("sla_metric",         "7.1 SLAs",                     "SLA Metric",
+            "[Metric name]",
+            "AI:slaMetric"),
+
+        new("sla_measurement",    "7.1 SLAs",                     "Measurement Method",
+            "[How measured]",
+            "AI:slaMeasurement"),
+
+        new("sla_frequency",      "7.1 SLAs",                     "Reporting Frequency",
+            "[Frequency]",
+            "AI:slaFrequency"),
+
+        new("sla_tool",           "7.1 SLAs",                     "Measurement Tool",
+            "[Tool name]",
+            "AI:slaTool"),
+
+        // ── 7.2 Actual vs Target Performance ──────────────────────────────────
+        new("sla_metric_perf",    "7.2 Performance",              "Performance Metric",
+            "[Metric]",
+            "AI:perfMetric"),
+
+        new("sla_actual_perf",    "7.2 Performance",              "Actual Performance",
+            "[Actual]",
+            "AI:perfActual"),
+
+        // ── 8. Volumetrics ────────────────────────────────────────────────────
+        new("vol_transaction",    "8. Volumetrics",               "Transaction Volumes",
+            "[Transaction type(s) and volume \u2014 add rows if multiple types]",
+            "AI:volumeTransaction"),
+
+        new("vol_note",           "8. Volumetrics",               "Volume Notes",
+            "[Note any peak, anomaly or seasonal factor]",
+            "AI:volumeNote"),
+
+        new("vol_forecast",       "8. Volumetrics",               "Volume Forecast",
+            "[Expected average monthly volume going forward]",
+            "AI:volumeForecast"),
+
+        // ── 9. Regulatory and Compliance ──────────────────────────────────────
+        new("reg_regulation",     "9. Regulatory",                "Regulation / Standard",
+            "[Regulation]",
+            "AI:regulation"),
+
+        new("reg_obligation",     "9. Regulatory",                "Obligation",
+            "[Obligation]",
+            "AI:regObligation"),
+
+        new("reg_control",        "9. Regulatory",                "Control in Process",
+            "[How process meets it]",
+            "AI:regControl"),
+
+        new("reg_evidence",       "9. Regulatory",                "Evidence Artefact",
+            "[Document / log / report]",
+            "AI:regEvidence"),
+
+        new("techm_framework",    "9. Regulatory",                "TechM Framework Reference",
+            "[TechM Control Framework Document Reference]",
+            "AI:techMFramework"),
+
+        // ── 10. Training Materials ────────────────────────────────────────────
+        new("train_module",       "10. Training",                 "Training Module",
+            "[Module name]",
+            "AI:trainingModule"),
+
+        new("train_delivery",     "10. Training",                 "Delivery Method",
+            "[Classroom / e-learning / on-the-job]",
+            "AI:trainingDelivery"),
+
+        new("train_verification", "10. Training",                 "Competency Verification",
+            "[Assessment / sign-off / observation]",
+            "AI:trainingVerification"),
+
+        // ── 11. Orange Customer Contract Obligations ───────────────────────────
+        new("occ_ref",            "11. OCC",                      "OCC Reference",
+            "[OCC Ref \u2014 provided by OBI]",
+            "AI:occRef"),
+
+        new("occ_obligation",     "11. OCC",                      "OCC Obligation",
+            "[Obligation from Orange Customer Contract]",
+            "AI:occObligation"),
+
+        new("occ_control",        "11. OCC",                      "OCC Control",
+            "[How this process addresses the obligation]",
+            "AI:occControl"),
     ];
 
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();
