@@ -16,62 +16,99 @@ public class DocxReportService : IDocxReportService
 
     private static readonly List<FieldDefinition> FieldDefs =
     [
-        // ── Cover ────────────────────────────────────────────────────────────
-        new("cover_process_name",    "Cover",                    "Process Name",
-            "[Process Name]",
+        // ── Cover page header fields ─────────────────────────────────────────
+        // TemplatePlaceholder must exactly match text in BARTOK_DD_Template_v2.docx
+        new("cover_process_name",    "Cover",                         "Process Name",
+            "Enter Process Name",
             "ProcessName"),
 
-        new("cover_lot",             "Cover",                    "Lot Number and Name",
-            "[Lot Number and Name]",
+        new("cover_lot",             "Cover",                         "Service Line / LOT",
+            "Enter Service Line / LOT",
             "SdcLots"),
 
-        new("cover_date",            "Cover",                    "Document Date",
-            "[Add date in dd-mmm-yyyy format e.g. 01-May-2026]",
+        new("cover_reviewer",        "Cover",                         "Reviewed By",
+            "Enter Reviewer Name",
+            "ProcessOwnerName"),
+
+        new("cover_date",            "Cover",                         "Review Date",
+            "DD MMM YYYY",
             "TODAY"),
 
-        new("cover_author",          "Cover",                    "Process Author",
-            "[Process Author Name | Email]",
-            "ProcessOwnerContact"),
-
-        new("cover_approver",        "Cover",                    "Approver",
-            "[Approver Name | Email]",
-            ""),
-
-        // ── 1. Purpose and Scope ─────────────────────────────────────────────
-        new("scope_countries",       "1. Purpose and Scope",     "Countries in Scope",
-            "[List all countries where this process operates]",
+        // Cover page location row ("India / Egypt / Brazil / Slovakia" default text)
+        new("cover_location",        "Cover",                         "Location(s)",
+            "India / Egypt / Brazil / Slovakia",
             "Country"),
 
-        // ── 1.2 Inputs & Artefacts ───────────────────────────────────────────
-        new("artefact_doc1",         "1.2 Inputs & Artefacts",   "Document / Artefact #1",
+        // ── 0. Client Inputs & Artefacts ─────────────────────────────────────
+        new("artefact_doc1",         "0. Client Inputs & Artefacts",  "Document / Artefact #1",
             "Enter document name...",
             "UploadedFileName"),
 
-        // ── 2. Process Overview ───────────────────────────────────────────────
-        new("process_description",   "2. Process Overview",      "Process Description",
-            "Detailed description",
+        // ── 1.1 Process Overview ─────────────────────────────────────────────
+        new("process_summary",       "1.1 Process Overview",          "Process Summary",
+            "Describe the process in your own words. Cover: what it does, who it serves, how it is triggered, and why it matters to the business. Avoid bullet points here — use complete sentences so this section can be read in isolation by a senior stakeholder.",
             "AI:summary"),
 
-        new("process_owner",         "2. Process Overview",      "Process Owner (Name, Role, OB)",
-            "[Name, Role, OB]",
-            "ProcessOwnerName"),
+        // ── 1.2 Basic Process Information ────────────────────────────────────
+        new("s12_process_name",      "1.2 Basic Process Information", "Process Name",
+            "Enter process name...",
+            "ProcessName"),
 
-        new("peak_volume",           "2. Process Overview",      "Peak Volume",
-            "[Peak volume and period — e.g. month-end, quarter-end]",
+        new("s12_service_line",      "1.2 Basic Process Information", "Service Line / LOT",
+            "Enter service line...",
+            "SdcLots"),
+
+        new("s12_process_owner",     "1.2 Basic Process Information", "Process Owner",
+            "Name and role...",
+            "ProcessOwnerContact"),
+
+        new("s12_geo_location",      "1.2 Basic Process Information", "Geo Location(s)",
+            "India / Brazil / Slovakia / Egypt / Multi-Geo",
+            "Country"),
+
+        new("s12_timezone",          "1.2 Basic Process Information", "Time Zone Coverage",
+            "e.g. GMT, IST, BRT...",
+            "TimeZone"),
+
+        // ── 2.1 Operating Model Overview ─────────────────────────────────────
+        new("operating_model",       "2.1 Operating Model Overview",  "Operating Model",
+            "Describe the team structure, reporting lines, and how the operating model functions across geographies. Note any shared service arrangements, dedicated client teams, or satellite structures. Highlight any named individuals critical to continuity.",
+            "AI:operatingModel"),
+
+        // ── 3.1 Process Narrative ─────────────────────────────────────────────
+        new("flow_summary",          "3.1 Process Narrative",         "Flow Summary",
+            "Describe the end-to-end flow in plain language. Walk through the process as a story: how is it triggered, what happens in sequence, where are the key decision points, and how does it conclude? Note any parallel workstreams or loops.",
+            "AI:flowSummary"),
+
+        // ── 3.2 Inputs ───────────────────────────────────────────────────────
+        new("input_volume",          "3.2 Inputs",                    "Volume",
+            "Typical volume per day/week...",
             "AI:peakVolume"),
 
-        new("systems_used",          "2. Process Overview",      "Systems Used",
-            "[Primary systems — ERP, ticketing, reporting tools]",
-            "AI:systemsUsed"),
+        // ── 7. WITO Impact Assessment ─────────────────────────────────────────
+        new("wito_summary",          "7. WITO Impact Assessment",     "WITO Summary",
+            "Summarise the overall impact of the transition on this process. What changes fundamentally, what stays the same, and where are the highest-risk change points? This section is read by transition leadership.",
+            "AI:witoSummary"),
 
-        // ── 5. Work Instructions ─────────────────────────────────────────────
-        new("work_instructions",     "5. Work Instructions",     "Step 1 Instructions",
-            "[Instruction 1 — system navigation, field entries, validation checks]",
-            "AI:workInstructions"),
+        // ── 10. Reviewer Confidence Score ─────────────────────────────────────
+        new("confidence_score",      "10. Reviewer Confidence Score", "Completeness Score",
+            "Rate 1 (low confidence) to 5 (complete and verified)...",
+            "AI:confidenceScore"),
 
-        // ── 9. Regulatory and Compliance ─────────────────────────────────────
-        new("control_framework_ref", "9. Regulatory and Compliance", "Control Framework Reference",
-            "[TechM Control Framework Document Reference]",
+        new("reviewer_name_date",    "10. Reviewer Confidence Score", "Reviewer Name & Date",
+            "Name / Date...",
+            "ProcessOwnerContact"),
+
+        new("open_questions",        "10. Reviewer Confidence Score", "Open Questions",
+            "List unresolved items...",
+            ""),
+
+        new("sign_off_status",       "10. Reviewer Confidence Score", "Sign-off Status",
+            "Draft / Reviewed / Approved",
+            ""),
+
+        new("next_action",           "10. Reviewer Confidence Score", "Next Action",
+            "Enter next step and owner...",
             ""),
     ];
 
@@ -85,13 +122,22 @@ public class DocxReportService : IDocxReportService
         ms.Write(templateBytes, 0, templateBytes.Length);
         ms.Position = 0;
 
+        // Build a lookup of the canonical TemplatePlaceholders from FieldDefs so that
+        // stale DB copies (written when code had different placeholder text) are never used.
+        var fieldDefLookup = FieldDefs.ToDictionary(f => f.Key, f => f.TemplatePlaceholder,
+            StringComparer.Ordinal);
+
         // Build replacement dictionary: placeholder → fill value
         var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var fs in fieldStatuses)
         {
             var value = fs.IsNA ? "N/A" : (fs.FillValue ?? string.Empty);
-            if (!string.IsNullOrEmpty(fs.TemplatePlaceholder))
-                replacements[fs.TemplatePlaceholder] = value;
+            // Prefer the current FieldDefs placeholder; fall back to the DB-stored one for
+            // any field whose key is no longer in FieldDefs (orphaned legacy record).
+            var placeholder = fieldDefLookup.TryGetValue(fs.FieldKey, out var fp)
+                ? fp : fs.TemplatePlaceholder;
+            if (!string.IsNullOrEmpty(placeholder))
+                replacements[placeholder] = value;
         }
 
         using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);

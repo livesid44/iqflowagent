@@ -188,14 +188,23 @@ public class ReportController : Controller
                     };
                     _db.ReportFieldStatuses.Add(newStatus);
                 }
-                else if (existing.Status == "Pending" || existing.Status == "Missing")
+                else
                 {
-                    // Only update if not already user-set (NA / TaskCreated)
-                    existing.Status    = aiResult?.Status ?? existing.Status;
-                    existing.FillValue = aiResult?.FillValue ?? existing.FillValue;
-                    existing.Notes     = aiResult?.Notes ?? existing.Notes;
-                    existing.AnalyzedAt = now;
-                    existing.UpdatedAt  = now;
+                    // Always refresh metadata so stale DB copies (written by an older code version
+                    // with different placeholder text) are updated and generation works correctly.
+                    existing.TemplatePlaceholder = fd.TemplatePlaceholder;
+                    existing.FieldLabel          = fd.Label;
+                    existing.Section             = fd.Section;
+                    existing.UpdatedAt           = now;
+
+                    if (existing.Status == "Pending" || existing.Status == "Missing")
+                    {
+                        // Only overwrite fill data if the field has not already been user-resolved.
+                        existing.Status     = aiResult?.Status ?? existing.Status;
+                        existing.FillValue  = aiResult?.FillValue ?? existing.FillValue;
+                        existing.Notes      = aiResult?.Notes ?? existing.Notes;
+                        existing.AnalyzedAt = now;
+                    }
                 }
             }
 

@@ -647,6 +647,9 @@ public class AzureOpenAiService : IAzureOpenAiService
                     return ("Available",
                         $"Est. {intake.EstimatedVolumePerDay} transactions / day. Confirm peak period with process owner.",
                         "Auto-generated from intake volume data.");
+                if (aiProp == "witoSummary")
+                    return ("Missing", "",
+                        "WITO impact summary requires stakeholder input. Please describe how the transition to TechM will change this process, what stays the same, and where the highest-risk change points are.");
                 if (aiProp == "systemsUsed")
                     return ("Missing", "",
                         "Systems used could not be determined from available data. Please specify the primary systems (ERP, ticketing, reporting tools) used in this process.");
