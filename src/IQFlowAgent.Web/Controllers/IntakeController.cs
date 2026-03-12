@@ -767,6 +767,12 @@ public class IntakeController : Controller
             record.AnalysisResult = result;
             record.Status = "Complete";
             record.AnalyzedAt = DateTime.UtcNow;
+
+            // Persist any PII/SPII values that were masked before the LLM call.
+            var piiFindings = ai.GetLastPiiFindings();
+            if (piiFindings.Count > 0)
+                record.PiiMaskingLog = System.Text.Json.JsonSerializer.Serialize(piiFindings);
+
             await db.SaveChangesAsync();
 
             // Auto-create tasks from action items

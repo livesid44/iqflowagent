@@ -17,6 +17,13 @@ public class AzureOpenAiService : IAzureOpenAiService
     private readonly ITenantContextService _tenantContext;
     private readonly IPiiScanService _piiScanner;
 
+    // Accumulates PII findings detected during the most recent AnalyzeIntakeAsync call.
+    // Reset to empty at the start of each AnalyzeIntakeAsync invocation.
+    // Thread-safety note: AzureOpenAiService is registered as Scoped — every HTTP request
+    // and every background-job scope resolves a separate instance, so _lastAnalysisPiiFindings
+    // is never accessed concurrently from different threads.
+    private readonly List<PiiFinding> _lastAnalysisPiiFindings = new();
+
     public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger,
         IHttpClientFactory httpClientFactory, ITenantContextService tenantContext,
         IPiiScanService piiScanner)
@@ -27,6 +34,9 @@ public class AzureOpenAiService : IAzureOpenAiService
         _tenantContext = tenantContext;
         _piiScanner = piiScanner;
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<PiiFinding> GetLastPiiFindings() => _lastAnalysisPiiFindings.AsReadOnly();
 
     private async Task<(string? endpoint, string? apiKey, string? deployment, string apiVersion, int maxTokens)> GetAiConfigAsync()
     {
@@ -53,6 +63,9 @@ public class AzureOpenAiService : IAzureOpenAiService
 
     public async Task<string> AnalyzeIntakeAsync(IntakeRecord intake, string? documentText)
     {
+        // Reset findings so GetLastPiiFindings() reflects only this invocation.
+        _lastAnalysisPiiFindings.Clear();
+
         var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         // Guard: all three fields must be set to real values
@@ -685,7 +698,8 @@ public class AzureOpenAiService : IAzureOpenAiService
                     $"Detected sensitive data: {types}. " +
                     $"Remove personally identifiable information before submitting.");
 
-            // Redact mode — log that we're continuing with masked content
+            // Redact mode — accumulate findings for the caller, then forward redacted content.
+            _lastAnalysisPiiFindings.AddRange(result.Findings);
             _logger.LogInformation(
                 "PII scan ({CallSite}): redacted {Count} finding(s) before forwarding to LLM",
                 callSite, result.Findings.Count);

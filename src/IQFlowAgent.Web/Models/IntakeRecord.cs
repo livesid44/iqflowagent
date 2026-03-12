@@ -34,6 +34,14 @@ public class IntakeRecord
     // Status & Analysis
     public string Status { get; set; } = "Draft"; // Draft, Submitted, Analyzing, Complete, Error
     public string? AnalysisResult { get; set; }      // JSON from Azure OpenAI
+
+    /// <summary>
+    /// JSON array of PII/SPII findings that were masked before the analysis was sent to the LLM.
+    /// Each element has the shape { "entityType": "…", "matchedText": "…" }.
+    /// Null when no PII was detected (or PII scanning was disabled at the time of analysis).
+    /// </summary>
+    public string? PiiMaskingLog { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SubmittedAt { get; set; }
     public DateTime? AnalyzedAt { get; set; }

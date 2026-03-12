@@ -181,6 +181,11 @@ public class RagProcessorService : BackgroundService
             intake.AnalyzedAt     = DateTime.UtcNow;
             intake.Status         = "Complete";
 
+            // Persist any PII/SPII values that were masked before the LLM call.
+            var piiFindings = aiService.GetLastPiiFindings();
+            if (piiFindings.Count > 0)
+                intake.PiiMaskingLog = System.Text.Json.JsonSerializer.Serialize(piiFindings);
+
             job.Status      = "Complete";
             job.CompletedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);

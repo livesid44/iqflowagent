@@ -7,6 +7,14 @@ public interface IAzureOpenAiService
     Task<string> AnalyzeIntakeAsync(IntakeRecord intake, string? documentText);
 
     /// <summary>
+    /// Returns the PII/SPII findings that were detected (and redacted) during the most
+    /// recent call to <see cref="AnalyzeIntakeAsync"/>.  The list is empty when PII
+    /// scanning is disabled or no PII was found.  A new <see cref="IAzureOpenAiService"/>
+    /// scope resets this list to empty.
+    /// </summary>
+    IReadOnlyList<PiiFinding> GetLastPiiFindings();
+
+    /// <summary>
     /// Verifies whether all tasks for an intake have sufficient closure evidence.
     /// Returns structured JSON with per-task verdicts and an overall canCloseIntake flag.
     /// </summary>
