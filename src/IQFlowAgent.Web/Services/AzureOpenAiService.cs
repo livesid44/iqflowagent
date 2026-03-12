@@ -437,17 +437,24 @@ public class AzureOpenAiService : IAzureOpenAiService
         _logger.LogInformation("Calling Azure OpenAI for report field analysis — url: {RequestUrl}", requestUrl);
 
         var systemPrompt = """
-            You are an expert business process documentation specialist.
-            You will be given:
-            1. Information about a business process intake
-            2. An AI analysis of that process (JSON)
-            3. A list of template fields from the BARTOK Due Diligence document
-            4. Optionally, text excerpts from task artifacts
+            You are an expert BARTOK Due Diligence documentation specialist at TechM.
+            You will be given structured intake data about a business process and a list of template fields
+            that need to be filled in the BARTOK DD document.
 
-            For each template field, determine:
-            - Whether the field can be filled from the available information (status: "Available" or "Missing")
-            - The exact value to use if Available (fillValue)
-            - A brief note explaining your determination (notes)
+            Your goal: fill EVERY field you possibly can from the intake data.
+            Do NOT leave a field as "Missing" if you can reasonably infer or synthesise the value from
+            the process name, description, business unit, location, process type, volume, or analysis JSON.
+
+            Rules:
+            1. For fields explicitly present in the intake (ProcessName, Country, ProcessOwner, etc.) — use them directly.
+            2. For narrative/descriptive fields — write professional, complete sentences appropriate for a Due Diligence report.
+               Use the process description, AI analysis summary, and any artifact text to construct meaningful content.
+            3. For "Yes/No" style fields — make a reasonable inference and provide a brief explanation.
+            4. For fields about transition/WITO impact — base on general outsourcing best practices combined with the specific process.
+            5. For fields about risks, governance, and compliance — provide standard DD language adapted to this process.
+            6. Only mark a field as "Missing" when there is genuinely no data available AND it cannot be reasonably inferred.
+            7. Keep fill values concise: narratives 2-4 sentences, lists use line-separated entries.
+            8. NEVER return the original placeholder text as the fill value.
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -455,14 +462,11 @@ public class AzureOpenAiService : IAzureOpenAiService
                 {
                   "key": "field_key",
                   "status": "Available",
-                  "fillValue": "the value to insert",
-                  "notes": "Source: intake process name"
+                  "fillValue": "the value to insert in the document",
+                  "notes": "brief explanation of source"
                 }
               ]
             }
-
-            Be specific and use actual data from the intake/analysis. For narrative fields, write complete professional sentences.
-            For "Missing" fields, explain concisely what additional information is needed.
             """;
 
         var userMessage = BuildFieldAnalysisMessage(intake, fieldDefinitionsJson, analysisJson, artifactText);
@@ -474,7 +478,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 new { role = "system", content = systemPrompt },
                 new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "AnalyzeReportFields") }
             },
-            max_tokens  = maxTokens,
+            max_tokens  = Math.Max(maxTokens, 6000),  // need space for full-document field coverage
             temperature = 0.3,
             top_p       = 1.0,
             model       = deployment
@@ -620,51 +624,346 @@ public class AzureOpenAiService : IAzureOpenAiService
         }
 
         // Resolve from AI analysis JSON
-        if (source.StartsWith("AI:", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(analysisJson))
+        if (source.StartsWith("AI:", StringComparison.OrdinalIgnoreCase))
         {
             var aiProp = source["AI:".Length..];
-            try
+
+            // Try to pull from the AI analysis JSON first (if present)
+            if (!string.IsNullOrWhiteSpace(analysisJson))
             {
-                using var doc = JsonDocument.Parse(analysisJson);
-                var root = doc.RootElement;
-                if (aiProp == "summary" && root.TryGetProperty("summary", out var sum))
-                    return ("Available", sum.GetString() ?? "", "Sourced from AI process analysis summary.");
-                if (aiProp == "confidenceScore" && root.TryGetProperty("confidenceScore", out var cs))
-                    return ("Available", cs.GetRawText(), "Sourced from AI confidence score.");
-                if (aiProp == "flowSummary" && root.TryGetProperty("summary", out var fs))
-                    return ("Available",
-                        $"{fs.GetString()} Process type: {intake.ProcessType}. " +
-                        $"Volume: {intake.EstimatedVolumePerDay} transactions/day.",
-                        "Sourced from AI analysis summary.");
-                if (aiProp == "operatingModel")
-                    return ("Available",
-                        $"The process '{intake.ProcessName}' is operated by the {intake.BusinessUnit} " +
-                        $"team in {FormatGeoLocation(intake)} under {intake.ProcessOwnerName}. " +
-                        $"The team follows a {intake.ProcessType} model with an estimated volume of " +
-                        $"{intake.EstimatedVolumePerDay} transactions per day.",
-                        "Auto-generated from intake metadata.");
-                if (aiProp == "peakVolume")
-                    return ("Available",
-                        $"Est. {intake.EstimatedVolumePerDay} transactions / day. Confirm peak period with process owner.",
-                        "Auto-generated from intake volume data.");
-                if (aiProp == "witoSummary")
-                    return ("Missing", "",
-                        "WITO impact summary requires stakeholder input. Please describe how the transition to TechM will change this process, what stays the same, and where the highest-risk change points are.");
-                if (aiProp == "systemsUsed")
-                    return ("Missing", "",
-                        "Systems used could not be determined from available data. Please specify the primary systems (ERP, ticketing, reporting tools) used in this process.");
-                if (aiProp == "workInstructions")
-                    return ("Missing", "",
-                        "Work instructions require step-level detail. Please document each step's system navigation, field entries and validation checks.");
+                try
+                {
+                    using var doc = JsonDocument.Parse(analysisJson);
+                    var root = doc.RootElement;
+                    if (aiProp == "summary" && root.TryGetProperty("summary", out var sum))
+                        return ("Available", sum.GetString() ?? "", "Sourced from AI process analysis summary.");
+                    if (aiProp == "confidenceScore" && root.TryGetProperty("confidenceScore", out var cs))
+                        return ("Available", cs.GetRawText(), "Sourced from AI confidence score.");
+                }
+                catch { /* ignore */ }
             }
-            catch { /* ignore */ }
+
+            // Synthesise from intake metadata — covers the mock/fallback path and enriches the LLM call context
+            var location = FormatGeoLocation(intake);
+            var vol      = intake.EstimatedVolumePerDay;
+            var procName = intake.ProcessName;
+            var bu       = intake.BusinessUnit;
+            var owner    = intake.ProcessOwnerName;
+            var ptype    = intake.ProcessType;
+            var tz       = intake.TimeZone;
+            var country  = intake.Country;
+            var desc     = string.IsNullOrWhiteSpace(intake.Description) ? $"the {procName} process" : intake.Description;
+
+            return aiProp switch
+            {
+                "summary" =>
+                    ("Available",
+                     $"{procName} is a {ptype?.ToLower()} business process operated by the {bu} team. " +
+                     $"{desc} The process runs in {location} and handles approximately {vol} transactions per day.",
+                     "Synthesised from intake metadata."),
+
+                "processContext" =>
+                    ("Available",
+                     $"This process is managed by {owner} within the {bu} department. " +
+                     $"It is classified as '{ptype}' and operates out of {location}. " +
+                     $"Review any recent changes or pain points with the process owner before finalising this section.",
+                     "Synthesised from intake metadata."),
+
+                "flowSummary" =>
+                    ("Available",
+                     $"{procName} is triggered by incoming requests handled by the {bu} team in {location}. " +
+                     $"The process follows a {ptype?.ToLower()} model and processes approximately {vol} transactions per day. " +
+                     $"Key decision points and exception paths should be validated with the process owner during the DD walkthrough.",
+                     "Synthesised from intake summary."),
+
+                "operatingModel" =>
+                    ("Available",
+                     $"The {procName} process is operated by the {bu} team under {owner}. " +
+                     $"The team is based in {location} and follows a {ptype?.ToLower()} delivery model. " +
+                     $"Estimated volume is {vol} transactions per day. Specific headcount, reporting lines, and shared-service arrangements to be confirmed with the process owner.",
+                     "Synthesised from intake metadata."),
+
+                "peakVolume" =>
+                    ("Available",
+                     $"Est. {vol} transactions / day. Confirm peak period (e.g. month-end, quarter-end) with process owner.",
+                     "Synthesised from intake volume data."),
+
+                "witoSummary" =>
+                    ("Available",
+                     $"The transition of {procName} to TechM will require knowledge transfer, tooling alignment, and SLA validation. " +
+                     $"The {bu} team currently operates from {location}; continuity planning should address geo-specific dependencies. " +
+                     $"Key risks include knowledge concentration and process standardisation across locations. " +
+                     $"Confirm specific transition milestones and Day 1 readiness criteria with {owner}.",
+                     "Synthesised from intake metadata."),
+
+                "subProcess" =>
+                    string.IsNullOrWhiteSpace(desc)
+                        ? ("Missing", "", "Sub-process name not available — confirm with process owner.")
+                        : ("Available", "N/A", "No distinct sub-process identified from intake data."),
+
+                "processCategory" =>
+                    string.IsNullOrWhiteSpace(ptype)
+                        ? ("Missing", "", "Process category not specified in intake — select from: Service Delivery / Service Assurance / Service Management / Billing & Invoicing.")
+                        : ("Available",
+                           ptype.Contains("Delivery", StringComparison.OrdinalIgnoreCase) ? "Service Delivery" :
+                           ptype.Contains("Assurance", StringComparison.OrdinalIgnoreCase) ? "Service Assurance" :
+                           ptype.Contains("Billing", StringComparison.OrdinalIgnoreCase) ? "Billing & Invoicing" : "Service Management",
+                           "Mapped from intake process type."),
+
+                "shiftModel" =>
+                    ("Available",
+                     tz?.Contains("GMT", StringComparison.OrdinalIgnoreCase) == true ? "Business hours (GMT)" :
+                     tz?.Contains("IST", StringComparison.OrdinalIgnoreCase) == true ? "Business hours (IST)" :
+                     country?.Contains("Multi", StringComparison.OrdinalIgnoreCase) == true ? "Follow-the-sun" : "Business hours",
+                     "Inferred from time zone and location."),
+
+                "teamSize" =>
+                    ("Missing", "",
+                     $"Team size for {procName} not captured in intake. Confirm total FTE count with {owner}."),
+
+                "skillProfile" =>
+                    ("Available",
+                     $"Mixed skill profile typical for a {ptype?.ToLower()} process. Exact L1/L2/L3/SME breakdown to be confirmed with {owner}.",
+                     "Inferred from process type."),
+
+                "servicesScope" =>
+                    string.IsNullOrWhiteSpace(bu)
+                        ? ("Missing", "", "Services scope not specified — confirm with process owner.")
+                        : ("Available",
+                           $"{procName} services provided to {bu} customers. Detailed service catalogue to be confirmed with process owner.",
+                           "Synthesised from intake."),
+
+                "productPortfolio" =>
+                    ("Missing", "",
+                     $"Product portfolio details for {procName} not available from intake. Confirm list of products in scope with {owner}."),
+
+                "slaCommitments" =>
+                    ("Missing", "",
+                     $"SLA commitments for {procName} not specified in intake. Review contract schedule with {owner} to confirm SLA targets, CSI goals, and governance clauses."),
+
+                "customerType" =>
+                    ("Available", "Strategic", "Defaulted to Strategic — confirm with account team."),
+
+                "renewalTimelines" =>
+                    ("Missing", "", $"Contract renewal timeline for {procName} not available. Confirm with commercial/legal team."),
+
+                "exitProjects" =>
+                    ("Available", "None identified at time of DD. Confirm with account and transition leadership.", "Inferred — no exit data in intake."),
+
+                "namedResources" =>
+                    string.IsNullOrWhiteSpace(owner)
+                        ? ("Missing", "", "Named resources not specified — confirm with process owner.")
+                        : ("Available",
+                           $"Process Owner: {owner} ({intake.ProcessOwnerEmail}). Additional named resources to be confirmed during DD walkthrough.",
+                           "Sourced from intake process owner."),
+
+                "keyPersonnel" =>
+                    ("Missing", "",
+                     $"Contractual key personnel for {procName} not specified in intake. Review contract schedule for named individuals."),
+
+                "skillGaps" =>
+                    ("Available",
+                     $"Specific skill gaps for {procName} to be assessed during DD. Focus areas: {ptype?.ToLower()} process expertise, tooling knowledge, and domain-specific competencies.",
+                     "Standard DD assessment prompt."),
+
+                "seedTeam" =>
+                    ("Available",
+                     $"Seed team requirements for {procName} to be defined as part of transition planning. Recommend shadowing period of minimum 4 weeks.",
+                     "Standard transition best practice."),
+
+                "escalationHierarchy" =>
+                    ("Available",
+                     $"Standard escalation: L1 ({bu} team) → L2 ({owner}) → L3 (Management). Exact path to be validated during DD walkthrough.",
+                     "Inferred from intake."),
+
+                "orgHierarchy" =>
+                    ("Available",
+                     $"{procName} sits within {bu} under {owner}. Full org chart mapping (GCC/RCC/LCC) to be confirmed with HR/org design team.",
+                     "Synthesised from intake."),
+
+                "followSunModel" =>
+                    (country?.Contains(",", StringComparison.Ordinal) == true
+                     || country?.Contains("/", StringComparison.Ordinal) == true)
+                        ? ("Available",
+                           $"Yes — process operates across {location}. Handoff points and SLAs between locations to be documented during DD.",
+                           "Inferred from multi-location intake.")
+                        : ("Available",
+                           $"No — process currently operates from a single location ({location}). Review if follow-the-sun is planned post-transition.",
+                           "Inferred from intake location."),
+
+                "regionalVariations" =>
+                    ("Available",
+                     $"Regional process variations (if any) for {procName} across {location} to be confirmed during DD walkthrough. Document any country-specific regulatory or tooling differences.",
+                     "Standard DD prompt."),
+
+                "deliveryModel" =>
+                    ("Available",
+                     string.IsNullOrWhiteSpace(bu) ? "Shared" :
+                     bu.Contains("Shared", StringComparison.OrdinalIgnoreCase) ? "Shared Service" : "Dedicated",
+                     "Inferred from business unit."),
+
+                "geoDependencyRisks" =>
+                    ("Available",
+                     $"Single-location concentration risk if {procName} is currently run from one site in {location}. Confirm BCP and cross-training arrangements with {owner}.",
+                     "Standard geo risk assessment."),
+
+                "bcpPerGeo" =>
+                    ("Available",
+                     $"BCP arrangements for {procName} in {location} to be confirmed. Assess current RTO/RPO targets and identify gaps against TechM standards.",
+                     "Standard BCP assessment prompt."),
+
+                "inputSource" =>
+                    ("Available",
+                     "Customer / Internal — confirm exact trigger mechanism with process owner.",
+                     "Inferred from process type."),
+
+                "inputFormat" =>
+                    ("Available",
+                     ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true
+                         ? "API / E-bonding"
+                         : "Manual / Email / Portal — confirm with process owner.",
+                     "Inferred from process automation level."),
+
+                "processFrequency" =>
+                    ("Available",
+                     vol > 100 ? "Real-time / Continuous" : vol > 10 ? "Daily" : "Weekly",
+                     "Inferred from estimated daily volume."),
+
+                "dataQualityIssues" =>
+                    ("Available",
+                     $"Data quality issues for {procName} to be assessed during DD. Common areas: input completeness, system data accuracy, and reporting consistency.",
+                     "Standard data quality prompt."),
+
+                "processOutput" =>
+                    ("Available",
+                     $"Output of {procName} is a processed transaction / resolved request delivered to the customer or internal stakeholder. Specific format and SLA to be confirmed.",
+                     "Inferred from process name and type."),
+
+                "outputRecipient" =>
+                    string.IsNullOrWhiteSpace(bu)
+                        ? ("Missing", "", "Output recipient not specified.")
+                        : ("Available", $"{bu} customer / internal stakeholder. Confirm exact recipient with process owner.", "Inferred from business unit."),
+
+                "governanceForum" =>
+                    ("Available",
+                     $"{bu} Operations Review — Weekly/Monthly cadence. Confirm forum name, participants, and reporting format with {owner}.",
+                     "Standard governance prompt."),
+
+                "controlCheckpoints" =>
+                    ("Available",
+                     $"Control checkpoints for {procName} to be documented: input validation, SLA breach alerting, exception escalation, and audit log review.",
+                     "Standard control framework."),
+
+                "knownExceptions" =>
+                    ("Available",
+                     $"Common exceptions for {procName} include: incomplete input data, system unavailability, and escalation timeouts. Confirm full exception taxonomy with process owner.",
+                     "Standard exception assessment."),
+
+                "exceptionVolume" =>
+                    ("Available",
+                     vol > 0 ? $"Est. 5–10% of {vol} daily transactions. Confirm with process owner." : "Est. 5–10% — confirm with process owner.",
+                     "Standard exception rate estimate."),
+
+                "baselineCommentary" =>
+                    ("Available",
+                     $"Baseline data for {procName} is {(vol > 0 ? "partially available from intake (volume: " + vol + " transactions/day)" : "not yet captured")}. " +
+                     $"Confirm whether figures are system-generated or manually estimated, and validate SLA measurement methodology with {owner} before finalising.",
+                     "Standard baseline assessment prompt."),
+
+                "toolLandscape" =>
+                    ("Missing", "",
+                     $"Tool landscape for {procName} not specified in intake. Document primary ITSM, CRM, and reporting tools used by the {bu} team."),
+
+                "apiMaturity" =>
+                    ("Available",
+                     ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ? "Medium — automated process suggests API integration exists."
+                     : "Low — confirm API availability with technology team.",
+                     "Inferred from process automation level."),
+
+                "automationOpps" =>
+                    ("Available",
+                     $"{procName} ({ptype}) has potential for further automation. Opportunities include: workflow automation, RPA for repetitive steps, and AI-assisted exception handling. Full assessment requires tooling analysis.",
+                     "Standard automation assessment."),
+
+                "aiUseCases" =>
+                    ("Available",
+                     $"Potential AI use cases for {procName}: intelligent routing, anomaly detection, predictive SLA breach alerting, and automated summarisation of process outcomes.",
+                     "Standard AI opportunity scan."),
+
+                "dataPlatform" =>
+                    ("Missing", "",
+                     $"Data platform details for {procName} not specified. Confirm use of EDH or other data platform with technology team."),
+
+                "dataQualityRating" =>
+                    ("Available",
+                     "Medium — specific data quality gaps to be assessed during DD walkthrough.",
+                     "Standard data readiness assessment."),
+
+                "dataOwnership" =>
+                    string.IsNullOrWhiteSpace(owner)
+                        ? ("Missing", "", "Data ownership not specified — confirm with process owner.")
+                        : ("Available", $"{owner} ({bu}). Full data ownership map to be confirmed during DD.", "Inferred from process owner."),
+
+                "resolverChanges" =>
+                    ("Available",
+                     $"Resolver group for {procName} will transition to TechM {bu} team. Existing client resolvers to be mapped to TechM role equivalents. Confirm exact changes with transition lead.",
+                     "Standard WITO assessment."),
+
+                "transitionRisk" =>
+                    ("Available",
+                     $"Key contractual performance risks during transition of {procName}: SLA breach during knowledge transfer period, key person dependency on {owner}, and tooling access delays. Mitigations to be agreed with client.",
+                     "Standard WITO risk assessment."),
+
+                "activeExits" =>
+                    ("Available",
+                     "No active customer exit projects identified at time of DD. Confirm with account team.",
+                     "Inferred — no exit data in intake."),
+
+                "assetBilling" =>
+                    ("Missing", "",
+                     $"Asset-based invoicing impact for {procName} not captured. Confirm asset billing scope and transition risk with commercial team."),
+
+                "exitObligations" =>
+                    ("Missing", "",
+                     $"Contractual exit obligations for {procName} not specified. Review contract schedule, exit assistance clauses, and minimum notice periods with legal team."),
+
+                "ktRisk" =>
+                    string.IsNullOrWhiteSpace(owner)
+                        ? ("Missing", "", "Knowledge transfer risk cannot be assessed — process owner not specified.")
+                        : ("Available",
+                           $"Key person dependency: {owner}. Critical knowledge concentration risk if this individual is not available during transition. Recommend structured KT plan with documented runbooks.",
+                           "Inferred from intake process owner."),
+
+                "reversibilityClauses" =>
+                    ("Missing", "",
+                     $"Reversibility clauses for {procName} not specified. Review contract for reverse transition obligations and portability requirements."),
+
+                "confidenceScore" =>
+                    ("Available", "3",
+                     "Default score — to be updated by reviewer after completing the DD session."),
+
+                "pendingDocuments" =>
+                    intake.UploadedFileName != null
+                        ? ("Available", "None — uploaded document received.", "Document uploaded with intake.")
+                        : ("Available", $"Process documentation for {procName} — request from {owner}.", "No document attached to intake."),
+
+                "systemsUsed" =>
+                    ("Missing", "",
+                     $"Systems used in {procName} not specified. Document primary ITSM, CRM, billing, and reporting tools during DD walkthrough."),
+
+                "workInstructions" =>
+                    ("Missing", "",
+                     "Work instructions require step-level detail. Document each step's system navigation, field entries and validation checks during the DD walkthrough."),
+
+                _ =>
+                    ("Missing", "",
+                     $"No automatic source available for '{label}' (key: {aiProp}). Please provide this information manually.")
+            };
         }
 
         // Fields with no source — mark as Missing
         return ("Missing", "", $"No automatic source available for '{label}'. Please provide this information manually or create a task to gather it.");
     }
-
-    // ── End of AnalyzeReportFieldsAsync ─────────────────────────────────────
 
     /// <summary>Formats city, country and optional site into a single location string.</summary>
     private static string FormatGeoLocation(IntakeRecord intake) =>
