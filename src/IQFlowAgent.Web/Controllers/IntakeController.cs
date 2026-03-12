@@ -110,11 +110,24 @@ public class IntakeController : Controller
             .Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinRequestBodyDataRateFeature>();
         if (rateFeature != null) rateFeature.MinDataRate = null;
 
-        var isXhr = Request.Headers["X-Requested-With"] == "XMLHttpRequest";
+        var isXhr      = Request.Headers["X-Requested-With"] == "XMLHttpRequest";
+        var fromChat   = Request.Form["source"] == "chat";
 
         // ── Validate mandatory fields per tenant field-config ──────────────────
         var tenantId    = _tenantContext.GetCurrentTenantId();
         var fieldConfig = await LoadFieldConfigDictAsync(tenantId);
+
+        // Clear hardcoded [Required] annotation errors for ProcessName/Description so that
+        // the per-tenant field config is the single authoritative source of required-field rules.
+        // If field config says a field is not mandatory, the [Required] annotation must not block submission.
+        bool IsFieldMandatory(string key) =>
+            fieldConfig.TryGetValue(key, out var fc) && fc.IsVisible && fc.IsMandatory;
+
+        if (!IsFieldMandatory(Models.IntakeFieldConfig.FProcessName))
+            ModelState.Remove(nameof(model.ProcessName));
+        if (!IsFieldMandatory(Models.IntakeFieldConfig.FDescription))
+            ModelState.Remove(nameof(model.Description));
+
         ValidateMandatoryFields(model, fieldConfig);
 
         if (!ModelState.IsValid)
@@ -128,6 +141,22 @@ public class IntakeController : Controller
                         .Select(e => e.ErrorMessage)
                         .ToList()
                 });
+
+            // Submission came from the chat interface — redirect back rather than
+            // showing the traditional Create form which the user did not navigate to.
+            if (fromChat)
+                return RedirectToAction(nameof(Chat));
+
+            // Regular form — repopulate ViewBag so the form renders correctly.
+            ViewBag.Departments  = await _db.MasterDepartments
+                .Where(d => d.IsActive && d.TenantId == tenantId)
+                .OrderBy(d => d.Name).Select(d => d.Name).ToListAsync();
+            ViewBag.LobsByDept   = await _db.MasterLobs
+                .Where(l => l.IsActive && l.TenantId == tenantId)
+                .OrderBy(l => l.DepartmentName).ThenBy(l => l.Name)
+                .Select(l => new { l.DepartmentName, l.Name }).ToListAsync();
+            await PopulateLotCountryViewBagAsync(tenantId);
+            ViewBag.FieldConfigs = fieldConfig;
             return View(model);
         }
 

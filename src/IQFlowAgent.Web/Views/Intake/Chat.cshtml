@@ -337,6 +337,7 @@
 <!-- Hidden form that POSTs to the existing Create endpoint -->
 <form id="hiddenForm" asp-action="Create" asp-controller="Intake" method="post" enctype="multipart/form-data" style="display:none;">
     @Html.AntiForgeryToken()
+    <input type="hidden" name="source"               value="chat" />
     <input type="hidden" name="ProcessName"          id="f_ProcessName" />
     <input type="hidden" name="Description"          id="f_Description" />
     <input type="hidden" name="BusinessUnit"         id="f_BusinessUnit" />
