@@ -115,6 +115,7 @@ public class DocxReportService : IDocxReportService
         DocumentFormat.OpenXml.OpenXmlElement root,
         Dictionary<string, string> replacements)
     {
+        // First pass: replace within individual runs (fast path for unbroken placeholders)
         foreach (var text in root.Descendants<Text>())
         {
             foreach (var kvp in replacements)
@@ -122,6 +123,34 @@ public class DocxReportService : IDocxReportService
                 if (text.Text.Contains(kvp.Key, StringComparison.Ordinal))
                     text.Text = text.Text.Replace(kvp.Key, kvp.Value, StringComparison.Ordinal);
             }
+        }
+
+        // Second pass: handle placeholders that Word has split across multiple runs.
+        // For each paragraph, merge all run texts, apply replacements, then redistribute
+        // the result by writing everything into the first run and clearing the rest.
+        foreach (var para in root.Descendants<Paragraph>())
+        {
+            var allTexts = para.Descendants<Run>()
+                               .SelectMany(r => r.Descendants<Text>())
+                               .ToList();
+            // Skip paragraphs with 0 or 1 text nodes — first pass already handled those
+            if (allTexts.Count <= 1) continue;
+
+            var merged = string.Concat(allTexts.Select(t => t.Text));
+            var replaced = merged;
+            foreach (var kvp in replacements)
+                replaced = replaced.Replace(kvp.Key, kvp.Value, StringComparison.Ordinal);
+
+            if (replaced == merged) continue;
+
+            // Write the replaced value into the first Text element and blank the others.
+            // Preserve xml:space="preserve" when the value has leading/trailing whitespace.
+            allTexts[0].Text = replaced;
+            if (replaced.Length > 0 && (replaced[0] == ' ' || replaced[^1] == ' '))
+                allTexts[0].Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve;
+
+            for (int i = 1; i < allTexts.Count; i++)
+                allTexts[i].Text = string.Empty;
         }
     }
 }
