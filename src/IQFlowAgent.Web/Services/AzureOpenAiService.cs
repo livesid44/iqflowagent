@@ -8,7 +8,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 {
     private const int MaxDocumentChars = 8000;
     private const int DefaultMaxOutputTokens = 2000;
-    private const int MaxAnalysisJsonChars = 3000;  // max chars from AI analysis sent in field-analysis prompt
+    private const int MaxAnalysisJsonChars = 4000;  // max chars from AI analysis sent in field-analysis prompt
     private const int MaxArtifactCharsPerReport = 8000;  // aggregate artifact chars for report field analysis
 
     private readonly IConfiguration _config;
@@ -441,20 +441,23 @@ public class AzureOpenAiService : IAzureOpenAiService
             You will be given structured intake data about a business process and a list of template fields
             that need to be filled in the BARTOK DD document.
 
-            Your goal: fill EVERY field you possibly can from the intake data.
-            Do NOT leave a field as "Missing" if you can reasonably infer or synthesise the value from
-            the process name, description, business unit, location, process type, volume, or analysis JSON.
+            Your goal: fill EVERY SINGLE field in the list with a meaningful, professional value.
+            This is a full document revalidation — every field must contain real content.
 
             Rules:
             1. For fields explicitly present in the intake (ProcessName, Country, ProcessOwner, etc.) — use them directly.
-            2. For narrative/descriptive fields — write professional, complete sentences appropriate for a Due Diligence report.
-               Use the process description, AI analysis summary, and any artifact text to construct meaningful content.
+            2. For narrative/descriptive fields — write professional, complete sentences appropriate for a Due Diligence
+               report. Use the process description, AI analysis summary, and any artifact text to construct meaningful content.
             3. For "Yes/No" style fields — make a reasonable inference and provide a brief explanation.
             4. For fields about transition/WITO impact — base on general outsourcing best practices combined with the specific process.
             5. For fields about risks, governance, and compliance — provide standard DD language adapted to this process.
-            6. Only mark a field as "Missing" when there is genuinely no data available AND it cannot be reasonably inferred.
+            6. NEVER use "Missing" status. For EVERY field, always use "Available" status. If the exact value is
+               not available, write professional DD language such as "To be confirmed with the process owner during
+               the DD walkthrough." or "Exact details to be reviewed with the commercial/legal team." or similar.
+               A due-diligence document must never have blank or empty sections.
             7. Keep fill values concise: narratives 2-4 sentences, lists use line-separated entries.
             8. NEVER return the original placeholder text as the fill value.
+            9. You MUST return a JSON entry for EVERY field key provided — do not omit any field from your response.
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -594,6 +597,18 @@ public class AzureOpenAiService : IAzureOpenAiService
         return JsonSerializer.Serialize(new { fields });
     }
 
+    /// <summary>
+    /// Returns an ("Available", fillValue, notes) tuple with professional DD placeholder text,
+    /// used whenever a concrete value is not available from intake data.
+    /// </summary>
+    private static (string status, string fillValue, string notes) Placeholder(
+        string label, string confirmer = "the process owner", string? extra = null)
+    {
+        var fill = $"{label} to be confirmed with {confirmer} during the DD walkthrough."
+                   + (string.IsNullOrWhiteSpace(extra) ? "" : $" {extra}");
+        return ("Available", fill, $"Synthesised — confirm {label.ToLower()} with {confirmer}.");
+    }
+
     private static (string status, string fillValue, string notes) ResolveMockField(
         string key, string label, string source, IntakeRecord intake, string? analysisJson)
     {
@@ -619,7 +634,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         if (intakeValue != null)
         {
             return string.IsNullOrWhiteSpace(intakeValue)
-                ? ("Missing", "", $"'{label}' could not be resolved from intake — value is empty.")
+                ? Placeholder(label, extra: "Value not supplied in intake — please update.")
                 : ("Available", intakeValue, $"Auto-resolved from intake: {source}");
         }
 
@@ -698,12 +713,12 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "subProcess" =>
                     string.IsNullOrWhiteSpace(desc)
-                        ? ("Missing", "", "Sub-process name not available — confirm with process owner.")
+                        ? Placeholder(label)
                         : ("Available", "N/A", "No distinct sub-process identified from intake data."),
 
                 "processCategory" =>
                     string.IsNullOrWhiteSpace(ptype)
-                        ? ("Missing", "", "Process category not specified in intake — select from: Service Delivery / Service Assurance / Service Management / Billing & Invoicing.")
+                        ? Placeholder(label, extra: "Select from: Service Delivery / Service Assurance / Service Management / Billing & Invoicing.")
                         : ("Available",
                            ptype.Contains("Delivery", StringComparison.OrdinalIgnoreCase) ? "Service Delivery" :
                            ptype.Contains("Assurance", StringComparison.OrdinalIgnoreCase) ? "Service Assurance" :
@@ -718,8 +733,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                      "Inferred from time zone and location."),
 
                 "teamSize" =>
-                    ("Missing", "",
-                     $"Team size for {procName} not captured in intake. Confirm total FTE count with {owner}."),
+                    Placeholder(label, extra: $"Provide total FTE count by role (L1/L2/L3/SME) for the {procName} team."),
 
                 "skillProfile" =>
                     ("Available",
@@ -728,38 +742,35 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "servicesScope" =>
                     string.IsNullOrWhiteSpace(bu)
-                        ? ("Missing", "", "Services scope not specified — confirm with process owner.")
+                        ? Placeholder(label)
                         : ("Available",
                            $"{procName} services provided to {bu} customers. Detailed service catalogue to be confirmed with process owner.",
                            "Synthesised from intake."),
 
                 "productPortfolio" =>
-                    ("Missing", "",
-                     $"Product portfolio details for {procName} not available from intake. Confirm list of products in scope with {owner}."),
+                    Placeholder(label, extra: $"Provide list of products and services covered under the {bu} tower."),
 
                 "slaCommitments" =>
-                    ("Missing", "",
-                     $"SLA commitments for {procName} not specified in intake. Review contract schedule with {owner} to confirm SLA targets, CSI goals, and governance clauses."),
+                    Placeholder(label, "process owner and the commercial team", $"Confirm SLA targets, CSI goals, KPI definitions, and governance clauses for {procName}."),
 
                 "customerType" =>
                     ("Available", "Strategic", "Defaulted to Strategic — confirm with account team."),
 
                 "renewalTimelines" =>
-                    ("Missing", "", $"Contract renewal timeline for {procName} not available. Confirm with commercial/legal team."),
+                    Placeholder(label, "the commercial and legal team", $"Review current term expiry date and auto-renewal provisions for {procName}."),
 
                 "exitProjects" =>
                     ("Available", "None identified at time of DD. Confirm with account and transition leadership.", "Inferred — no exit data in intake."),
 
                 "namedResources" =>
                     string.IsNullOrWhiteSpace(owner)
-                        ? ("Missing", "", "Named resources not specified — confirm with process owner.")
+                        ? Placeholder(label, extra: "Provide names, roles, and tenure for all key contributors.")
                         : ("Available",
                            $"Process Owner: {owner} ({intake.ProcessOwnerEmail}). Additional named resources to be confirmed during DD walkthrough.",
                            "Sourced from intake process owner."),
 
                 "keyPersonnel" =>
-                    ("Missing", "",
-                     $"Contractual key personnel for {procName} not specified in intake. Review contract schedule for named individuals."),
+                    Placeholder(label, "the process owner and legal team", $"Review contractual named individuals, notice period obligations, and substitution procedures for {procName}."),
 
                 "skillGaps" =>
                     ("Available",
@@ -841,7 +852,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "outputRecipient" =>
                     string.IsNullOrWhiteSpace(bu)
-                        ? ("Missing", "", "Output recipient not specified.")
+                        ? Placeholder(label)
                         : ("Available", $"{bu} customer / internal stakeholder. Confirm exact recipient with process owner.", "Inferred from business unit."),
 
                 "governanceForum" =>
@@ -871,8 +882,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                      "Standard baseline assessment prompt."),
 
                 "toolLandscape" =>
-                    ("Missing", "",
-                     $"Tool landscape for {procName} not specified in intake. Document primary ITSM, CRM, and reporting tools used by the {bu} team."),
+                    Placeholder(label, "the process owner and technology team", $"Identify ITSM, CRM, billing, and reporting platforms used by the {bu} team. Confirm tool ownership, licensing, and portability."),
 
                 "apiMaturity" =>
                     ("Available",
@@ -891,8 +901,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                      "Standard AI opportunity scan."),
 
                 "dataPlatform" =>
-                    ("Missing", "",
-                     $"Data platform details for {procName} not specified. Confirm use of EDH or other data platform with technology team."),
+                    Placeholder(label, "the technology team", $"Assess use of EDH, data warehouses, or other analytics platforms for {procName}. Document data flows and integration points."),
 
                 "dataQualityRating" =>
                     ("Available",
@@ -901,7 +910,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "dataOwnership" =>
                     string.IsNullOrWhiteSpace(owner)
-                        ? ("Missing", "", "Data ownership not specified — confirm with process owner.")
+                        ? Placeholder(label, extra: "Map each data source to a named owner and confirm governance responsibilities.")
                         : ("Available", $"{owner} ({bu}). Full data ownership map to be confirmed during DD.", "Inferred from process owner."),
 
                 "resolverChanges" =>
@@ -920,23 +929,20 @@ public class AzureOpenAiService : IAzureOpenAiService
                      "Inferred — no exit data in intake."),
 
                 "assetBilling" =>
-                    ("Missing", "",
-                     $"Asset-based invoicing impact for {procName} not captured. Confirm asset billing scope and transition risk with commercial team."),
+                    Placeholder(label, "the commercial team", $"Confirm asset billing scope, transition-period invoicing arrangements, and at-risk revenue implications for {procName}."),
 
                 "exitObligations" =>
-                    ("Missing", "",
-                     $"Contractual exit obligations for {procName} not specified. Review contract schedule, exit assistance clauses, and minimum notice periods with legal team."),
+                    Placeholder(label, "the legal team", $"Confirm exit assistance duration, minimum notice periods, data portability, and transition support obligations for {procName}."),
 
                 "ktRisk" =>
                     string.IsNullOrWhiteSpace(owner)
-                        ? ("Missing", "", "Knowledge transfer risk cannot be assessed — process owner not specified.")
+                        ? Placeholder(label, extra: "Identify key person dependencies and document KT plan including runbooks and shadowing schedule.")
                         : ("Available",
                            $"Key person dependency: {owner}. Critical knowledge concentration risk if this individual is not available during transition. Recommend structured KT plan with documented runbooks.",
                            "Inferred from intake process owner."),
 
                 "reversibilityClauses" =>
-                    ("Missing", "",
-                     $"Reversibility clauses for {procName} not specified. Review contract for reverse transition obligations and portability requirements."),
+                    Placeholder(label, "the legal and commercial team", $"Confirm reverse transition obligations, portability requirements, and cost implications for {procName}."),
 
                 "confidenceScore" =>
                     ("Available", "3",
@@ -948,21 +954,18 @@ public class AzureOpenAiService : IAzureOpenAiService
                         : ("Available", $"Process documentation for {procName} — request from {owner}.", "No document attached to intake."),
 
                 "systemsUsed" =>
-                    ("Missing", "",
-                     $"Systems used in {procName} not specified. Document primary ITSM, CRM, billing, and reporting tools during DD walkthrough."),
+                    Placeholder(label, "the process owner and technology team", $"Identify ITSM, CRM, billing, and reporting tools for {procName}, including access methods and integration dependencies."),
 
                 "workInstructions" =>
-                    ("Missing", "",
-                     "Work instructions require step-level detail. Document each step's system navigation, field entries and validation checks during the DD walkthrough."),
+                    Placeholder(label, extra: $"Document step-by-step system navigation, field entries, decision rules, and validation checks for each step of {procName}. Request existing SOPs or runbooks from {owner}."),
 
                 _ =>
-                    ("Missing", "",
-                     $"No automatic source available for '{label}' (key: {aiProp}). Please provide this information manually.")
+                    Placeholder(label, extra: $"(Field key: {aiProp})")
             };
         }
 
-        // Fields with no source — mark as Missing
-        return ("Missing", "", $"No automatic source available for '{label}'. Please provide this information manually or create a task to gather it.");
+        // Fields with no AI source — provide a reviewable placeholder
+        return Placeholder(label, extra: "No automatic mapping found — please review and update.");
     }
 
     /// <summary>Formats city, country and optional site into a single location string.</summary>

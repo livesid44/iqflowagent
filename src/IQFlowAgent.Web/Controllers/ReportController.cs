@@ -197,9 +197,10 @@ public class ReportController : Controller
                     existing.Section             = fd.Section;
                     existing.UpdatedAt           = now;
 
-                    if (existing.Status == "Pending" || existing.Status == "Missing")
+                    // Always apply LLM results so every re-analysis refreshes the entire document.
+                    // NA is the only status that represents a deliberate user decision — preserve it.
+                    if (existing.Status != "NA")
                     {
-                        // Only overwrite fill data if the field has not already been user-resolved.
                         existing.Status     = aiResult?.Status ?? existing.Status;
                         existing.FillValue  = aiResult?.FillValue ?? existing.FillValue;
                         existing.Notes      = aiResult?.Notes ?? existing.Notes;
