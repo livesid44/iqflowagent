@@ -16,6 +16,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ITenantContextService _tenantContext;
     private readonly IPiiScanService _piiScanner;
+    private readonly IAuditLogService _auditLog;
 
     // Accumulates PII findings detected during the most recent AnalyzeIntakeAsync call.
     // Reset to empty at the start of each AnalyzeIntakeAsync invocation.
@@ -24,15 +25,21 @@ public class AzureOpenAiService : IAzureOpenAiService
     // is never accessed concurrently from different threads.
     private readonly List<PiiFinding> _lastAnalysisPiiFindings = new();
 
+    // ── Audit-log context ─────────────────────────────────────────────────────
+    // Set at the start of each public method so the PII helper can log correctly.
+    private string _currentCorrelationId = string.Empty;
+    private int?   _currentIntakeId;
+
     public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger,
         IHttpClientFactory httpClientFactory, ITenantContextService tenantContext,
-        IPiiScanService piiScanner)
+        IPiiScanService piiScanner, IAuditLogService auditLog)
     {
         _config = config;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
         _tenantContext = tenantContext;
         _piiScanner = piiScanner;
+        _auditLog = auditLog;
     }
 
     /// <inheritdoc />
@@ -65,6 +72,8 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         // Reset findings so GetLastPiiFindings() reflects only this invocation.
         _lastAnalysisPiiFindings.Clear();
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
 
         var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
@@ -148,7 +157,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             http.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", apiKey);
 
-            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "AnalyzeIntake");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -196,6 +205,8 @@ public class AzureOpenAiService : IAzureOpenAiService
     public async Task<string> VerifyIntakeClosureAsync(
         IntakeRecord intake, IList<IntakeTask> tasks, string? aggregatedArtifactText)
     {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
         var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -266,7 +277,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             http.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", apiKey);
 
-            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "VerifyIntakeClosure");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -414,6 +425,8 @@ public class AzureOpenAiService : IAzureOpenAiService
         string? analysisJson,
         string? artifactText)
     {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
         var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -512,7 +525,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             http.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
-            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "AnalyzeReportFields");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1212,6 +1225,15 @@ public class AzureOpenAiService : IAzureOpenAiService
         try
         {
             var result = await _piiScanner.ScanAsync(userContent);
+            var tenantId = _tenantContext.GetCurrentTenantId();
+
+            // Always log the PII scan result to the audit log.
+            await _auditLog.LogPiiScanAsync(
+                correlationId    : _currentCorrelationId,
+                callSite         : callSite,
+                tenantId         : tenantId,
+                intakeRecordId   : _currentIntakeId,
+                scanResult       : result);
 
             if (!result.HasPii)
                 return userContent;
@@ -1250,6 +1272,76 @@ public class AzureOpenAiService : IAzureOpenAiService
                 callSite);
             return userContent;
         }
+    }
+
+    /// <summary>
+    /// Executes an HTTP POST to the LLM endpoint and writes an audit log entry for the call.
+    /// Returns the raw JSON response body on success, or null on HTTP failure.
+    /// </summary>
+    private async Task<HttpResponseMessage> PostLlmAsync(
+        HttpClient http,
+        string requestUrl,
+        object requestBody,
+        string callSite)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        HttpResponseMessage response;
+        try
+        {
+            response = await http.PostAsJsonAsync(requestUrl, requestBody);
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : _currentCorrelationId,
+                callSite       : callSite,
+                eventType      : "LlmCall",
+                tenantId       : tenantId,
+                intakeRecordId : _currentIntakeId,
+                requestUrl     : requestUrl,
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
+            throw;
+        }
+
+        sw.Stop();
+        await _auditLog.LogExternalCallAsync(
+            correlationId  : _currentCorrelationId,
+            callSite       : callSite,
+            eventType      : "LlmCall",
+            tenantId       : tenantId,
+            intakeRecordId : _currentIntakeId,
+            requestUrl     : requestUrl,
+            httpStatusCode : (int)response.StatusCode,
+            durationMs     : sw.ElapsedMilliseconds,
+            isMocked       : false,
+            outcome        : response.IsSuccessStatusCode ? "Success" : "Error");
+
+        return response;
+    }
+
+    /// <summary>
+    /// Logs a mocked LLM call (no real HTTP request was made).
+    /// </summary>
+    private async Task LogMockedCallAsync(string callSite)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        await _auditLog.LogExternalCallAsync(
+            correlationId  : _currentCorrelationId,
+            callSite       : callSite,
+            eventType      : "LlmCall",
+            tenantId       : tenantId,
+            intakeRecordId : _currentIntakeId,
+            requestUrl     : null,
+            httpStatusCode : null,
+            durationMs     : 0,
+            isMocked       : true,
+            outcome        : "MockResponse");
     }
 
     private static string BuildUserMessage(IntakeRecord intake, string? documentText)
@@ -1338,6 +1430,8 @@ public class AzureOpenAiService : IAzureOpenAiService
     public async Task<string> RunQcCheckAsync(
         IntakeRecord intake, string? analysisJson, string? tasksSummary, string? documentText)
     {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
         var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -1403,10 +1497,25 @@ public class AzureOpenAiService : IAzureOpenAiService
             client.DefaultRequestHeaders.Accept.Add(
                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
+            var tenantId4Qc = _tenantContext.GetCurrentTenantId();
+            var swQc = System.Diagnostics.Stopwatch.StartNew();
             var json     = JsonSerializer.Serialize(requestBody);
             var payload  = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
             var response = await client.PostAsync(requestUrl, payload);
+            swQc.Stop();
             var body     = await response.Content.ReadAsStringAsync();
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : _currentCorrelationId,
+                callSite       : "RunQcCheck",
+                eventType      : "LlmCall",
+                tenantId       : tenantId4Qc,
+                intakeRecordId : _currentIntakeId,
+                requestUrl     : requestUrl,
+                httpStatusCode : (int)response.StatusCode,
+                durationMs     : swQc.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : response.IsSuccessStatusCode ? "Success" : "Error");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1525,6 +1634,8 @@ public class AzureOpenAiService : IAzureOpenAiService
 
     public async Task<string> GenerateSopFromTranscriptAsync(string transcript, IntakeRecord intake)
     {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
         var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -1664,10 +1775,24 @@ public class AzureOpenAiService : IAzureOpenAiService
             client.DefaultRequestHeaders.Accept.Add(
                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
+            var swSop = System.Diagnostics.Stopwatch.StartNew();
             var json     = JsonSerializer.Serialize(requestBody);
             var payload  = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
             var response = await client.PostAsync(requestUrl, payload);
+            swSop.Stop();
             var body     = await response.Content.ReadAsStringAsync();
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : _currentCorrelationId,
+                callSite       : "GenerateSop",
+                eventType      : "LlmCall",
+                tenantId       : _tenantContext.GetCurrentTenantId(),
+                intakeRecordId : _currentIntakeId,
+                requestUrl     : requestUrl,
+                httpStatusCode : (int)response.StatusCode,
+                durationMs     : swSop.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : response.IsSuccessStatusCode ? "Success" : "Error");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -2151,6 +2276,8 @@ public class AzureOpenAiService : IAzureOpenAiService
     /// </summary>
     public async Task<string> GenerateDescriptionAsync(string processName, string pointers)
     {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = null; // not tied to a specific intake
         var (endpoint, apiKey, deployment, apiVersion, _) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -2202,7 +2329,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             http.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", apiKey);
 
-            var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "GenerateDescription");
 
             if (!response.IsSuccessStatusCode)
             {

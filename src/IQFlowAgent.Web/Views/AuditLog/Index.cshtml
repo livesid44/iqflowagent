@@ -1,0 +1,257 @@
+@model IEnumerable<IQFlowAgent.Web.Models.AuditLog>
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Audit Log";
+    ViewData["ActivePage"] = "auditlog";
+
+    int page       = ViewBag.Page;
+    int totalPages = ViewBag.TotalPages;
+    int totalCount = ViewBag.TotalCount;
+    string fType   = ViewBag.FilterEventType ?? "";
+    string fSite   = ViewBag.FilterCallSite  ?? "";
+    string fOut    = ViewBag.FilterOutcome   ?? "";
+    int?   fIntake = ViewBag.FilterIntakeId;
+
+    string OutcomeClass(string outcome) => outcome switch {
+        "Success"      => "badge-success",
+        "MockResponse" => "badge-mock",
+        "Error"        => "badge-error",
+        "Blocked"      => "badge-blocked",
+        "Redacted"     => "badge-redacted",
+        "Clean"        => "badge-clean",
+        _              => "badge-default"
+    };
+    string PiiClass(string status) => status switch {
+        "Pass"    => "pii-pass",
+        "Fail"    => "pii-fail",
+        "Blocked" => "pii-blocked",
+        _         => "pii-skipped"
+    };
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
+
+<main class="app-main">
+<div class="page-title">Audit Log</div>
+<div class="page-sub">All external API calls and PII/SPII scan events recorded by the system</div>
+
+<style>
+    .al-stats          { display:flex; gap:16px; margin:18px 0 20px; flex-wrap:wrap; }
+    .al-stat           { background:#fff; border-radius:10px; padding:14px 20px; min-width:120px; box-shadow:0 2px 8px rgba(0,0,0,.06); flex:1; text-align:center; }
+    .al-stat .num      { font-size:1.7rem; font-weight:700; color:#1a2a5e; }
+    .al-stat .lbl      { font-size:0.75rem; color:#888; margin-top:2px; }
+    .al-stat.warn .num { color:#d97706; }
+    .al-stat.danger .num{ color:#dc2626; }
+    .al-stat.ok .num   { color:#059669; }
+
+    .al-filter         { background:#fff; border-radius:10px; padding:14px 18px; margin-bottom:18px; box-shadow:0 1px 6px rgba(0,0,0,.05); display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .al-filter select,
+    .al-filter input   { border:1px solid #dde2ef; border-radius:6px; padding:5px 10px; font-size:0.83rem; background:#fafbff; }
+    .al-filter button  { background:#1a2a5e; color:#fff; border:none; border-radius:6px; padding:6px 18px; font-size:0.83rem; cursor:pointer; }
+    .al-filter a       { font-size:0.82rem; color:#888; text-decoration:none; }
+
+    .al-card           { background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.07); overflow:hidden; }
+    .al-table          { width:100%; border-collapse:collapse; }
+    .al-table th       { background:#f8faff; font-size:0.76rem; color:#666; text-transform:uppercase; letter-spacing:.04em; padding:11px 14px; text-align:left; border-bottom:1px solid #e9ecf5; white-space:nowrap; }
+    .al-table td       { padding:11px 14px; font-size:0.83rem; color:#333; border-bottom:1px solid #f0f3f9; vertical-align:middle; }
+    .al-table tr:last-child td { border-bottom:none; }
+    .al-table tr:hover td { background:#fafbff; }
+
+    .badge             { display:inline-block; padding:3px 10px; border-radius:20px; font-size:0.76rem; font-weight:600; white-space:nowrap; }
+    .badge-success     { background:#d1fae5; color:#065f46; }
+    .badge-mock        { background:#e0e7ff; color:#3730a3; }
+    .badge-error       { background:#fee2e2; color:#991b1b; }
+    .badge-blocked     { background:#fef3c7; color:#92400e; }
+    .badge-redacted    { background:#fce7f3; color:#9d174d; }
+    .badge-clean       { background:#d1fae5; color:#065f46; }
+    .badge-default     { background:#f1f5f9; color:#64748b; }
+
+    .pii-pass          { color:#059669; font-weight:600; font-size:0.78rem; }
+    .pii-fail          { color:#dc2626; font-weight:600; font-size:0.78rem; }
+    .pii-blocked       { color:#d97706; font-weight:600; font-size:0.78rem; }
+    .pii-skipped       { color:#94a3b8; font-size:0.78rem; }
+
+    .ev-llm            { color:#1a2a5e; font-weight:600; }
+    .ev-pii            { color:#7c3aed; font-weight:600; }
+    .ev-other          { color:#64748b; }
+
+    .corr-link         { font-family:monospace; font-size:0.76rem; color:#6366f1; background:#eef2ff; padding:2px 7px; border-radius:4px; text-decoration:none; }
+    .corr-link:hover   { background:#c7d2fe; }
+    .dur-chip          { font-size:0.76rem; color:#888; }
+    .mock-chip         { font-size:0.75rem; color:#6366f1; background:#e0e7ff; padding:2px 7px; border-radius:4px; }
+
+    .pager             { display:flex; gap:6px; justify-content:center; margin:18px 0 4px; }
+    .pager a, .pager span { padding:6px 14px; border-radius:7px; font-size:0.82rem; border:1px solid #e2e8f0; text-decoration:none; color:#333; }
+    .pager .cur        { background:#1a2a5e; color:#fff; border-color:#1a2a5e; }
+    .pager a:hover     { background:#f0f4ff; }
+
+    .empty-state       { text-align:center; padding:48px 24px; color:#aaa; }
+    .intake-badge      { font-family:monospace; font-size:0.76rem; background:#f0f4ff; color:#1a2a5e; padding:2px 8px; border-radius:4px; }
+    .detail-btn        { background:#f0f4ff; color:#1a2a5e; border:1px solid #c7d2fe; border-radius:6px; padding:4px 12px; font-size:0.78rem; text-decoration:none; white-space:nowrap; }
+    .detail-btn:hover  { background:#e0e7ff; }
+</style>
+
+<!-- ── Stats ── -->
+<div class="al-stats">
+    <div class="al-stat">
+        <div class="num">@ViewBag.TotalCalls</div>
+        <div class="lbl">LLM Calls</div>
+    </div>
+    <div class="al-stat">
+        <div class="num">@ViewBag.TotalPiiScans</div>
+        <div class="lbl">PII Scans</div>
+    </div>
+    <div class="al-stat @(ViewBag.PiiFailCount > 0 ? "warn" : "ok")">
+        <div class="num">@ViewBag.PiiFailCount</div>
+        <div class="lbl">PII Detections</div>
+    </div>
+    <div class="al-stat @(ViewBag.BlockedCount > 0 ? "danger" : "ok")">
+        <div class="num">@ViewBag.BlockedCount</div>
+        <div class="lbl">Blocked Calls</div>
+    </div>
+    <div class="al-stat">
+        <div class="num">@ViewBag.MockedCount</div>
+        <div class="lbl">Mocked Calls</div>
+    </div>
+</div>
+
+<!-- ── Filters ── -->
+<form method="get" class="al-filter">
+    <select name="eventType">
+        <option value="">All Event Types</option>
+        @foreach (var et in (ViewBag.EventTypes as List<string> ?? []))
+        {
+            if (fType == et) { <option value="@et" selected="selected">@et</option> }
+            else             { <option value="@et">@et</option> }
+        }
+    </select>
+    <select name="callSite">
+        <option value="">All Call Sites</option>
+        @foreach (var cs in (ViewBag.CallSites as List<string> ?? []))
+        {
+            if (fSite == cs) { <option value="@cs" selected="selected">@cs</option> }
+            else             { <option value="@cs">@cs</option> }
+        }
+    </select>
+    <select name="outcome">
+        @{ string[] outcomes = ["", "Success", "MockResponse", "Error", "Blocked", "Redacted", "Clean"];
+           string[] labels   = ["All Outcomes", "Success", "Mock Response", "Error", "Blocked", "Redacted", "Clean"]; }
+        @for (int oi = 0; oi < outcomes.Length; oi++)
+        {
+            if (fOut == outcomes[oi]) { <option value="@outcomes[oi]" selected="selected">@labels[oi]</option> }
+            else                     { <option value="@outcomes[oi]">@labels[oi]</option> }
+        }
+    </select>
+    <input type="number" name="intakeId" placeholder="Intake ID…" value="@(fIntake.HasValue ? fIntake.Value.ToString() : "")" style="width:120px;" />
+    <button type="submit">🔍 Filter</button>
+    <a href="/AuditLog">Clear</a>
+    <span style="margin-left:auto; color:#888; font-size:0.8rem;">@totalCount result(s)</span>
+</form>
+
+<div class="al-card">
+    @if (!Model.Any())
+    {
+        <div class="empty-state">
+            <div style="font-size:2.5rem; margin-bottom:12px;">📋</div>
+            <div style="font-weight:600; margin-bottom:6px;">No audit log entries yet</div>
+            <div style="font-size:0.85rem;">Logs appear here after the first AI analysis or PII scan is triggered.</div>
+        </div>
+    }
+    else
+    {
+        <table class="al-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Time</th>
+                    <th>Event</th>
+                    <th>Call Site</th>
+                    <th>PII Scan</th>
+                    <th>Outcome</th>
+                    <th>Duration</th>
+                    <th>Intake</th>
+                    <th>Correlation</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var log in Model)
+                {
+                    <tr>
+                        <td style="color:#94a3b8;font-size:0.75rem;">@log.Id</td>
+                        <td style="white-space:nowrap; font-size:0.8rem;">@log.CreatedAt.ToString("dd MMM HH:mm:ss")</td>
+                        <td>
+                            <span class="@(log.EventType == "LlmCall" ? "ev-llm" : log.EventType == "PiiScan" ? "ev-pii" : "ev-other")">
+                                @log.EventType
+                            </span>
+                        </td>
+                        <td style="font-size:0.8rem;">@log.CallSite</td>
+                        <td>
+                            @if (log.EventType == "PiiScan")
+                            {
+                                <span class="@PiiClass(log.PiiScanStatus)">
+                                    @log.PiiScanStatus
+                                    @if (log.PiiFindingCount > 0)
+                                    {
+                                        <span style="font-weight:400">&nbsp;(@log.PiiFindingCount found)</span>
+                                    }
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="pii-skipped">—</span>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge @OutcomeClass(log.Outcome)">@log.Outcome</span>
+                            @if (log.IsMocked) { <span class="mock-chip" style="margin-left:4px;">mock</span> }
+                        </td>
+                        <td>
+                            @if (log.DurationMs.HasValue && log.DurationMs > 0)
+                            {
+                                <span class="dur-chip">@log.DurationMs ms</span>
+                            }
+                            else { <span class="pii-skipped">—</span> }
+                        </td>
+                        <td>
+                            @if (log.IntakeRecordId.HasValue)
+                            {
+                                <span class="intake-badge">@log.IntakeRecordId</span>
+                            }
+                            else { <span class="pii-skipped">—</span> }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(log.CorrelationId))
+                            {
+                                <a href="/AuditLog/Sequence/@log.CorrelationId" class="corr-link" title="View full sequence">@log.CorrelationId</a>
+                            }
+                        </td>
+                        <td>
+                            <a href="/AuditLog/Details/@log.Id" class="detail-btn">Details</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (totalPages > 1)
+        {
+            <div class="pager">
+                @if (page > 1)
+                {
+                    <a href="?page=@(page-1)&eventType=@fType&callSite=@fSite&outcome=@fOut@(fIntake.HasValue ? "&intakeId="+fIntake : "")">‹ Prev</a>
+                }
+                @for (int p = Math.Max(1, page-2); p <= Math.Min(totalPages, page+2); p++)
+                {
+                    if (p == page) { <span class="cur">@p</span> }
+                    else { <a href="?page=@p&eventType=@fType&callSite=@fSite&outcome=@fOut@(fIntake.HasValue ? "&intakeId="+fIntake : "")">@p</a> }
+                }
+                @if (page < totalPages)
+                {
+                    <a href="?page=@(page+1)&eventType=@fType&callSite=@fSite&outcome=@fOut@(fIntake.HasValue ? "&intakeId="+fIntake : "")">Next ›</a>
+                }
+            </div>
+        }
+    }
+</div>
+
+</main>

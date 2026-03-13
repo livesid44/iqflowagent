@@ -25,6 +25,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
     public DbSet<RagJob> RagJobs => Set<RagJob>();
     public DbSet<TenantPiiSettings> TenantPiiSettings => Set<TenantPiiSettings>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
