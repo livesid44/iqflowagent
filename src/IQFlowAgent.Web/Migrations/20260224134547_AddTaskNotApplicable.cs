@@ -13,14 +13,12 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<bool>(
                 name: "IsNotApplicable",
                 table: "IntakeTasks",
-                type: "INTEGER",
                 nullable: false,
                 defaultValue: false);
 
             migrationBuilder.AddColumn<string>(
                 name: "NaReason",
                 table: "IntakeTasks",
-                type: "TEXT",
                 nullable: true);
         }
 

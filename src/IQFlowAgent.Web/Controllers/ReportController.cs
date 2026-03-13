@@ -19,7 +19,7 @@ public class ReportController : Controller
     private readonly IWebHostEnvironment _env;
     private readonly ITenantContextService _tenantContext;
 
-    private const string TemplateName = "BARTOK_DD_Template_v2.docx";
+    private const string TemplateName = "BARTOK_S8_SOP_Template_v2.docx";
     private const int MaxArtifactCharsPerFile = 1500;
 
     private static string GenerateTaskId() =>
@@ -188,14 +188,24 @@ public class ReportController : Controller
                     };
                     _db.ReportFieldStatuses.Add(newStatus);
                 }
-                else if (existing.Status == "Pending" || existing.Status == "Missing")
+                else
                 {
-                    // Only update if not already user-set (NA / TaskCreated)
-                    existing.Status    = aiResult?.Status ?? existing.Status;
-                    existing.FillValue = aiResult?.FillValue ?? existing.FillValue;
-                    existing.Notes     = aiResult?.Notes ?? existing.Notes;
-                    existing.AnalyzedAt = now;
-                    existing.UpdatedAt  = now;
+                    // Always refresh metadata so stale DB copies (written by an older code version
+                    // with different placeholder text) are updated and generation works correctly.
+                    existing.TemplatePlaceholder = fd.TemplatePlaceholder;
+                    existing.FieldLabel          = fd.Label;
+                    existing.Section             = fd.Section;
+                    existing.UpdatedAt           = now;
+
+                    // Always apply LLM results so every re-analysis refreshes the entire document.
+                    // NA is the only status that represents a deliberate user decision — preserve it.
+                    if (existing.Status != "NA")
+                    {
+                        existing.Status     = aiResult?.Status ?? existing.Status;
+                        existing.FillValue  = aiResult?.FillValue ?? existing.FillValue;
+                        existing.Notes      = aiResult?.Notes ?? existing.Notes;
+                        existing.AnalyzedAt = now;
+                    }
                 }
             }
 
@@ -422,7 +432,10 @@ public class ReportController : Controller
 
         if (report.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         {
-            return Redirect(report.FilePath);
+            var sasUrl = await _blobService.GenerateSasDownloadUrlAsync(report.FilePath);
+            if (string.IsNullOrWhiteSpace(sasUrl))
+                return NotFound();
+            return Redirect(sasUrl);
         }
 
         var fullPath = Path.Combine(_env.WebRootPath, report.FilePath.TrimStart('/'));

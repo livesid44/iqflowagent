@@ -20,8 +20,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<FinalReport> FinalReports => Set<FinalReport>();
     public DbSet<MasterDepartment> MasterDepartments => Set<MasterDepartment>();
     public DbSet<MasterLob> MasterLobs => Set<MasterLob>();
+    public DbSet<LotCountryMapping> LotCountryMappings => Set<LotCountryMapping>();
+    public DbSet<IntakeFieldConfig> IntakeFieldConfigs => Set<IntakeFieldConfig>();
     public DbSet<QcCheck> QcChecks => Set<QcCheck>();
     public DbSet<RagJob> RagJobs => Set<RagJob>();
+    public DbSet<TenantPiiSettings> TenantPiiSettings => Set<TenantPiiSettings>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -32,6 +36,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .WithMany()
             .HasForeignKey(s => s.TenantId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<TenantAiSettings>()
+            .HasIndex(s => s.TenantId)
+            .IsUnique();
 
         builder.Entity<UserTenant>()
             .HasOne(ut => ut.User)
@@ -93,5 +101,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             .WithMany()
             .HasForeignKey(r => r.IntakeRecordId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<TenantPiiSettings>()
+            .HasIndex(p => p.TenantId)
+            .IsUnique();
     }
 }

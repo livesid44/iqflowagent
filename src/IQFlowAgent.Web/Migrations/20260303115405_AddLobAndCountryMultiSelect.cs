@@ -14,7 +14,6 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<string>(
                 name: "Lob",
                 table: "IntakeRecords",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
@@ -22,14 +21,15 @@ namespace IQFlowAgent.Web.Migrations
                 name: "MasterLobs",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
-                    TenantId = table.Column<int>(type: "INTEGER", nullable: false),
-                    DepartmentName = table.Column<string>(type: "TEXT", nullable: false),
-                    Name = table.Column<string>(type: "TEXT", nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: true),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    TenantId = table.Column<int>(nullable: false),
+                    DepartmentName = table.Column<string>(nullable: false),
+                    Name = table.Column<string>(nullable: false),
+                    Description = table.Column<string>(nullable: true),
+                    IsActive = table.Column<bool>(nullable: false),
+                    CreatedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {

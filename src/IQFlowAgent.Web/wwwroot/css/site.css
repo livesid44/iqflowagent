@@ -41,22 +41,24 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
 /* ── Sidebar ─────────────────────────────────────────
    Default: collapsed (50px, icons only). Toggle adds .open → 265px.
 ────────────────────────────────────────────────────── */
+/* ── Sidebar shell: split into sticky toggle + scrollable nav body ─────── */
 .app-sidebar {
     width: 50px;
     background: #e31837;
-    padding: 8px 0 25px;
     position: fixed;
     top: 60px; left: 0; bottom: 0;
     z-index: 99;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;               /* hide scroll on the outer shell */
     transition: width 0.35s ease;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
 }
 .app-sidebar.open { width: 265px; }
 
-/* Toggle arrow button */
+/* Toggle arrow button – always pinned at the top, never scrolls away */
 .sidebar-toggle {
+    flex-shrink: 0;
     cursor: pointer;
     padding: 10px 15px;
     color: #fff;
@@ -67,9 +69,28 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
 .sidebar-toggle .toggle-arrow { transition: transform 0.35s ease; }
 .app-sidebar.open .sidebar-toggle .toggle-arrow { transform: rotate(180deg); }
 
+/* Scrollable nav body */
+.sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 20px;
+}
+
+/* Themed scrollbar – thin, matching the red sidebar */
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-track { background: rgba(255,255,255,0.08); }
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.35);
+    border-radius: 4px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.6); }
+/* Firefox */
+.sidebar-nav { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.35) rgba(255,255,255,0.08); }
+
 /* Section headings */
 .sidebar-section-title {
-    padding: 8px 18px 4px;
+    padding: 10px 18px 3px;
     color: rgba(255,255,255,0.65);
     font-size: 0.68rem;
     text-transform: uppercase;
@@ -88,7 +109,7 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
     color: rgba(255,255,255,0.9);
     text-decoration: none;
     font-size: 0.88rem;
-    padding: 11px 0 11px 15px;
+    padding: 8px 0 8px 15px;        /* reduced from 11px for tighter packing */
     transition: background 0.2s, border-left 0.2s;
     border-left: 3px solid transparent;
     overflow: hidden;
@@ -124,6 +145,72 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
     display: block !important;
 }
 .app-sidebar.open .sidebar-label { max-width: 200px; opacity: 1; }
+
+/* ── Collapsible sub-group (Master Data) ────────────── */
+.sidebar-group-toggle {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px;
+    color: rgba(255,255,255,0.9);
+    text-decoration: none;
+    font-size: 0.88rem;
+    padding: 8px 0 8px 15px;
+    border-left: 3px solid transparent;
+    overflow: hidden;
+    cursor: pointer;
+    background: none;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    width: 100%;
+    text-align: left;
+    transition: background 0.2s, border-left 0.2s;
+}
+.sidebar-group-toggle:hover,
+.sidebar-group-toggle.active {
+    background: rgba(255,255,255,0.18);
+    border-left-color: #fff;
+    color: #fff;
+}
+.sidebar-group-toggle:hover .sidebar-icon svg,
+.sidebar-group-toggle.active .sidebar-icon svg { opacity: 1; }
+.sidebar-group-chevron {
+    margin-left: auto;
+    margin-right: 12px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: transform 0.3s ease, opacity 0.25s ease;
+}
+.app-sidebar.open .sidebar-group-chevron { opacity: 1; }
+.sidebar-group-toggle[aria-expanded="true"] .sidebar-group-chevron { transform: rotate(90deg); }
+.sidebar-sub-nav {
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.3s ease;
+}
+.sidebar-sub-nav.open { max-height: 400px; }
+.sidebar-sub-link {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px;
+    color: rgba(255,255,255,0.8);
+    text-decoration: none;
+    font-size: 0.83rem;
+    padding: 7px 0 7px 15px;
+    border-left: 3px solid transparent;
+    overflow: hidden;
+    transition: background 0.2s, border-left 0.2s;
+    background: rgba(0,0,0,0.12);
+}
+.sidebar-sub-link:hover,
+.sidebar-sub-link.active {
+    background: rgba(255,255,255,0.14);
+    border-left-color: rgba(255,255,255,0.7);
+    color: #fff;
+}
+.sidebar-sub-link .sidebar-icon svg { opacity: 0.75; }
+.sidebar-sub-link:hover .sidebar-icon svg,
+.sidebar-sub-link.active .sidebar-icon svg { opacity: 1; }
 
 /* ── Main content ────────────────────────────────────── */
 .app-main {
@@ -386,11 +473,11 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
     text-align: center;
     padding: 12px 24px;
     font-size: 0.78rem;
-    margin-left: 50px;
+    /* margin-left is set by JS in _AppShell.cshtml when the sidebar is present.
+       Pages without a sidebar (error page, login) get no left offset. */
     transition: margin-left 0.35s ease;
 }
-.app-layout.sidebar-open ~ .app-footer,
-.app-footer.sidebar-open { margin-left: 265px; }
+.app-layout.sidebar-open ~ .app-footer { margin-left: 265px; }
 .app-footer a { color: #fff; text-decoration: none; }
 .app-footer a:hover { text-decoration: underline; }
 .footer-tm-logo { height: 16px; width: auto; vertical-align: middle; margin-right: 6px; }

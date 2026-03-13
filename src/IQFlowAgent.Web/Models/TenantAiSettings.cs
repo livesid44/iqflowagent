@@ -20,6 +20,12 @@ public class TenantAiSettings
     public string AzureSpeechRegion { get; set; } = string.Empty;
     public string AzureSpeechApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// When true the intake form's Country/City dropdowns are filtered by the selected LOT(s)
+    /// using the LotCountryMapping table.  When false, the full global list is shown.
+    /// </summary>
+    public bool UseCountryFilterByLot { get; set; } = false;
+
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public string? UpdatedByUserId { get; set; }
 }

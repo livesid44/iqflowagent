@@ -310,8 +310,16 @@
 
     <!-- Top bar -->
     <div class="chat-topbar">
-        <a href="/Intake" class="chat-topbar-back"><i class="bi bi-arrow-left"></i> Intakes</a>
+        <a href="/Intake/Index" class="chat-topbar-back"><i class="bi bi-arrow-left"></i> Intakes</a>
         <div class="chat-topbar-title"><i class="bi bi-robot me-2"></i>Process Intake Assistant</div>
+        <div style="display:flex;gap:4px;align-items:center;background:rgba(255,255,255,0.12);border-radius:6px;padding:3px;">
+            <a href="/Intake/Create" style="color:rgba(255,255,255,0.7);text-decoration:none;padding:4px 10px;font-size:0.78rem;display:flex;align-items:center;gap:4px;border-radius:4px;">
+                <i class="bi bi-ui-checks-grid"></i> Form
+            </a>
+            <span style="background:rgba(255,255,255,0.2);color:#fff;padding:4px 10px;font-size:0.78rem;border-radius:4px;display:flex;align-items:center;gap:4px;">
+                <i class="bi bi-robot"></i> Chat
+            </span>
+        </div>
         <div class="chat-topbar-id" id="topbarIntakeId"></div>
     </div>
     <div class="chat-progress-wrap" style="background:#1a2a5e;">
@@ -329,11 +337,13 @@
 <!-- Hidden form that POSTs to the existing Create endpoint -->
 <form id="hiddenForm" asp-action="Create" asp-controller="Intake" method="post" enctype="multipart/form-data" style="display:none;">
     @Html.AntiForgeryToken()
+    <input type="hidden" name="source"               value="chat" />
     <input type="hidden" name="ProcessName"          id="f_ProcessName" />
     <input type="hidden" name="Description"          id="f_Description" />
     <input type="hidden" name="BusinessUnit"         id="f_BusinessUnit" />
     <input type="hidden" name="Department"           id="f_Department" />
     <input type="hidden" name="Lob"                  id="f_Lob" />
+    <input type="hidden" name="SdcLots"              id="f_SdcLots" />
     <input type="hidden" name="ProcessOwnerName"     id="f_ProcessOwnerName" />
     <input type="hidden" name="ProcessOwnerEmail"    id="f_ProcessOwnerEmail" />
     <input type="hidden" name="ProcessType"          id="f_ProcessType" />
@@ -366,17 +376,64 @@ const LOB_BY_DEPT = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
 ));
 
 // ─────────────────────────────────────────────────────────────
+//  Intake field configuration (visibility + mandatory flags)
+// ─────────────────────────────────────────────────────────────
+const FIELD_CONFIG = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+    (ViewBag.FieldConfigs as Dictionary<string, IQFlowAgent.Web.Models.IntakeFieldConfig>
+        ?? new Dictionary<string, IQFlowAgent.Web.Models.IntakeFieldConfig>())
+        .ToDictionary(
+            kv => kv.Key,
+            kv => new { isVisible = kv.Value.IsVisible, isMandatory = kv.Value.IsMandatory }
+        )
+));
+// fieldVisible: defaults to true when a key has no entry — consistent with the server-side default
+// (LoadFieldConfigDictAsync seeds missing fields as IsVisible=true, IsMandatory=false).
+function fieldVisible(key)   { return !FIELD_CONFIG[key] || FIELD_CONFIG[key].isVisible; }
+// fieldMandatory: defaults to false when a key has no entry or is not visible — also consistent with server defaults.
+function fieldMandatory(key) { return FIELD_CONFIG[key]  && FIELD_CONFIG[key].isVisible && FIELD_CONFIG[key].isMandatory; }
+
+// ─────────────────────────────────────────────────────────────
+//  LOT-aware country/city filtering
+// ─────────────────────────────────────────────────────────────
+const USE_LOT_FILTER  = @Html.Raw((ViewBag.UseCountryFilterByLot ?? false) ? "true" : "false");
+const LOT_COUNTRY_MAP = @Html.Raw(ViewBag.LotCountryMapJson ?? "{}");
+
+function getCountriesForSelectedLots() {
+    if (!USE_LOT_FILTER || !data.SdcLots) return COUNTRY_LIST;
+    const selectedLots = data.SdcLots.split(',').map(s => s.trim()).filter(Boolean);
+    if (selectedLots.length === 0) return COUNTRY_LIST;
+    const countries = new Set();
+    selectedLots.forEach(lot => { (LOT_COUNTRY_MAP[lot] || []).forEach(e => countries.add(e.country)); });
+    return countries.size > 0 ? [...countries].sort() : COUNTRY_LIST;
+}
+
+function getCitiesForSelectedLots(selectedCountries) {
+    if (!USE_LOT_FILTER || !data.SdcLots) return getCitiesForCountries(selectedCountries);
+    const selectedLots = data.SdcLots.split(',').map(s => s.trim()).filter(Boolean);
+    if (selectedLots.length === 0) return getCitiesForCountries(selectedCountries);
+    const result = new Set();
+    selectedLots.forEach(lot => {
+        (LOT_COUNTRY_MAP[lot] || []).filter(e => selectedCountries.includes(e.country)).forEach(e => {
+            if (e.cities && e.cities.length > 0) e.cities.forEach(c => result.add(c));
+            else (COUNTRY_CITY_MAP[e.country] || []).forEach(c => result.add(c));
+        });
+    });
+    return result.size > 0 ? [...result].sort() : getCitiesForCountries(selectedCountries);
+}
+
+// ─────────────────────────────────────────────────────────────
 //  State
 // ─────────────────────────────────────────────────────────────
 const data = {
-    ProcessName: '', Description: '', BusinessUnit: '', Department: '', Lob: '',
+    ProcessName: '', Description: '', BusinessUnit: '', Department: '', Lob: '', SdcLots: '',
     ProcessOwnerName: '', ProcessOwnerEmail: '', ProcessType: 'Manual',
     EstimatedVolumePerDay: 0, Priority: 'Medium',
     Country: '', City: '', SiteLocation: '', TimeZone: '',
     hasFile: false
 };
 let currentStep = 0;
-const TOTAL_STEPS = 15; // 14 questions (steps[]) + 1 summary step
+// TOTAL_STEPS is computed after steps are filtered (set at bottom of script)
+let TOTAL_STEPS = 16;
 const LONG_MSG_THRESHOLD = 100;
 const LONG_TYPING_DELAY  = 900;
 const SHORT_TYPING_DELAY = 600;
@@ -391,31 +448,34 @@ const steps = [
         ask: () => "👋 Hi! I'm your Process Intake Assistant. Let's capture your business process details together.\n\nFirst — what is the <span class='highlight'>name</span> of this business process?",
         type: 'text',
         placeholder: 'e.g. Customer Service Call Handling',
-        required: true,
-        validate: v => v.trim().length >= 2 ? null : 'Please enter at least 2 characters.'
+        get required() { return fieldMandatory('ProcessName'); },
+        validate: v => !fieldMandatory('ProcessName') || v.trim().length >= 2 ? null : 'Please enter at least 2 characters.'
     },
     {
         key: 'Description',
         ask: () => `Got it — <span class='highlight'>${data.ProcessName}</span>. 📋\n\nCan you give me a brief <span class='highlight'>description</span> of what this process does?`,
         type: 'textarea',
         placeholder: 'Describe the process — what it does, key inputs & outputs…',
-        required: true,
-        validate: v => v.trim().length >= 10 ? null : 'Please provide at least 10 characters.'
+        get required() { return fieldMandatory('Description'); },
+        get skippable() { return !fieldMandatory('Description'); },
+        validate: v => !fieldMandatory('Description') || v.trim().length >= 10 ? null : 'Please provide at least 10 characters.'
     },
     {
         key: 'BusinessUnit',
         ask: () => `Thanks! Which <span class='highlight'>Business Unit</span> does this process belong to?`,
         type: 'text',
         placeholder: 'e.g. Operations, Finance, HR…',
-        required: true,
-        validate: v => v.trim().length >= 1 ? null : 'Business Unit is required.'
+        get required() { return fieldMandatory('BusinessUnit'); },
+        get skippable() { return !fieldMandatory('BusinessUnit'); },
+        validate: v => !fieldMandatory('BusinessUnit') || v.trim().length >= 1 ? null : 'Business Unit is required.'
     },
     {
         key: 'Department',
         ask: () => `And the <span class='highlight'>Department</span> within <em>${data.BusinessUnit}</em>? (optional — press Skip if not applicable)`,
         type: 'select',
         options: () => [['', '— Select Department —'], ...DEPARTMENTS],
-        skippable: true
+        get required() { return fieldMandatory('Department'); },
+        get skippable() { return !fieldMandatory('Department'); }
     },
     {
         key: 'Lob',
@@ -425,23 +485,39 @@ const steps = [
             const lobs = LOB_BY_DEPT[data.Department] || [];
             return [['', '— Select LOB —'], ...lobs.map(l => [l, l])];
         },
-        skippable: true
+        get required() { return fieldMandatory('Lob'); },
+        get skippable() { return !fieldMandatory('Lob'); }
+    },
+    {
+        key: 'SdcLots',
+        ask: () => `Which <span class='highlight'>Lots or SDC</span> apply to this process? (optional — you can select multiple)`,
+        type: 'multichips',
+        chips: [
+            'Lot 1 – Global Customer Support',
+            'Lot 2 – Quote to Bill',
+            'Lot 3 – International Integrator',
+            'Lot 4 – One Post Sales'
+        ],
+        get required() { return fieldMandatory('SdcLots'); },
+        get skippable() { return !fieldMandatory('SdcLots'); }
     },
     {
         key: 'ProcessOwnerName',
         ask: () => `Who is the <span class='highlight'>Process Owner</span>? Please give their full name.`,
         type: 'text',
         placeholder: 'Full name',
-        required: true,
-        validate: v => v.trim().length >= 2 ? null : 'Please enter a name.'
+        get required() { return fieldMandatory('ProcessOwnerName'); },
+        get skippable() { return !fieldMandatory('ProcessOwnerName'); },
+        validate: v => !fieldMandatory('ProcessOwnerName') || v.trim().length >= 2 ? null : 'Please enter a name.'
     },
     {
         key: 'ProcessOwnerEmail',
         ask: () => `What is <span class='highlight'>${data.ProcessOwnerName}'s email address</span>?`,
         type: 'email',
         placeholder: 'owner@@company.com',
-        required: true,
-        validate: v => /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/.test(v) ? null : 'Please enter a valid email address.'
+        get required() { return fieldMandatory('ProcessOwnerEmail'); },
+        get skippable() { return !fieldMandatory('ProcessOwnerEmail'); },
+        validate: v => !fieldMandatory('ProcessOwnerEmail') || /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/.test(v) ? null : 'Please enter a valid email address.'
     },
     {
         key: 'ProcessType',
@@ -455,8 +531,8 @@ const steps = [
         ask: () => `Approximately how many <span class='highlight'>transactions per day</span> does this process handle?`,
         type: 'number',
         placeholder: 'e.g. 500',
-        required: false,
-        skippable: true,
+        get required() { return fieldMandatory('EstimatedVolumePerDay'); },
+        get skippable() { return !fieldMandatory('EstimatedVolumePerDay'); },
         validate: v => (!v || parseInt(v) >= 0) ? null : 'Please enter a valid number.'
     },
     {
@@ -471,32 +547,33 @@ const steps = [
         key: 'Country',
         ask: () => `📍 Location time! In which <span class='highlight'>country / countries</span> is this process located? (multi-select)`,
         type: 'multiselect',
-        list: () => COUNTRY_LIST,
-        required: true,
-        validate: v => v && v.trim().length >= 2 ? null : 'Country is required.'
+        list: () => getCountriesForSelectedLots(),
+        get required() { return fieldMandatory('Country'); },
+        get skippable() { return !fieldMandatory('Country'); },
+        validate: v => !fieldMandatory('Country') || (v && v.trim().length >= 2) ? null : 'Country is required.'
     },
     {
         key: 'City',
         ask: () => `And the <span class='highlight'>city / cities</span>? (optional — select one or more)`,
         type: 'multiselect',
-        list: () => getCitiesForCountries(data.Country ? data.Country.split(',').map(s => s.trim()).filter(Boolean) : []),
-        required: false,
-        skippable: true
+        list: () => getCitiesForSelectedLots(data.Country ? data.Country.split(',').map(s => s.trim()).filter(Boolean) : []),
+        get required() { return fieldMandatory('City'); },
+        get skippable() { return !fieldMandatory('City'); }
     },
     {
         key: 'SiteLocation',
         ask: () => `Any specific <span class='highlight'>site or office</span> location? (optional)`,
         type: 'text',
         placeholder: 'Building / floor / campus name…',
-        required: false,
-        skippable: true
+        get required() { return fieldMandatory('SiteLocation'); },
+        get skippable() { return !fieldMandatory('SiteLocation'); }
     },
     {
         key: 'TimeZone',
         ask: () => `Which <span class='highlight'>time zone</span> does this process operate in? (optional)`,
         type: 'select',
-        required: false,
-        skippable: true,
+        get required() { return fieldMandatory('TimeZone'); },
+        get skippable() { return !fieldMandatory('TimeZone'); },
         options: [
             ['', '— Select time zone —'],
             ['UTC-12:00','UTC-12:00 (Baker Island)'],
@@ -527,10 +604,13 @@ const steps = [
         key: 'Document',
         ask: () => `📎 Do you have any supporting documents to upload? (optional)\nSupported: PDF, DOCX, TXT, CSV, JSON, MD`,
         type: 'file',
-        required: false,
-        skippable: true
+        get required() { return fieldMandatory('Document'); },
+        get skippable() { return !fieldMandatory('Document'); }
     }
-];
+].filter(s => fieldVisible(s.key));
+
+// TOTAL_STEPS = number of filtered question steps + 1 (summary)
+TOTAL_STEPS = steps.length + 1;
 
 // ─────────────────────────────────────────────────────────────
 //  DOM helpers
@@ -619,6 +699,59 @@ function renderInput(step, index) {
             qr.appendChild(btn);
         });
         inputEl.appendChild(qr);
+
+    } else if (step.type === 'multichips') {
+        // Multi-select chips: each chip toggles selected state; a Done button confirms
+        const selected = new Set();
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;';
+
+        const chipsRow = document.createElement('div');
+        chipsRow.className = 'quick-replies';
+        chipsRow.style.flexWrap = 'wrap';
+
+        function renderChips() {
+            chipsRow.innerHTML = '';
+            (step.chips || []).forEach(label => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                const isSelected = selected.has(label);
+                btn.className = 'qr-chip' + (isSelected ? ' selected-chip' : '');
+                btn.style.cssText = isSelected
+                    ? 'background:#1a2a5e;color:#fff;border-color:#1a2a5e;'
+                    : '';
+                btn.textContent = (isSelected ? '✓ ' : '') + label;
+                btn.onclick = () => {
+                    if (selected.has(label)) selected.delete(label);
+                    else selected.add(label);
+                    renderChips();
+                };
+                chipsRow.appendChild(btn);
+            });
+        }
+        renderChips();
+
+        const doneRow = document.createElement('div');
+        doneRow.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:4px;';
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'chat-send-btn';
+        doneBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+        doneBtn.title = 'Confirm selection';
+        doneBtn.onclick = () => answerStep(step, index, [...selected].join(', ') || '');
+        doneRow.appendChild(doneBtn);
+
+        if (step.skippable) {
+            const skip = document.createElement('button');
+            skip.className = 'btn-skip';
+            skip.textContent = 'Skip';
+            skip.onclick = () => answerStep(step, index, '');
+            doneRow.appendChild(skip);
+        }
+
+        wrapper.appendChild(chipsRow);
+        wrapper.appendChild(doneRow);
+        inputEl.appendChild(wrapper);
 
     } else if (step.type === 'file') {
         const zone = document.createElement('div');
@@ -803,6 +936,9 @@ function renderInput(step, index) {
         searchInp.focus();
 
     } else if (step.type === 'textarea') {
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:6px;width:100%;';
+
         const ta = document.createElement('textarea');
         ta.className = 'chat-text-input';
         ta.rows = 3;
@@ -822,10 +958,95 @@ function renderInput(step, index) {
             answerStep(step, index, ta.value.trim());
         };
         row.appendChild(sendBtn);
-        inputEl.appendChild(row);
+        wrapper.appendChild(row);
         ta.addEventListener('keydown', e => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
         });
+
+        // ── AI Assist button (only shown for the Description step) ──
+        if (step.key === 'Description') {
+            const aiToggleBtn = document.createElement('button');
+            aiToggleBtn.type = 'button';
+            aiToggleBtn.className = 'btn-skip';
+            aiToggleBtn.style.cssText = 'align-self:flex-start;background:rgba(26,42,94,0.08);color:#1a2a5e;border-color:#1a2a5e;';
+            aiToggleBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate with AI';
+
+            const aiPanel = document.createElement('div');
+            aiPanel.style.cssText = 'display:none;background:#f8faff;border:1px solid #c8d5f0;border-radius:10px;padding:12px 14px;';
+
+            const aiHint = document.createElement('p');
+            aiHint.style.cssText = 'font-size:0.78rem;color:#444;margin:0 0 7px;';
+            aiHint.textContent = 'Enter brief key points (one per line) and let AI write a full description:';
+            aiPanel.appendChild(aiHint);
+
+            const pointersTa = document.createElement('textarea');
+            pointersTa.rows = 3;
+            pointersTa.placeholder = 'e.g.\n- Handles inbound calls\n- Logs cases in CRM\n- Escalates unresolved issues';
+            pointersTa.style.cssText = 'width:100%;border:1px solid #ddd;border-radius:8px;padding:8px 10px;font-size:0.83rem;resize:vertical;box-sizing:border-box;';
+            aiPanel.appendChild(pointersTa);
+
+            const aiBottomRow = document.createElement('div');
+            aiBottomRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:7px;';
+
+            const aiGenBtn = document.createElement('button');
+            aiGenBtn.type = 'button';
+            aiGenBtn.className = 'chat-send-btn';
+            aiGenBtn.style.cssText = 'font-size:0.8rem;padding:7px 14px;width:auto;border-radius:8px;';
+            aiGenBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate';
+
+            const aiErrSpan = document.createElement('span');
+            aiErrSpan.style.cssText = 'color:#e31837;font-size:0.78rem;';
+
+            aiGenBtn.onclick = async () => {
+                const pts = pointersTa.value.trim();
+                aiErrSpan.textContent = '';
+                if (!pts) { aiErrSpan.textContent = 'Please enter some key points.'; return; }
+
+                aiGenBtn.disabled = true;
+                aiGenBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Generating…';
+
+                try {
+                    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+                    const resp  = await fetch('/Intake/GenerateDescription', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+                        body: JSON.stringify({ processName: data.ProcessName ?? '', pointers: pts })
+                    });
+                    const json = await resp.json();
+                    if (json.success) {
+                        ta.value = json.description;
+                        aiPanel.style.display = 'none';
+                        aiToggleBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate with AI';
+                        ta.focus();
+                    } else {
+                        aiErrSpan.textContent = json.error ?? 'Generation failed — please type manually.';
+                    }
+                } catch (e) {
+                    aiErrSpan.textContent = 'Network error. Please try again.';
+                } finally {
+                    aiGenBtn.disabled = false;
+                    aiGenBtn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate';
+                }
+            };
+
+            aiBottomRow.appendChild(aiGenBtn);
+            aiBottomRow.appendChild(aiErrSpan);
+            aiPanel.appendChild(aiBottomRow);
+
+            aiToggleBtn.onclick = () => {
+                const open = aiPanel.style.display !== 'none';
+                aiPanel.style.display = open ? 'none' : 'block';
+                aiToggleBtn.innerHTML = open
+                    ? '<i class="bi bi-stars me-1"></i>Generate with AI'
+                    : '<i class="bi bi-x me-1"></i>Close AI Assist';
+                if (!open) pointersTa.focus();
+            };
+
+            wrapper.appendChild(aiToggleBtn);
+            wrapper.appendChild(aiPanel);
+        }
+
+        inputEl.appendChild(wrapper);
         ta.focus();
 
     } else {
@@ -901,22 +1122,30 @@ async function showSummary() {
     card.style.maxWidth = '90%';
 
     const uploadedFileName = data.hasFile ? (document.getElementById('f_Document').files[0]?.name || '') : '';
-    const summaryRows = [
-        ['Process Name', data.ProcessName],
-        ['Description', data.Description.length > SUMMARY_DESC_MAX ? data.Description.substring(0, SUMMARY_DESC_MAX) + '…' : data.Description],
-        ['Business Unit', data.BusinessUnit],
-        ['Department', data.Department || '—'],
-        ['LOB', data.Lob || '—'],
-        ['Process Owner', `${data.ProcessOwnerName} (${data.ProcessOwnerEmail})`],
-        ['Process Type', data.ProcessType],
-        ['Volume / Day', data.EstimatedVolumePerDay || '—'],
-        ['Priority', data.Priority],
-        ['Country', data.Country],
-        ['City', data.City || '—'],
-        ['Site', data.SiteLocation || '—'],
-        ['Time Zone', data.TimeZone || '—'],
-        ['Document', uploadedFileName || 'None uploaded']
+    // Build summary rows only for fields that were shown (visible in config)
+    const allSummaryRows = [
+        ['ProcessName',           'Process Name',  () => data.ProcessName],
+        ['Description',           'Description',   () => data.Description.length > SUMMARY_DESC_MAX ? data.Description.substring(0, SUMMARY_DESC_MAX) + '…' : data.Description],
+        ['BusinessUnit',          'Business Unit', () => data.BusinessUnit],
+        ['Department',            'Department',    () => data.Department || '—'],
+        ['Lob',                   'LOB',           () => data.Lob || '—'],
+        ['SdcLots',               'Lots / SDC',    () => data.SdcLots || '—'],
+        ['ProcessOwnerName',      'Process Owner', () => `${data.ProcessOwnerName} (${data.ProcessOwnerEmail})`],
+        ['ProcessType',           'Process Type',  () => data.ProcessType],
+        ['EstimatedVolumePerDay', 'Volume / Day',  () => data.EstimatedVolumePerDay || '—'],
+        ['Priority',              'Priority',      () => data.Priority],
+        ['Country',               'Country',       () => data.Country],
+        ['City',                  'City',          () => data.City || '—'],
+        ['SiteLocation',          'Site',          () => data.SiteLocation || '—'],
+        ['TimeZone',              'Time Zone',     () => data.TimeZone || '—'],
+        ['Document',              'Document',      () => uploadedFileName || 'None uploaded']
     ];
+    // ProcessOwnerName and ProcessOwnerEmail are shown together in a single "Process Owner" summary row.
+    // Show that row if either of those fields was visible (configured to be collected).
+    function shouldShowOwnerRow() { return fieldVisible('ProcessOwnerName') || fieldVisible('ProcessOwnerEmail'); }
+    const summaryRows = allSummaryRows
+        .filter(([key]) => key === 'ProcessOwnerName' ? shouldShowOwnerRow() : fieldVisible(key))
+        .map(([, label, val]) => [label, val()]);
 
     const rows = summaryRows.map(([k,v]) =>
         `<div class="summary-row"><span class="s-key">${k}</span><span class="s-val">${escHtml(String(v))}</span></div>`
@@ -947,6 +1176,7 @@ function submitIntake() {
     document.getElementById('f_BusinessUnit').value          = data.BusinessUnit;
     document.getElementById('f_Department').value            = data.Department;
     document.getElementById('f_Lob').value                   = data.Lob;
+    document.getElementById('f_SdcLots').value               = data.SdcLots;
     document.getElementById('f_ProcessOwnerName').value      = data.ProcessOwnerName;
     document.getElementById('f_ProcessOwnerEmail').value     = data.ProcessOwnerEmail;
     document.getElementById('f_ProcessType').value           = data.ProcessType;

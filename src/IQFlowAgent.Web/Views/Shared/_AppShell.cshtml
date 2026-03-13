@@ -71,6 +71,7 @@
         <div class="sidebar-toggle" onclick="toggleAppSidebar()" title="Toggle navigation">
             <svg class="toggle-arrow" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5" width="16" height="16" aria-label="Toggle sidebar navigation"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
+        <nav class="sidebar-nav" aria-label="Main navigation">
         <div class="sidebar-section-title">Process</div>
         <a asp-controller="Dashboard" asp-action="Index" class="@Nav("dashboard")">
             <span class="sidebar-icon" aria-hidden="true">
@@ -121,23 +122,68 @@
             </span>
             <span class="sidebar-label">Auth Settings</span>
         </a>
-        <a asp-controller="MasterData" asp-action="Department" class="@Nav("masterdata")">
+
+        @{
+            /* Master Data group — show as active when any sub-page is active */
+            var masterDataPages = new[] { "masterdata", "masterdatalob", "masterdatalotcountry", "masterdataintakefields" };
+            bool isMasterDataActive = masterDataPages.Contains(activePage, StringComparer.OrdinalIgnoreCase);
+            string masterGroupExpanded = isMasterDataActive ? "true" : "false";
+        }
+        <button class="sidebar-group-toggle @(isMasterDataActive ? "active" : "")"
+                id="masterDataGroupBtn"
+                aria-expanded="@masterGroupExpanded"
+                onclick="toggleSidebarGroup('masterDataGroupBtn','masterDataSubNav')"
+                title="Master Data">
             <span class="sidebar-icon" aria-hidden="true">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
             </span>
             <span class="sidebar-label">Master Data</span>
-        </a>
-        <a asp-controller="MasterData" asp-action="Lob" class="@Nav("masterdatalob")">
-            <span class="sidebar-icon" aria-hidden="true">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/><path d="M8 7V5a2 2 0 0 0-4 0v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
-            </span>
-            <span class="sidebar-label">LOB Master</span>
-        </a>
+            <svg class="sidebar-group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.8)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <div class="sidebar-sub-nav @(isMasterDataActive ? "open" : "")" id="masterDataSubNav">
+            <a asp-controller="MasterData" asp-action="Department" class="sidebar-sub-link @(activePage == "masterdata" ? "active" : "")">
+                <span class="sidebar-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                </span>
+                <span class="sidebar-label">Departments</span>
+            </a>
+            <a asp-controller="MasterData" asp-action="Lob" class="sidebar-sub-link @(activePage == "masterdatalob" ? "active" : "")">
+                <span class="sidebar-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-4 0v2"/><path d="M8 7V5a2 2 0 0 0-4 0v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+                </span>
+                <span class="sidebar-label">LOB Master</span>
+            </a>
+            <a asp-controller="MasterData" asp-action="LotCountryMapping" class="sidebar-sub-link @(activePage == "masterdatalotcountry" ? "active" : "")">
+                <span class="sidebar-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="3"/><path d="M12 2a8 8 0 0 1 8 8c0 5-8 13-8 13S4 15 4 10a8 8 0 0 1 8-8z"/></svg>
+                </span>
+                <span class="sidebar-label">LOT Mapping</span>
+            </a>
+            <a asp-controller="MasterData" asp-action="IntakeFields" class="sidebar-sub-link @(activePage == "masterdataintakefields" ? "active" : "")">
+                <span class="sidebar-icon" aria-hidden="true">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="15" x2="13" y2="15"/></svg>
+                </span>
+                <span class="sidebar-label">Intake Fields</span>
+            </a>
+        </div>
+
         <a asp-controller="TenantAiSettings" asp-action="Index" class="@Nav("tenantaisettings")">
             <span class="sidebar-icon" aria-hidden="true">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
             </span>
             <span class="sidebar-label">AI Settings</span>
+        </a>
+        <a asp-controller="PiiSettings" asp-action="Index" class="@Nav("piisettings")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            </span>
+            <span class="sidebar-label">PII Safeguard</span>
+        </a>
+        <a asp-controller="AuditLog" asp-action="Index" class="@Nav("auditlog")">
+            <span class="sidebar-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </span>
+            <span class="sidebar-label">Audit Log</span>
         </a>
         @if (User.IsInRole("SuperAdmin"))
         {
@@ -148,19 +194,31 @@
             <span class="sidebar-label">Tenants</span>
         </a>
         }
+        </nav>
     </aside>
 
     <script>
         (function () {
-            // Restore sidebar state from localStorage
+            // Restore sidebar open/close state from localStorage
             var open = localStorage.getItem('sidebarOpen') === '1';
             if (open) {
                 document.getElementById('appSidebar').classList.add('open');
                 document.getElementById('appLayout').classList.add('sidebar-open');
-                var footer = document.getElementById('appFooter');
-                if (footer) footer.style.marginLeft = '265px';
+            }
+            // Always set the footer margin to match the current sidebar state so it
+            // aligns correctly from the first paint (avoids a flash of misaligned footer).
+            var footer = document.getElementById('appFooter');
+            if (footer) footer.style.marginLeft = open ? '265px' : '50px';
+            // Restore Master Data sub-group open state (key matches toggleSidebarGroup: navId + 'Open')
+            var mdOpen = localStorage.getItem('masterDataSubNavOpen') === '1';
+            var mdBtn = document.getElementById('masterDataGroupBtn');
+            var mdNav = document.getElementById('masterDataSubNav');
+            if (mdBtn && mdNav && mdOpen) {
+                mdBtn.setAttribute('aria-expanded', 'true');
+                mdNav.classList.add('open');
             }
         })();
+
         function toggleAppSidebar() {
             var sidebar = document.getElementById('appSidebar');
             var layout  = document.getElementById('appLayout');
@@ -170,6 +228,18 @@
             if (footer) footer.style.marginLeft = isOpen ? '265px' : '50px';
             localStorage.setItem('sidebarOpen', isOpen ? '1' : '0');
         }
+
+        function toggleSidebarGroup(btnId, navId) {
+            var btn = document.getElementById(btnId);
+            var nav = document.getElementById(navId);
+            if (!btn || !nav) return;
+            var expanded = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+            nav.classList.toggle('open', !expanded);
+            // Persist state (keyed by navId)
+            localStorage.setItem(navId + 'Open', expanded ? '0' : '1');
+        }
+
         function toggleTenantDropdown() {
             var btn = document.getElementById('tenantToggleBtn');
             var dropdown = document.getElementById('tenantDropdown');

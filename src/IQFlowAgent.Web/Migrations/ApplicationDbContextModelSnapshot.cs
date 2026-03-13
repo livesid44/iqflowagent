@@ -94,6 +94,73 @@ namespace IQFlowAgent.Web.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("IQFlowAgent.Web.Models.AuditLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CallSite")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("DurationMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("HttpStatusCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("IntakeRecordId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsMocked")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PiiFindingCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PiiFindingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PiiScanStatus")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestUrl")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("WasBlocked")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AuditLogs");
+                });
+
             modelBuilder.Entity("IQFlowAgent.Web.Models.AuthSettings", b =>
                 {
                     b.Property<int>("Id")
@@ -230,6 +297,41 @@ namespace IQFlowAgent.Web.Migrations
                     b.ToTable("IntakeDocuments");
                 });
 
+            modelBuilder.Entity("IQFlowAgent.Web.Models.IntakeFieldConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FieldName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsMandatory")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsVisible")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SectionName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("IntakeFieldConfigs");
+                });
+
             modelBuilder.Entity("IQFlowAgent.Web.Models.IntakeRecord", b =>
                 {
                     b.Property<int>("Id")
@@ -279,6 +381,9 @@ namespace IQFlowAgent.Web.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PiiMaskingLog")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Priority")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -296,6 +401,10 @@ namespace IQFlowAgent.Web.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProcessType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SdcLots")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -390,6 +499,38 @@ namespace IQFlowAgent.Web.Migrations
                     b.HasIndex("IntakeRecordId");
 
                     b.ToTable("IntakeTasks");
+                });
+
+            modelBuilder.Entity("IQFlowAgent.Web.Models.LotCountryMapping", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Cities")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Country")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LotName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("LotCountryMappings");
                 });
 
             modelBuilder.Entity("IQFlowAgent.Web.Models.MasterDepartment", b =>
@@ -706,11 +847,71 @@ namespace IQFlowAgent.Web.Migrations
                     b.Property<string>("UpdatedByUserId")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("UseCountryFilterByLot")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId")
+                        .IsUnique();
 
                     b.ToTable("TenantAiSettings");
+                });
+
+            modelBuilder.Entity("IQFlowAgent.Web.Models.TenantPiiSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("BlockOnDetection")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectCreditCardNumbers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectDatesOfBirth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectEmailAddresses")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectIpAddresses")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectPassportNumbers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectPersonNames")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectPhoneNumbers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectSsnNumbers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("DetectUrls")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique();
+
+                    b.ToTable("TenantPiiSettings");
                 });
 
             modelBuilder.Entity("IQFlowAgent.Web.Models.UserTenant", b =>

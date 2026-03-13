@@ -1,7 +1,7 @@
 {
   "ConnectionStrings": {
     "SqlServer": "Server=YOUR_SERVER\\SQLEXPRESS;Database=IQFlowAgent;User Id=sa;Password=YOUR_PASS;TrustServerCertificate=True;",
-    "Sqlite": "Data Source=iqflowagent.db"
+    "Sqlite": "Data Source=App_Data/iqflowagent.db"
   },
   "AzureOpenAI": {
     "Endpoint": "https://YOUR_RESOURCE.cognitiveservices.azure.com/",
