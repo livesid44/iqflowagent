@@ -204,9 +204,11 @@
             if (open) {
                 document.getElementById('appSidebar').classList.add('open');
                 document.getElementById('appLayout').classList.add('sidebar-open');
-                var footer = document.getElementById('appFooter');
-                if (footer) footer.style.marginLeft = '265px';
             }
+            // Always set the footer margin to match the current sidebar state so it
+            // aligns correctly from the first paint (avoids a flash of misaligned footer).
+            var footer = document.getElementById('appFooter');
+            if (footer) footer.style.marginLeft = open ? '265px' : '50px';
             // Restore Master Data sub-group open state (key matches toggleSidebarGroup: navId + 'Open')
             var mdOpen = localStorage.getItem('masterDataSubNavOpen') === '1';
             var mdBtn = document.getElementById('masterDataGroupBtn');

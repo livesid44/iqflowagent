@@ -473,11 +473,11 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
     text-align: center;
     padding: 12px 24px;
     font-size: 0.78rem;
-    margin-left: 50px;
+    /* margin-left is set by JS in _AppShell.cshtml when the sidebar is present.
+       Pages without a sidebar (error page, login) get no left offset. */
     transition: margin-left 0.35s ease;
 }
-.app-layout.sidebar-open ~ .app-footer,
-.app-footer.sidebar-open { margin-left: 265px; }
+.app-layout.sidebar-open ~ .app-footer { margin-left: 265px; }
 .app-footer a { color: #fff; text-decoration: none; }
 .app-footer a:hover { text-decoration: underline; }
 .footer-tm-logo { height: 16px; width: auto; vertical-align: middle; margin-right: 6px; }

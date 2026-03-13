@@ -51,13 +51,17 @@ public class AuditLogController : Controller
             query = query.Where(l => l.IntakeRecordId == intakeId.Value);
 
         var totalCount = await query.CountAsync();
+
+        // Paginate with a DB-level sort on CreatedAt (datetime2 after FixAuditLogsColumnTypes
+        // migration).  Only the 50 rows on the requested page are fetched.
         var logs = await query
             .OrderByDescending(l => l.CreatedAt)
             .Skip((page - 1) * PageSize)
             .Take(PageSize)
             .ToListAsync();
 
-        // Summary stats for the current filter set
+        // Summary stats — WHERE comparisons on string columns are safe on SQL Server
+        // even for legacy text type; only ORDER BY / DISTINCT are restricted.
         var allForTenant = _db.AuditLogs.Where(l => l.TenantId == tenantId);
         ViewBag.TotalCalls    = await allForTenant.CountAsync(l => l.EventType == "LlmCall");
         ViewBag.TotalPiiScans = await allForTenant.CountAsync(l => l.EventType == "PiiScan");
@@ -74,20 +78,21 @@ public class AuditLogController : Controller
         ViewBag.FilterOutcome   = outcome   ?? "";
         ViewBag.FilterIntakeId  = intakeId;
 
-        // Distinct values for filter dropdowns
-        ViewBag.EventTypes = await _db.AuditLogs
+        // Distinct dropdown values — fetched as a lightweight 2-column projection and
+        // processed in memory to avoid SQL Server "text cannot be used in ORDER BY /
+        // DISTINCT" errors that occur when the column type is still the legacy TEXT type
+        // (i.e., before the FixAuditLogsColumnTypes migration has been applied).
+        var dropdownMeta = await _db.AuditLogs
             .Where(l => l.TenantId == tenantId)
-            .Select(l => l.EventType)
-            .Distinct()
-            .OrderBy(t => t)
+            .Select(l => new { l.EventType, l.CallSite })
             .ToListAsync();
 
-        ViewBag.CallSites = await _db.AuditLogs
-            .Where(l => l.TenantId == tenantId)
+        ViewBag.EventTypes = dropdownMeta
+            .Select(l => l.EventType)
+            .Where(t => !string.IsNullOrEmpty(t)).Distinct().OrderBy(t => t).ToList();
+        ViewBag.CallSites  = dropdownMeta
             .Select(l => l.CallSite)
-            .Distinct()
-            .OrderBy(t => t)
-            .ToListAsync();
+            .Where(t => !string.IsNullOrEmpty(t)).Distinct().OrderBy(t => t).ToList();
 
         return View(logs);
     }

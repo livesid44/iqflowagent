@@ -1,25 +1,75 @@
-﻿@model ErrorViewModel
+﻿@model IQFlowAgent.Web.Models.ErrorViewModel
 @{
+    Layout = null;
     ViewData["Title"] = "Error";
 }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Something went wrong – IQFlowAgent</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+    <style>
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .error-card {
+            background: #fff;
+            border-radius: 18px;
+            padding: 40px 40px 32px;
+            width: 100%;
+            max-width: 480px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .error-icon { font-size: 3rem; margin-bottom: 12px; }
+        .error-title { font-size: 1.4rem; font-weight: 700; color: #1a2a5e; margin-bottom: 8px; }
+        .error-subtitle { color: #666; font-size: 0.9rem; margin-bottom: 20px; }
+        .request-id {
+            background: #f4f6fa; border-radius: 8px; padding: 10px 14px;
+            font-size: 0.78rem; color: #555; margin-bottom: 24px; word-break: break-all;
+        }
+        .request-id strong { color: #1a2a5e; }
+        .btn-home {
+            background: #e31837; border: none; color: #fff;
+            border-radius: 25px; padding: 10px 28px; font-size: 0.92rem;
+            font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block;
+            transition: background 0.2s;
+        }
+        .btn-home:hover { background: #c01530; color: #fff; }
+        .footer-note { margin-top: 24px; font-size: 0.78rem; color: #aaa; }
+        .tm-logo { height: 14px; width: auto; vertical-align: middle; margin-right: 4px; opacity: 0.5; }
+    </style>
+</head>
+<body>
+<div class="error-card">
+    <div class="error-icon">⚠️</div>
+    <div class="error-title">Something went wrong</div>
+    <div class="error-subtitle">
+        An unexpected error occurred while processing your request.<br />
+        Our team has been notified. Please try again in a moment.
+    </div>
 
-<h1 class="text-danger">Error.</h1>
-<h2 class="text-danger">An error occurred while processing your request.</h2>
+    @if (Model.ShowRequestId)
+    {
+        <div class="request-id">
+            <strong>Reference ID:</strong><br />@Model.RequestId
+        </div>
+    }
 
-@if (Model.ShowRequestId)
-{
-    <p>
-        <strong>Request ID:</strong> <code>@Model.RequestId</code>
-    </p>
-}
+    <a href="/" class="btn-home">← Go to Home</a>
 
-<h3>Development Mode</h3>
-<p>
-    Swapping to <strong>Development</strong> environment will display more detailed information about the error that occurred.
-</p>
-<p>
-    <strong>The Development environment shouldn't be enabled for deployed applications.</strong>
-    It can result in displaying sensitive information from exceptions to end users.
-    For local debugging, enable the <strong>Development</strong> environment by setting the <strong>ASPNETCORE_ENVIRONMENT</strong> environment variable to <strong>Development</strong>
-    and restarting the app.
-</p>
+    <div class="footer-note">
+        <img src="~/images/techmahindra.svg" class="tm-logo" alt="Tech Mahindra" />
+        &copy; @DateTime.Now.Year Tech Mahindra Ltd. All rights reserved.
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
