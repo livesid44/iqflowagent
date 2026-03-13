@@ -2201,6 +2201,9 @@ public class AzureOpenAiService : IAzureOpenAiService
             temperature = 0
         };
 
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        var tenantId      = _tenantContext.GetCurrentTenantId();
+
         try
         {
             var http = _httpClientFactory.CreateClient();
@@ -2208,8 +2211,22 @@ public class AzureOpenAiService : IAzureOpenAiService
             http.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", apiKey);
 
+            var sw       = System.Diagnostics.Stopwatch.StartNew();
             var response = await http.PostAsJsonAsync(requestUrl, requestBody);
+            sw.Stop();
             int code = (int)response.StatusCode;
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "TestConnection",
+                eventType      : "LlmCall",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : requestUrl,
+                httpStatusCode : code,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : response.IsSuccessStatusCode ? "Success" : "Error");
 
             if (response.IsSuccessStatusCode)
             {
@@ -2232,11 +2249,35 @@ public class AzureOpenAiService : IAzureOpenAiService
         }
         catch (TaskCanceledException)
         {
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "TestConnection",
+                eventType      : "LlmCall",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : requestUrl,
+                httpStatusCode : null,
+                durationMs     : 0,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : "Request timed out (15 s).");
             return (false, 0, "Request timed out (15 s). Verify the endpoint URL is reachable.");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Azure OpenAI connection test threw an exception.");
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "TestConnection",
+                eventType      : "LlmCall",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : requestUrl,
+                httpStatusCode : null,
+                durationMs     : 0,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
             return (false, 0, $"Connection error: {ex.Message}");
         }
     }

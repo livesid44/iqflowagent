@@ -19,12 +19,15 @@ public class BlobStorageService : IBlobStorageService
     private readonly IConfiguration _config;
     private readonly ILogger<BlobStorageService> _logger;
     private readonly ITenantContextService _tenantContext;
+    private readonly IAuditLogService _auditLog;
 
-    public BlobStorageService(IConfiguration config, ILogger<BlobStorageService> logger, ITenantContextService tenantContext)
+    public BlobStorageService(IConfiguration config, ILogger<BlobStorageService> logger,
+        ITenantContextService tenantContext, IAuditLogService auditLog)
     {
-        _config = config;
-        _logger = logger;
+        _config        = config;
+        _logger        = logger;
         _tenantContext = tenantContext;
+        _auditLog      = auditLog;
     }
 
     public async Task<bool> IsConfiguredAsync()
@@ -45,12 +48,48 @@ public class BlobStorageService : IBlobStorageService
         };
 
         content.Position = 0;
-        await blobClient.UploadAsync(content, uploadOptions);
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var sw       = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            await blobClient.UploadAsync(content, uploadOptions);
+            sw.Stop();
 
-        _logger.LogInformation("Uploaded blob {BlobName} to container {Container}",
-            blobName, containerClient.Name);
+            _logger.LogInformation("Uploaded blob {BlobName} to container {Container}",
+                blobName, containerClient.Name);
 
-        return blobClient.Uri.ToString();
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobUpload",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobClient.Uri.ToString(),
+                httpStatusCode : 201,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Success");
+
+            return blobClient.Uri.ToString();
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobUpload",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobClient.Uri.ToString(),
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
+            throw;
+        }
     }
 
     public async Task<string?> DownloadTextAsync(string blobUrl)
@@ -59,6 +98,9 @@ public class BlobStorageService : IBlobStorageService
         if (!TextExtensions.Contains(ext))
             return null;
 
+        var tenantId      = _tenantContext.GetCurrentTenantId();
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        var sw            = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var (conn, containerName) = await GetStorageConfigAsync();
@@ -66,28 +108,88 @@ public class BlobStorageService : IBlobStorageService
             var credentialedClient = new BlobClient(conn!, containerName, blobName);
 
             var response = await credentialedClient.DownloadContentAsync();
+            sw.Stop();
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDownload",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : 200,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Success");
+
             return response.Value.Content.ToString();
         }
         catch (Exception ex)
         {
+            sw.Stop();
             _logger.LogWarning(ex, "Could not download text content from blob {BlobUrl}", blobUrl);
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDownload",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
+
             return null;
         }
     }
 
     public async Task DeleteAsync(string blobUrl)
     {
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        var tenantId      = _tenantContext.GetCurrentTenantId();
+        var sw            = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var (conn, containerName) = await GetStorageConfigAsync();
             var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
             var blobClient = new BlobClient(conn!, containerName, blobName);
             await blobClient.DeleteIfExistsAsync();
+            sw.Stop();
+
             _logger.LogInformation("Deleted blob {BlobName}", blobName);
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDelete",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : 200,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Success");
         }
         catch (Exception ex)
         {
+            sw.Stop();
             _logger.LogWarning(ex, "Could not delete blob at {BlobUrl}", blobUrl);
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDelete",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
         }
     }
 
