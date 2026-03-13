@@ -25,7 +25,6 @@
             <div class="card-body">
                 <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
                     <label class="toggle-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-                        <input type="hidden" name="IsEnabled" value="false" />
                         <input type="checkbox" asp-for="IsEnabled" id="isEnabledToggle" class="toggle-checkbox"
                                onchange="onMasterToggle(this.checked)" />
                         <span class="toggle-track" id="masterToggleTrack"></span>
@@ -98,9 +97,9 @@
                             .GetProperty(propName)!.GetValue(Model) ?? false);
                         <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #f5f5f5;">
                             <div style="padding-top:2px;">
-                                <input type="hidden" name="@propName" value="false" />
                                 <input type="checkbox" name="@propName" value="true" id="chk_@propName"
                                        @(currentVal ? "checked" : "") />
+                                <input type="hidden" name="@propName" value="false" />
                             </div>
                             <div>
                                 <label for="chk_@propName" style="font-weight:600;cursor:pointer;">@label</label>

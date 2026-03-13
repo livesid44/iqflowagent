@@ -142,7 +142,7 @@ public class AuditLogController : Controller
     }
 
     // GET /AuditLog/Sequence/5  — view full correlation sequence for a CorrelationId
-    public async Task<IActionResult> Sequence(string correlationId)
+    public async Task<IActionResult> Sequence([FromRoute(Name = "id")] string correlationId)
     {
         if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 64)
             return BadRequest("Invalid correlation ID.");
