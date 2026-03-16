@@ -160,9 +160,8 @@ public class AzureOpenAiService : IAzureOpenAiService
             };
 
             var http = _httpClientFactory.CreateClient();
-            // Azure AI Foundry uses "Authorization: Bearer <key>" — matches the cURL in the portal
-            http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", apiKey);
+            // Azure OpenAI (cognitiveservices.azure.com) authenticates via the "api-key" header.
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
 
             var response = await PostLlmAsync(http, requestUrl, requestBody, "AnalyzeIntake");
 
@@ -284,8 +283,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             };
 
             var http = _httpClientFactory.CreateClient();
-            http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", apiKey);
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
 
             var response = await PostLlmAsync(http, requestUrl, requestBody, "VerifyIntakeClosure");
 
@@ -540,8 +538,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         try
         {
             var http = _httpClientFactory.CreateClient();
-            http.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
 
             var response = await PostLlmAsync(http, requestUrl, requestBody, "AnalyzeReportFields");
 
@@ -1514,8 +1511,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             };
 
             var client = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            client.DefaultRequestHeaders.Add("api-key", apiKey);
             client.DefaultRequestHeaders.Accept.Add(
                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
@@ -1750,8 +1746,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             };
 
             var http = _httpClientFactory.CreateClient();
-            http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", apiKey);
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
 
             var response = await PostLlmAsync(http, requestUrl, requestBody, "GenerateSingleField");
 
@@ -1922,8 +1917,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             };
 
             var client  = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            client.DefaultRequestHeaders.Add("api-key", apiKey);
             client.DefaultRequestHeaders.Accept.Add(
                 new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
@@ -2360,8 +2354,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         {
             var http = _httpClientFactory.CreateClient();
             http.Timeout = TimeSpan.FromSeconds(15);
-            http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", apiKey);
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
 
             var sw       = System.Diagnostics.Stopwatch.StartNew();
             var response = await http.PostAsJsonAsync(requestUrl, requestBody);
@@ -2522,8 +2515,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             };
 
             var http = _httpClientFactory.CreateClient();
-            http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", apiKey);
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
 
             var response = await PostLlmAsync(http, requestUrl, requestBody, "GenerateDescription");
 
