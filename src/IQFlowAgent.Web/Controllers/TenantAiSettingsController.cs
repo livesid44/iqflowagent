@@ -20,6 +20,7 @@ public class TenantAiSettingsDto
     public string? AzureOpenAIDeploymentName    { get; set; }
     public string? AzureOpenAIApiVersion        { get; set; }
     public int    AzureOpenAIMaxTokens          { get; set; }
+    public string? AzureOpenAIModelVersion      { get; set; }
     public string? AzureStorageConnectionString { get; set; }
     public string? AzureStorageContainerName    { get; set; }
     public string? AzureSpeechRegion            { get; set; }
@@ -109,6 +110,7 @@ public class TenantAiSettingsController : Controller
                     AzureOpenAIDeploymentName      = model.AzureOpenAIDeploymentName ?? string.Empty,
                     AzureOpenAIApiVersion          = model.AzureOpenAIApiVersion ?? "2025-01-01-preview",
                     AzureOpenAIMaxTokens           = model.AzureOpenAIMaxTokens > 0 ? model.AzureOpenAIMaxTokens : 4096,
+                    AzureOpenAIModelVersion        = model.AzureOpenAIModelVersion ?? "gpt-5.2",
                     AzureStorageConnectionString   = model.AzureStorageConnectionString ?? string.Empty,
                     AzureStorageContainerName      = model.AzureStorageContainerName ?? "intakes",
                     AzureSpeechRegion              = model.AzureSpeechRegion ?? string.Empty,
@@ -124,6 +126,7 @@ public class TenantAiSettingsController : Controller
                 existing.AzureOpenAIDeploymentName     = model.AzureOpenAIDeploymentName ?? string.Empty;
                 existing.AzureOpenAIApiVersion         = model.AzureOpenAIApiVersion ?? "2025-01-01-preview";
                 existing.AzureOpenAIMaxTokens          = model.AzureOpenAIMaxTokens > 0 ? model.AzureOpenAIMaxTokens : 4096;
+                existing.AzureOpenAIModelVersion       = model.AzureOpenAIModelVersion ?? "gpt-5.2";
                 existing.AzureStorageConnectionString  = model.AzureStorageConnectionString ?? string.Empty;
                 existing.AzureStorageContainerName     = model.AzureStorageContainerName ?? "intakes";
                 existing.AzureSpeechRegion             = model.AzureSpeechRegion ?? string.Empty;

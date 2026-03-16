@@ -316,6 +316,37 @@ public class ReportController : Controller
         return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
     }
 
+    // ── POST /Report/AiGenerateField ─────────────────────────────────────────
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AiGenerateField(int fieldStatusId, string? userContext)
+    {
+        var field = await _db.ReportFieldStatuses
+            .Include(f => f.IntakeRecord)
+            .FirstOrDefaultAsync(f => f.Id == fieldStatusId);
+        if (field == null) return NotFound();
+
+        var intake = field.IntakeRecord;
+
+        // Aggregate analysis JSON from intake
+        var analysisJson = intake.AnalysisResult;
+
+        // Aggregate artifact text from tasks
+        var tasks = await _db.IntakeTasks
+            .Where(t => t.IntakeRecordId == intake.Id)
+            .Include(t => t.Documents)
+            .ToListAsync();
+        var artifactText = await AggregateArtifactTextAsync(tasks);
+
+        var generated = await _aiService.GenerateSingleFieldAsync(
+            intake, field.FieldKey, field.FieldLabel, userContext, analysisJson, artifactText);
+
+        if (string.IsNullOrWhiteSpace(generated))
+            return Json(new { success = false, message = "AI could not generate content. Ensure Azure OpenAI is configured and try again." });
+
+        return Json(new { success = true, value = generated });
+    }
+
     // ── POST /Report/Generate ────────────────────────────────────────────────
     [HttpPost]
     [ValidateAntiForgeryToken]

@@ -30,7 +30,17 @@
                     </div>
                     <div>
                         <label class="form-label">Deployment Name</label>
-                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="gpt-4o" />
+                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="gpt-4o or gpt-5.2" id="deploymentNameInput" />
+                    </div>
+                    <div>
+                        <label class="form-label">Model Version</label>
+                        <select asp-for="AzureOpenAIModelVersion" class="form-input" id="modelVersionSelect" onchange="onModelVersionChange(this.value)">
+                            <option value="gpt-5.2">GPT-5.2 (Recommended — higher quality)</option>
+                            <option value="gpt-4o">GPT-4o</option>
+                        </select>
+                        <div style="font-size:11px;color:#888;margin-top:4px;">
+                            Changing this will also update the Deployment Name field to match the selected model.
+                        </div>
                     </div>
                     <div>
                         <label class="form-label">API Version</label>
@@ -99,6 +109,13 @@
 </div>
 </div>
 <script>
+function onModelVersionChange(version) {
+    const depInput = document.getElementById('deploymentNameInput');
+    if (depInput) {
+        depInput.value = version;
+    }
+}
+
 async function testConnection() {
     const btn    = document.getElementById('test-btn');
     const result = document.getElementById('test-result');

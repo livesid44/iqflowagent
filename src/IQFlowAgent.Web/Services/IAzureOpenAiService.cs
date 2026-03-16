@@ -42,6 +42,18 @@ public interface IAzureOpenAiService
         string? documentText);
 
     /// <summary>
+    /// Generates content for a single report field using AI, grounded in the provided user context
+    /// and the intake data/document content. Returns the generated text or an empty string on failure.
+    /// </summary>
+    Task<string> GenerateSingleFieldAsync(
+        IntakeRecord intake,
+        string fieldKey,
+        string fieldLabel,
+        string? userContext,
+        string? analysisJson,
+        string? artifactText);
+
+    /// <summary>
     /// Generates a structured SOP / training document from a meeting transcript.
     /// Returns the SOP as a markdown string.
     /// </summary>

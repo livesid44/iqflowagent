@@ -13,6 +13,8 @@ public class TenantAiSettings
     public string AzureOpenAIDeploymentName { get; set; } = string.Empty;
     public string AzureOpenAIApiVersion { get; set; } = "2025-01-01-preview";
     public int AzureOpenAIMaxTokens { get; set; } = 2000;
+    /// <summary>Active model version used in API calls: "gpt-4o" or "gpt-5.2".</summary>
+    public string AzureOpenAIModelVersion { get; set; } = "gpt-5.2";
     public string AzureStorageConnectionString { get; set; } = string.Empty;
     public string AzureStorageContainerName { get; set; } = "intakes";
 

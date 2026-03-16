@@ -45,7 +45,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     /// <inheritdoc />
     public IReadOnlyList<PiiFinding> GetLastPiiFindings() => _lastAnalysisPiiFindings.AsReadOnly();
 
-    private async Task<(string? endpoint, string? apiKey, string? deployment, string apiVersion, int maxTokens)> GetAiConfigAsync()
+    private async Task<(string? endpoint, string? apiKey, string? deployment, string apiVersion, int maxTokens, string modelVersion)> GetAiConfigAsync()
     {
         var tenantSettings = await _tenantContext.GetCurrentTenantAiSettingsAsync();
         if (tenantSettings != null
@@ -58,14 +58,17 @@ public class AzureOpenAiService : IAzureOpenAiService
         {
             return (tenantSettings.AzureOpenAIEndpoint, tenantSettings.AzureOpenAIApiKey,
                 tenantSettings.AzureOpenAIDeploymentName, tenantSettings.AzureOpenAIApiVersion,
-                tenantSettings.AzureOpenAIMaxTokens);
+                tenantSettings.AzureOpenAIMaxTokens,
+                !string.IsNullOrWhiteSpace(tenantSettings.AzureOpenAIModelVersion)
+                    ? tenantSettings.AzureOpenAIModelVersion : "gpt-5.2");
         }
         var endpoint = _config["AzureOpenAI:Endpoint"];
         var apiKey = _config["AzureOpenAI:ApiKey"];
         var deployment = _config["AzureOpenAI:DeploymentName"];
         var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
         var maxTokens = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
-        return (endpoint, apiKey, deployment, apiVersion, maxTokens);
+        var modelVersion = _config["AzureOpenAI:ModelVersion"] ?? "gpt-5.2";
+        return (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion);
     }
 
     public async Task<string> AnalyzeIntakeAsync(IntakeRecord intake, string? documentText)
@@ -75,7 +78,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = intake.Id;
 
-        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
 
         // Guard: all three fields must be set to real values
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
@@ -109,7 +112,11 @@ public class AzureOpenAiService : IAzureOpenAiService
         try
         {
             var systemPrompt = """
-                You are an expert business process analyst. 
+                You are an expert business process analyst.
+                IMPORTANT: You MUST base ALL of your analysis exclusively on the information provided in this prompt —
+                the intake metadata and any uploaded document content. Do NOT use any external knowledge from the internet,
+                Wikipedia, industry databases, or other outside sources. Only rephrase, summarize, and structure the
+                information that is explicitly present in the provided intake data and document text.
                 Analyze the provided business process intake information and produce a structured JSON analysis.
                 Your response must be valid JSON with the following structure:
                 {
@@ -149,7 +156,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 max_tokens  = maxTokens,
                 temperature = 0.7,
                 top_p       = 1.0,
-                model       = deployment   // included for compatibility; Azure ignores it
+                model       = modelVersion   // hint to the Azure OpenAI API about the desired model version
             };
 
             var http = _httpClientFactory.CreateClient();
@@ -207,7 +214,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = intake.Id;
-        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -233,6 +240,9 @@ public class AzureOpenAiService : IAzureOpenAiService
         {
             var systemPrompt = """
                 You are an expert business process quality auditor.
+                IMPORTANT: You MUST base ALL of your verification exclusively on the task comments, action logs, and
+                artifact information explicitly provided in this prompt. Do NOT use any external knowledge from the
+                internet or outside sources. Only evaluate the evidence that is explicitly present in the provided data.
                 You will be given information about a business process intake and its associated tasks.
                 Your job is to verify whether each task has sufficient closure evidence to be considered truly completed,
                 or whether it should be reopened for additional work.
@@ -270,7 +280,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 max_tokens  = maxTokens,
                 temperature = 0.3,
                 top_p       = 1.0,
-                model       = deployment
+                model       = modelVersion
             };
 
             var http = _httpClientFactory.CreateClient();
@@ -427,7 +437,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = intake.Id;
-        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -451,6 +461,13 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         var systemPrompt = """
             You are an expert BARTOK / Schedule 8 SOP documentation specialist at TechM.
+            IMPORTANT: You MUST base ALL content exclusively on the information provided in this prompt —
+            the intake metadata, the uploaded document text, and any task artifact text. Do NOT use any
+            external knowledge from the internet, Wikipedia, regulations databases, or other outside sources.
+            Only rephrase, structure, and elaborate on information that is explicitly present in the
+            provided data. If specific information (e.g. regulations, SLA targets, system names) is not
+            present in the provided content, indicate "To be confirmed with process owner" rather than
+            inventing it from external sources.
             You will be given structured intake data about a business process and a list of fields
             from the new BARTOK S8 SOP template that must be filled in.
 
@@ -468,26 +485,27 @@ public class AzureOpenAiService : IAzureOpenAiService
             - 10. Training Materials (modules, delivery methods, competency verification)
             - 11. Orange Customer Contract Obligations (OCC references, obligations, controls)
 
-            Your goal: fill EVERY SINGLE field with meaningful, professional content.
+            Your goal: fill EVERY SINGLE field with meaningful, professional content derived solely
+            from the provided intake data and document content.
             This is a full document generation — every field must contain specific, relevant content.
 
             Rules:
             1. For fields directly from intake (process name, owner, country, etc.) — use them exactly.
-            2. For process description, SOP steps, work instructions, and SLA metrics — generate complete,
-               professional S8 SOP language specific to this process. Be concrete, not generic.
-            3. For RACI tasks and roles — generate 4 specific task names and 4 specific role titles
-               appropriate for this process type and business unit.
-            4. For SOP steps — generate 3-4 concrete step actions that describe how this process actually
-               runs. Include the role, system used, and expected output for each step.
-            5. For work instructions — write step-by-step instructions a new operative can follow,
-               including system navigation and error handling.
-            6. For SLA metrics — generate specific KPIs appropriate for this process type (e.g.
-               resolution time, first contact resolution, accuracy rate).
-            7. For regulatory/compliance — identify the most relevant regulations for this process
-               type and geography.
+            2. For process description, SOP steps, work instructions, and SLA metrics — generate content
+               that is grounded in and consistent with the provided intake data and document text only.
+               Be concrete and specific to this process, not generic.
+            3. For RACI tasks and roles — derive task names and role titles from the intake data and document.
+            4. For SOP steps — derive step actions from the process description and document content.
+               Include the role, system, and expected output only if mentioned in the provided data.
+            5. For work instructions — write step-by-step instructions based on what is described in the document.
+            6. For SLA metrics — use only SLA/KPI data mentioned in the intake or document. If none are
+               present, write "To be confirmed with process owner — not specified in intake document."
+            7. For regulatory/compliance — use only regulatory references explicitly mentioned in the intake
+               or document. Do NOT infer regulations from the geography or industry. If none are stated,
+               write "To be confirmed with the compliance team — not specified in intake document."
             8. NEVER use "Missing" status. For EVERY field, always return "Available" with real content.
-               If exact data is not available, write professional placeholder text that a reviewer
-               can easily update (e.g. "To be confirmed with process owner — estimated X").
+               If exact data is not available in the provided content, write professional placeholder text
+               that a reviewer can easily update (e.g. "To be confirmed with process owner — not in document").
             9. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
             10. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
 
@@ -516,7 +534,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             max_tokens  = Math.Max(maxTokens, 6000),  // need space for full-document field coverage
             temperature = 0.3,
             top_p       = 1.0,
-            model       = deployment
+            model       = modelVersion
         };
 
         try
@@ -1432,7 +1450,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = intake.Id;
-        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -1448,6 +1466,10 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         const string systemPrompt = """
             You are a quality assurance expert for business process automation.
+            IMPORTANT: You MUST base ALL of your evaluation exclusively on the information provided in
+            this prompt — the intake data, AI analysis JSON, task completion evidence, and uploaded
+            document content. Do NOT use any external knowledge from the internet or outside sources.
+            Only assess the quality of the information explicitly present in the provided data.
             Evaluate the provided intake record, its AI analysis, task completion evidence, and any uploaded documents.
             Score the intake on each of the following QC parameters on a scale of 0-100:
             1. completeness       - are all required fields, documents, and information present?
@@ -1630,13 +1652,139 @@ public class AzureOpenAiService : IAzureOpenAiService
         });
     }
 
+    // ─── GenerateSingleFieldAsync ─────────────────────────────────────────────
+
+    public async Task<string> GenerateSingleFieldAsync(
+        IntakeRecord intake,
+        string fieldKey,
+        string fieldLabel,
+        string? userContext,
+        string? analysisJson,
+        string? artifactText)
+    {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Azure OpenAI not configured — cannot generate field '{FieldKey}' for intake {IntakeId}.", fieldKey, intake.IntakeId);
+            return string.Empty;
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+        {
+            _logger.LogWarning("Azure OpenAI endpoint invalid — cannot generate field '{FieldKey}'.", fieldKey);
+            return string.Empty;
+        }
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+
+        const string systemPrompt = """
+            You are a BARTOK / Schedule 8 SOP documentation specialist at TechM.
+            IMPORTANT: You MUST base ALL content exclusively on the information provided in this prompt —
+            the intake metadata, any prior AI analysis, task artifact text, and the user's context notes.
+            Do NOT use any external knowledge from the internet, Wikipedia, or outside sources. Only
+            rephrase, elaborate, and structure information that is explicitly present in the provided data.
+            Your task is to generate professional, document-ready content for a single SOP field.
+            Return ONLY the field value as plain text — no JSON, no markdown headers, no extra commentary.
+            The content should be concise (1-4 sentences) and suitable for direct insertion into a document.
+            """;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Field to generate: {fieldLabel} (key: {fieldKey})");
+        sb.AppendLine();
+        sb.AppendLine("=== Intake Metadata ===");
+        sb.AppendLine($"Process Name: {intake.ProcessName}");
+        sb.AppendLine($"Description: {intake.Description}");
+        sb.AppendLine($"Business Unit: {intake.BusinessUnit}");
+        sb.AppendLine($"Department: {intake.Department}");
+        sb.AppendLine($"Process Owner: {intake.ProcessOwnerName} ({intake.ProcessOwnerEmail})");
+        sb.AppendLine($"Process Type: {intake.ProcessType}");
+        sb.AppendLine($"Location: {intake.City}, {intake.Country}");
+        sb.AppendLine($"Volume/day: {intake.EstimatedVolumePerDay}");
+        sb.AppendLine($"Priority: {intake.Priority}");
+        if (!string.IsNullOrWhiteSpace(userContext))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== User Context / Additional Notes ===");
+            sb.AppendLine(userContext);
+        }
+        if (!string.IsNullOrWhiteSpace(analysisJson))
+        {
+            var truncatedAnalysis = analysisJson.Length > MaxAnalysisJsonChars
+                ? analysisJson[..MaxAnalysisJsonChars] + "\n[...truncated]"
+                : analysisJson;
+            sb.AppendLine();
+            sb.AppendLine("=== Prior AI Analysis (JSON) ===");
+            sb.AppendLine(truncatedAnalysis);
+        }
+        if (!string.IsNullOrWhiteSpace(artifactText))
+        {
+            var truncatedArtifact = artifactText.Length > MaxDocumentChars
+                ? artifactText[..MaxDocumentChars] + "\n[...truncated]"
+                : artifactText;
+            sb.AppendLine();
+            sb.AppendLine("=== Task Artifact Text ===");
+            sb.AppendLine(truncatedArtifact);
+        }
+
+        var userMessage = sb.ToString();
+
+        try
+        {
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "GenerateSingleField") }
+                },
+                max_tokens  = Math.Min(maxTokens, 500),
+                temperature = 0.4,
+                top_p       = 1.0,
+                model       = modelVersion
+            };
+
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "GenerateSingleField");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Azure OpenAI returned {Status} for GenerateSingleField: {Body}",
+                    (int)response.StatusCode, errorBody);
+                return string.Empty;
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(responseText);
+            return doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString()?.Trim() ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GenerateSingleFieldAsync failed for field '{FieldKey}' on intake {IntakeId}.", fieldKey, intake.IntakeId);
+            return string.Empty;
+        }
+    }
+
     // ─── GenerateSopFromTranscriptAsync ──────────────────────────────────────
 
     public async Task<string> GenerateSopFromTranscriptAsync(string transcript, IntakeRecord intake)
     {
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = intake.Id;
-        var (endpoint, apiKey, deployment, apiVersion, maxTokens) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -1657,6 +1805,10 @@ public class AzureOpenAiService : IAzureOpenAiService
             COMPREHENSIVE, DETAILED Standard Operating Procedure (SOP) / Training Document from the
             provided meeting transcript. The document must be ready for immediate use by a new employee
             as a step-by-step training guide — not a high-level summary.
+            IMPORTANT: You MUST base ALL content exclusively on the provided meeting transcript and the
+            process context below. Do NOT use any external knowledge from the internet, Wikipedia, or
+            outside sources. Only extract, rephrase, and structure information explicitly present in the
+            transcript. For details not present in the transcript, add a [TO CONFIRM] placeholder.
 
             Process context:
             - Process Name: {intake.ProcessName}
@@ -2176,7 +2328,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     /// </summary>
     public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
     {
-        var (endpoint, apiKey, deployment, apiVersion, _) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, _, modelVersion) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -2319,7 +2471,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = null; // not tied to a specific intake
-        var (endpoint, apiKey, deployment, apiVersion, _) = await GetAiConfigAsync();
+        var (endpoint, apiKey, deployment, apiVersion, _, modelVersion) = await GetAiConfigAsync();
 
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
@@ -2340,9 +2492,12 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         const string systemPrompt = """
             You are a business process analyst. The user has provided a process name and brief key points.
-            Expand these points into a comprehensive, professional process description (150-300 words).
+            IMPORTANT: You MUST base your description exclusively on the process name and key points
+            provided by the user. Do NOT use any external knowledge from the internet, Wikipedia, or
+            outside sources. Only expand, rephrase, and elaborate on the information explicitly given.
+            Expand the provided key points into a comprehensive, professional process description (150-300 words).
             The description should clearly explain what the process does, who is involved, the key steps
-            and inputs/outputs, and the business value it delivers.
+            and inputs/outputs, and the business value it delivers, based solely on the provided information.
             Use clear, professional language and flowing prose paragraphs — NOT bullet points.
             Return ONLY the description text. Do not include headings, labels, or extra commentary.
             """;
@@ -2363,7 +2518,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 max_tokens  = 600,
                 temperature = 0.7,
                 top_p       = 1.0,
-                model       = deployment
+                model       = modelVersion
             };
 
             var http = _httpClientFactory.CreateClient();

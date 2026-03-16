@@ -65,6 +65,14 @@
     .badge-pending   { background: #fef3c7; color: #92400e; }
     .badge-task      { background: #ede9fe; color: #5b21b6; }
 
+    .btn-ai-gen { background: linear-gradient(135deg,#7c3aed,#5b21b6); color: #fff; padding: 4px 8px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.72rem; font-weight: 600; margin-top: 4px; white-space: nowrap; }
+    .btn-ai-gen:disabled { background: #c4b5fd; cursor: wait; }
+
+    .ai-gen-panel { display:none; margin-top:8px; padding:10px 12px; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:8px; }
+    .ai-gen-panel textarea { width:100%; border:1px solid #c4b5fd; border-radius:6px; padding:6px 8px; font-size:0.79rem; font-family:inherit; resize:vertical; min-height:48px; }
+    .ai-gen-panel .ai-gen-actions { display:flex; gap:8px; margin-top:6px; align-items:center; }
+    .ai-gen-panel .ai-gen-note { font-size:0.71rem; color:#6d28d9; }
+
     .action-btns { display: flex; flex-direction: column; gap: 6px; }
     .btn-sm { padding: 4px 10px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.75rem; font-weight: 600; }
     .btn-save-val   { background: #2563eb; color: #fff; }
@@ -260,14 +268,30 @@
 
                         <!-- Value editor -->
                         <div class="field-value">
-                            <form method="post" action="/Report/SetValue">
+                            <form method="post" action="/Report/SetValue" id="save-form-@field.Id">
                                 @Html.AntiForgeryToken()
                                 <input type="hidden" name="fieldStatusId" value="@field.Id" />
-                                <textarea name="fillValue" rows="2" placeholder="@field.TemplatePlaceholder">@field.FillValue</textarea>
-                                <div style="margin-top:6px;">
+                                <textarea name="fillValue" id="textarea-@field.Id" rows="2" placeholder="@field.TemplatePlaceholder">@field.FillValue</textarea>
+                                <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
                                     <button type="submit" class="btn-sm btn-save-val">💾 Save Value</button>
+                                    <button type="button" class="btn-ai-gen" id="ai-btn-@field.Id"
+                                            onclick="toggleAiPanel(@field.Id)">✨ Generate with AI</button>
                                 </div>
                             </form>
+                            <!-- AI generation panel -->
+                            <div class="ai-gen-panel" id="ai-panel-@field.Id">
+                                <div class="ai-gen-note" style="margin-bottom:6px;">
+                                    ✨ AI will generate content for <strong>@field.FieldLabel</strong> based on the intake document. Add any extra context below (optional).
+                                </div>
+                                <textarea id="ai-ctx-@field.Id" rows="2" placeholder="Optional: add extra context or instructions for the AI…"></textarea>
+                                <div class="ai-gen-actions">
+                                    <button type="button" class="btn-sm btn-ai-gen" id="ai-run-@field.Id"
+                                            onclick="runAiGenerate(@field.Id, '@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(field.FieldLabel))')">🤖 Generate</button>
+                                    <button type="button" class="btn-sm" style="background:#e5e7eb;color:#374151;"
+                                            onclick="toggleAiPanel(@field.Id)">Cancel</button>
+                                    <span id="ai-status-@field.Id" style="font-size:0.72rem;color:#6d28d9;"></span>
+                                </div>
+                            </div>
                             @if (!string.IsNullOrWhiteSpace(field.Notes))
                             {
                                 <div class="field-notes">ℹ️ @field.Notes</div>
@@ -320,3 +344,49 @@
     } @* end else (intake selected) *@
 </main>
 </div>@* close app-layout *@
+
+@section Scripts {
+<script>
+function toggleAiPanel(fieldId) {
+    const panel = document.getElementById('ai-panel-' + fieldId);
+    panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+async function runAiGenerate(fieldId, fieldLabel) {
+    const runBtn   = document.getElementById('ai-run-'    + fieldId);
+    const statusEl = document.getElementById('ai-status-' + fieldId);
+    const ctxEl    = document.getElementById('ai-ctx-'    + fieldId);
+    const taEl     = document.getElementById('textarea-'  + fieldId);
+    const form     = document.getElementById('save-form-' + fieldId);
+    const token    = form.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    runBtn.disabled = true;
+    runBtn.textContent = '⏳ Generating…';
+    statusEl.textContent = '';
+
+    const formData = new FormData();
+    formData.append('fieldStatusId', fieldId);
+    formData.append('userContext',   ctxEl.value || '');
+    formData.append('__RequestVerificationToken', token);
+
+    try {
+        const resp = await fetch('/Report/AiGenerateField', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.success) {
+            taEl.value = data.value;
+            statusEl.textContent = '✓ Generated — review and click Save Value.';
+            statusEl.style.color = '#059669';
+            document.getElementById('ai-panel-' + fieldId).style.display = 'none';
+        } else {
+            statusEl.textContent = '✗ ' + (data.message || 'Generation failed.');
+            statusEl.style.color = '#dc2626';
+        }
+    } catch (ex) {
+        statusEl.textContent = '✗ Network error: ' + ex.message;
+        statusEl.style.color = '#dc2626';
+    }
+    runBtn.disabled = false;
+    runBtn.textContent = '🤖 Generate';
+}
+</script>
+}
