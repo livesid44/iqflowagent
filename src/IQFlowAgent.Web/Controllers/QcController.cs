@@ -46,15 +46,26 @@ public class QcController : Controller
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
 
-        // Load latest QC check per intake
         var intakeIds  = intakes.Select(i => i.Id).ToList();
+
+        // Load latest QC check per intake
         var latestQcs  = await _db.QcChecks
             .Where(q => intakeIds.Contains(q.IntakeRecordId))
             .GroupBy(q => q.IntakeRecordId)
             .Select(g => g.OrderByDescending(q => q.CreatedAt).First())
             .ToListAsync();
 
-        ViewBag.LatestQcs = latestQcs.ToDictionary(q => q.IntakeRecordId);
+        // Count open (non-NA) tasks per intake so the view can show a readiness hint
+        var openTaskCounts = await _db.IntakeTasks
+            .Where(t => intakeIds.Contains(t.IntakeRecordId)
+                        && !t.IsNotApplicable
+                        && (t.Status == "Open" || t.Status == "In Progress"))
+            .GroupBy(t => t.IntakeRecordId)
+            .Select(g => new { IntakeRecordId = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        ViewBag.LatestQcs       = latestQcs.ToDictionary(q => q.IntakeRecordId);
+        ViewBag.OpenTaskCounts  = openTaskCounts.ToDictionary(x => x.IntakeRecordId, x => x.Count);
         return View(intakes);
     }
 
@@ -69,6 +80,26 @@ public class QcController : Controller
         if (intake.Status != "Closed")
         {
             TempData["Error"] = "QC check can only be run on closed intakes.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        // Block QC if there are open (non-NA) tasks — they must be resolved first
+        var openTaskCount = await _db.IntakeTasks
+            .CountAsync(t => t.IntakeRecordId == intakeId
+                             && !t.IsNotApplicable
+                             && (t.Status == "Open" || t.Status == "In Progress"));
+        if (openTaskCount > 0)
+        {
+            TempData["Error"] = $"QC cannot be run: {openTaskCount} task(s) are still open for {intake.IntakeId}. " +
+                                "Close or mark all tasks as N/A before running QC.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        // Block QC if AI analysis has not been completed yet
+        if (string.IsNullOrWhiteSpace(intake.AnalysisResult))
+        {
+            TempData["Error"] = $"QC cannot be run: AI analysis has not been completed for {intake.IntakeId}. " +
+                                "Please run the intake analysis first.";
             return RedirectToAction(nameof(Index));
         }
 
