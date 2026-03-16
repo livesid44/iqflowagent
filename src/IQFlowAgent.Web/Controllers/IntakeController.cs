@@ -850,6 +850,25 @@ public class IntakeController : Controller
                     if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
                         continue;
 
+                    // Append a BARTOK output-document section block when the task targets a specific template section
+                    if (item.TryGetProperty("bartokSection", out var bartokSectionEl))
+                    {
+                        var sectionName  = bartokSectionEl.GetString() ?? "";
+                        var requiredInfo = item.TryGetProperty("requiredInfo", out var ri) ? ri.GetString() ?? "" : "";
+
+                        if (!string.IsNullOrWhiteSpace(sectionName))
+                        {
+                            description = description.TrimEnd();
+                            description += $"""
+
+
+📄 BARTOK S8 SOP — Output Document Section
+Section : {sectionName}
+Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description above." : requiredInfo)}
+""";
+                        }
+                    }
+
                     AddTask(db, record, title, description, priority, owner, now,
                         $"Task automatically created from AI analysis of intake {record.IntakeId}.");
                 }

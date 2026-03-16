@@ -112,13 +112,35 @@ public class AzureOpenAiService : IAzureOpenAiService
         try
         {
             var systemPrompt = """
-                You are an expert business process analyst.
+                You are an expert business process analyst specialising in BARTOK Schedule 8 SOP documentation.
                 IMPORTANT: You MUST base ALL of your analysis exclusively on the information provided in this prompt —
                 the intake metadata and any uploaded document content. Do NOT use any external knowledge from the internet,
                 Wikipedia, industry databases, or other outside sources. Only rephrase, summarize, and structure the
                 information that is explicitly present in the provided intake data and document text.
-                Analyze the provided business process intake information and produce a structured JSON analysis.
-                Your response must be valid JSON with the following structure:
+
+                The END GOAL of this workflow is to produce a completed BARTOK S8 SOP document.
+                That document has the following sections — each requiring specific information:
+
+                  Document Control     : Process name, lot/SDC, document date, process author (name + email), approver (name + email)
+                  1. Purpose & Scope   : Countries in scope, input artefacts / documents required
+                  2. Process Overview  : Detailed description, process owner, monthly volumes (12 months of data), peak volume/period, weekday/weekend/holiday hours of operation, systems used
+                  3. RACI              : 4 task names specific to this process, 4 role titles, RACI assignments (R/A/C/I per cell)
+                  4. SOP Steps         : Step-by-step actions, responsible role per step, system used per step, expected output per step, decision points, automation status, opportunity rating, automation type
+                  5. Work Instructions : Detailed step-by-step instructions (including navigation, field entries, error handling) for each SOP step
+                  6. Escalation & Exceptions : Escalation triggers, escalation paths, resolution timeframes, exception types, exception handling approach, approval requirements
+                  7. SLAs & Performance: SLA metric names, measurement methods, reporting frequency, measurement tools, actual vs target performance data
+                  8. Volumetrics       : Transaction type(s) and volume detail, volume notes (peaks/anomalies/seasonal factors), volume forecast
+                  9. Regulatory & Compliance : Applicable regulations/standards, obligations, controls in the process, evidence artefacts, TechM Framework references
+                  10. Training         : Training module names, delivery methods, competency verification approach
+                  11. OCC              : Orange Customer Contract reference numbers, obligations, how the process addresses each obligation
+
+                YOUR TASK:
+                1. Review the intake form and uploaded document.
+                2. For EACH section listed above, determine whether the available information is sufficient (Pass), partial (Warning), or missing (Fail).
+                3. For every section that is Warning or Fail, create an actionItem that specifies exactly what information must be gathered.
+                4. Produce checkPoints — one per BARTOK section — assessing its completeness.
+
+                Respond ONLY with valid JSON (no markdown fences) matching this exact structure:
                 {
                   "processName": "...",
                   "confidenceScore": 85,
@@ -133,7 +155,14 @@ public class AzureOpenAiService : IAzureOpenAiService
                   ],
                   "riskAreas": ["risk 1", "risk 2"],
                   "actionItems": [
-                    { "title": "action title", "description": "what needs to be done", "owner": "role or team", "priority": "High|Medium|Low" }
+                    {
+                      "title": "action title",
+                      "description": "what needs to be done",
+                      "owner": "role or team",
+                      "priority": "High|Medium|Low",
+                      "bartokSection": "2. Process Overview",
+                      "requiredInfo": "Monthly transaction volumes for 12 months; peak volume and period; weekday/weekend/holiday hours of operation; list of systems used"
+                    }
                   ],
                   "checkPoints": [
                     { "label": "checkpoint label", "status": "Pass|Fail|Warning", "note": "optional explanation" }
@@ -141,9 +170,24 @@ public class AzureOpenAiService : IAzureOpenAiService
                   "qualityScore": 90,
                   "summary": "Brief executive summary of the process analysis."
                 }
-                actionItems: concrete next steps that the team must take (e.g. document the process, schedule review, assign owner).
-                checkPoints: validation checks that confirm readiness or compliance (e.g. SLA defined, escalation path documented).
-                Respond ONLY with the JSON object, no markdown fences.
+
+                Rules for actionItems:
+                - Only create an action item for a section where information is genuinely missing or insufficient.
+                - Set priority=High for critical sections: Document Control, 2. Process Overview, 4. SOP Steps.
+                - Set priority=Medium for supporting sections: 3. RACI, 5. Work Instructions, 6. Escalation & Exceptions, 7. SLAs & Performance, 8. Volumetrics.
+                - Set priority=Low for sections that can be confirmed later: 9. Regulatory & Compliance, 10. Training, 11. OCC.
+                - "bartokSection" must exactly name the section (e.g. "4. SOP Steps").
+                - "requiredInfo" must list the specific data items that are absent or unconfirmed.
+                - If the uploaded document clearly covers a section, do NOT create a task for it.
+
+                Rules for checkPoints:
+                - Include one checkpoint per BARTOK section (11 total) assessing whether its information is sufficient.
+                - status=Pass: enough information is present in the intake or document.
+                - status=Warning: partial information; some items need confirmation from the process owner.
+                - status=Fail: section is critically under-documented; a task must be created.
+
+                actionItems: concrete steps to collect missing information required for the BARTOK S8 SOP output document.
+                checkPoints: section-level readiness checks for the BARTOK S8 SOP output document.
                 """;
 
             var requestBody = new
@@ -1388,55 +1432,149 @@ public class AzureOpenAiService : IAzureOpenAiService
 
     private static string GenerateMockAnalysis(IntakeRecord intake)
     {
+        var hasDocument  = !string.IsNullOrWhiteSpace(intake.UploadedFileName);
+        var hasOwner     = !string.IsNullOrWhiteSpace(intake.ProcessOwnerName);
+        var hasCountry   = !string.IsNullOrWhiteSpace(intake.Country);
+        var hasVolume    = intake.EstimatedVolumePerDay > 0;
+        // Default mock value for stepsIdentified when AI is not configured
+        const int mockStepsIdentified = 6;
+
         return System.Text.Json.JsonSerializer.Serialize(new
         {
             _source = "mock",
             processName = intake.ProcessName,
             confidenceScore = 82,
-            stepsIdentified = 6,
+            stepsIdentified = mockStepsIdentified,
             estimatedHandlingTimeMinutes = 12,
             complianceStatus = "Passed",
             automationPotential = "Medium",
             keyInsights = new[]
             {
-                $"Process '{intake.ProcessName}' has {6} distinct steps identified",
+                $"Process '{intake.ProcessName}' has {mockStepsIdentified} distinct steps identified",
                 $"Located in {intake.City}, {intake.Country} — timezone considerations apply",
                 $"Business unit '{intake.BusinessUnit}' shows standard process complexity",
-                "Compliance requirements appear to be met based on provided information"
+                "BARTOK S8 SOP readiness check performed — see checkpoints and tasks for gap details"
             },
             recommendations = new[]
             {
-                new { icon = "bulb", text = "Document each step with clear entry/exit criteria to reduce variation" },
-                new { icon = "target", text = "Identify top 3 bottlenecks for automation prioritization" },
-                new { icon = "bar", text = "Establish KPIs: cycle time, error rate, throughput per day" }
+                new { icon = "bulb", text = "Complete all BARTOK S8 SOP section tasks before scheduling the document review" },
+                new { icon = "target", text = "Prioritise gathering monthly volumetrics data and SLA metrics from the process owner" },
+                new { icon = "bar",   text = "Confirm automation opportunity rating and system names with the IT/Operations team" }
             },
             riskAreas = new[]
             {
-                "Manual handoff points between departments",
-                "Lack of standardized documentation for exception handling"
+                "Insufficient volumetrics data may delay SLA target-setting",
+                "Escalation and exception-handling paths are not yet documented"
             },
-            actionItems = new[]
+            actionItems = new object[]
             {
-                new { title = "Document Process Steps", description = $"Create a detailed step-by-step runbook for '{intake.ProcessName}' capturing inputs, outputs, and decision points for each step.", owner = $"{intake.ProcessOwnerName} / {intake.BusinessUnit}", priority = "High" },
-                new { title = "Schedule Process Walk-Through", description = "Organise a 90-minute walk-through session with the process team to validate captured steps and identify undocumented exceptions.", owner = "Process Owner", priority = "High" },
-                new { title = "Define SLA & KPIs", description = "Establish measurable SLAs (cycle time, error rate, throughput) and baseline current performance before any automation is applied.", owner = $"{intake.Department ?? intake.BusinessUnit} Lead", priority = "Medium" },
-                new { title = "Map Handoff Points", description = "Identify every manual handoff between teams or systems and document the responsible party, expected turnaround, and escalation path.", owner = "Business Analyst", priority = "Medium" },
-                new { title = "Conduct Automation Feasibility Study", description = "Assess the top 3 candidate steps for RPA/automation — estimate effort, cost, and expected ROI over 12 months.", owner = "Automation COE", priority = "Low" }
+                new { title = "Confirm Approver Details",
+                      description = $"The BARTOK S8 SOP Document Control section requires an approver name and email address. Please confirm who will approve the SOP for '{intake.ProcessName}'.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Process Owner",
+                      priority = "High",
+                      bartokSection = "Document Control",
+                      requiredInfo = "Approver full name; approver email address" },
+
+                new { title = "Provide Monthly Transaction Volumes",
+                      description = $"The BARTOK S8 SOP requires 12 months of transaction volume data, peak volume/period, and hours of operation (weekday/weekend/holiday) for '{intake.ProcessName}'. The intake currently shows {intake.EstimatedVolumePerDay} transactions/day but does not include monthly breakdowns.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Process Owner",
+                      priority = "High",
+                      bartokSection = "2. Process Overview",
+                      requiredInfo = "Monthly transaction volumes for the last 12 months; peak volume and period (e.g. month-end); weekday hours of operation; weekend hours; public holiday cover arrangements; list of all systems used in the process" },
+
+                new { title = "Define RACI Matrix",
+                      description = $"Section 3 of the BARTOK S8 SOP requires a RACI matrix with 4 process-specific task names and 4 role titles for '{intake.ProcessName}'. Please provide task and role details so the RACI table can be populated.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Process Owner",
+                      priority = "Medium",
+                      bartokSection = "3. RACI",
+                      requiredInfo = "4 task names specific to this process; 4 role titles; RACI assignments (Responsible/Accountable/Consulted/Informed) per cell" },
+
+                new { title = "Document SOP Steps and Work Instructions",
+                      description = $"Sections 4 and 5 of the BARTOK S8 SOP require detailed step-by-step actions, responsible roles, systems, decision points, automation assessment, and full work instructions for '{intake.ProcessName}'.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Process Owner",
+                      priority = "High",
+                      bartokSection = "4. SOP Steps",
+                      requiredInfo = "Step-by-step actions with responsible role and system per step; expected output per step; decision points with Yes/No paths; automation status (Manual/Partially Automated/Fully Automated); automation opportunity rating (Low/Medium/High/Prime); automation type (RPA/AI/Workflow/Integration/N/A); detailed work instructions including system navigation and error-handling steps" },
+
+                new { title = "Document Escalation Paths and Exception Handling",
+                      description = $"Section 6 of the BARTOK S8 SOP requires escalation triggers, escalation paths, resolution timeframes, exception types, and handling approaches for '{intake.ProcessName}'.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Process Owner",
+                      priority = "Medium",
+                      bartokSection = "6. Escalation & Exceptions",
+                      requiredInfo = "Escalation triggers; who to notify and how; resolution timeframe; exception types encountered; handling approach; approval requirements for exceptions" },
+
+                new { title = "Provide SLA Metrics and Performance Data",
+                      description = $"Section 7 of the BARTOK S8 SOP requires SLA metric names, measurement methods, reporting frequency, measurement tools, and actual vs target performance data for '{intake.ProcessName}'.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Process Owner",
+                      priority = "Medium",
+                      bartokSection = "7. SLAs & Performance",
+                      requiredInfo = "SLA metric name(s); measurement method; reporting frequency; measurement tool; actual performance figures; target performance figures" },
+
+                new { title = "Confirm Regulatory/Compliance References",
+                      description = $"Section 9 of the BARTOK S8 SOP requires applicable regulations, obligations, controls, and evidence artefacts for '{intake.ProcessName}'.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Compliance Team",
+                      priority = "Low",
+                      bartokSection = "9. Regulatory & Compliance",
+                      requiredInfo = "Applicable regulation(s) or standard(s); specific obligations; controls already in the process; evidence artefacts (documents/logs/reports); TechM Control Framework reference" },
+
+                new { title = "Confirm Training Materials and OCC Obligations",
+                      description = $"Sections 10 and 11 of the BARTOK S8 SOP require training module names, delivery methods, competency verification, and Orange Customer Contract (OCC) references for '{intake.ProcessName}'.",
+                      owner = hasOwner ? $"{intake.ProcessOwnerName}" : "Training & Compliance Team",
+                      priority = "Low",
+                      bartokSection = "10. Training",
+                      requiredInfo = "Training module name(s); delivery method (classroom/e-learning/on-the-job); competency verification approach; OCC reference numbers; OCC obligation descriptions; how this process addresses each OCC obligation" }
             },
-            checkPoints = new[]
+            checkPoints = new object[]
             {
-                new { label = "Process Owner Assigned", status = string.IsNullOrWhiteSpace(intake.ProcessOwnerName) ? "Fail" : "Pass", note = string.IsNullOrWhiteSpace(intake.ProcessOwnerName) ? "No process owner provided" : $"Assigned to {intake.ProcessOwnerName}" },
-                new { label = "Business Unit Defined", status = string.IsNullOrWhiteSpace(intake.BusinessUnit) ? "Fail" : "Pass", note = string.IsNullOrWhiteSpace(intake.BusinessUnit) ? "Business unit missing" : $"Unit: {intake.BusinessUnit}" },
-                new { label = "Location Information Complete", status = string.IsNullOrWhiteSpace(intake.Country) ? "Warning" : "Pass", note = string.IsNullOrWhiteSpace(intake.Country) ? "Country not specified" : $"{intake.City}, {intake.Country}" },
-                new { label = "Process Description Provided", status = string.IsNullOrWhiteSpace(intake.Description) ? "Fail" : "Pass", note = string.IsNullOrWhiteSpace(intake.Description) ? "No description" : "Description captured" },
-                new { label = "Volume Estimate Available", status = intake.EstimatedVolumePerDay == 0 ? "Warning" : "Pass", note = intake.EstimatedVolumePerDay == 0 ? "Volume per day not provided — needed for capacity planning" : $"{intake.EstimatedVolumePerDay} transactions/day" },
-                new { label = "Supporting Document Uploaded", status = string.IsNullOrWhiteSpace(intake.UploadedFileName) ? "Warning" : "Pass", note = string.IsNullOrWhiteSpace(intake.UploadedFileName) ? "No document attached — analysis is based on metadata only" : $"Document: {intake.UploadedFileName}" },
-                new { label = "Compliance Status Verified", status = "Pass", note = "No compliance blockers identified based on provided information" }
+                new { label = "Document Control — Author & Approver",
+                      status = hasOwner ? "Warning" : "Fail",
+                      note   = hasOwner ? $"Process author set to {intake.ProcessOwnerName}. Approver not yet confirmed." : "Process owner not assigned — author and approver fields will be blank in the SOP." },
+
+                new { label = "1. Purpose & Scope — Countries and Input Artefacts",
+                      status = hasCountry ? "Warning" : "Fail",
+                      note   = hasCountry ? $"Country '{intake.Country}' captured. Input artefact list needs confirmation." : "Country not specified — scope section cannot be completed." },
+
+                new { label = "2. Process Overview — Volumes, Hours & Systems",
+                      status = hasVolume ? "Warning" : "Fail",
+                      note   = hasVolume ? $"Estimated volume {intake.EstimatedVolumePerDay}/day recorded. Monthly breakdown, peak period, hours of operation, and systems list are required." : "No volume data provided — process overview section incomplete." },
+
+                new { label = "3. RACI — Tasks and Roles",
+                      status = "Warning",
+                      note   = "RACI tasks and role titles must be confirmed with the process owner before the RACI matrix can be populated." },
+
+                new { label = "4. SOP Steps — Actions, Systems & Automation",
+                      status = hasDocument ? "Warning" : "Fail",
+                      note   = hasDocument ? $"Document '{intake.UploadedFileName}' uploaded. Detailed SOP steps, decision points, and automation assessment still need confirmation." : "No supporting document — SOP steps cannot be derived. Please upload the process document or walk-through notes." },
+
+                new { label = "5. Work Instructions — Step-by-Step Detail",
+                      status = hasDocument ? "Warning" : "Fail",
+                      note   = hasDocument ? "Supporting document present. Detailed work instructions (navigation steps, field entries, error handling) need to be extracted or written." : "No document — work instructions cannot be drafted." },
+
+                new { label = "6. Escalation & Exceptions",
+                      status = "Fail",
+                      note   = "No escalation triggers, paths, or exception-handling information found in the intake or document." },
+
+                new { label = "7. SLAs & Performance",
+                      status = "Fail",
+                      note   = "No SLA metrics, measurement methods, or performance data found in the intake or document." },
+
+                new { label = "8. Volumetrics",
+                      status = hasVolume ? "Warning" : "Fail",
+                      note   = hasVolume ? $"Intake records {intake.EstimatedVolumePerDay} transactions/day. Monthly volumes, peak notes, and forecast are required for the Volumetrics section." : "No volume information — Volumetrics section cannot be completed." },
+
+                new { label = "9. Regulatory & Compliance",
+                      status = "Warning",
+                      note   = "No regulatory references found in the intake. Compliance team must confirm applicable regulations, controls, and evidence artefacts." },
+
+                new { label = "10. Training & 11. OCC",
+                      status = "Warning",
+                      note   = "Training materials and OCC obligations have not been specified. These must be confirmed before the SOP is finalised." }
             },
-            qualityScore = 78,
-            summary = $"Initial analysis of '{intake.ProcessName}' indicates a {intake.ProcessType.ToLower()} process with medium automation potential. " +
-                      $"The process handles approximately {intake.EstimatedVolumePerDay} transactions per day. " +
-                      "Recommend a detailed process walk-through to validate identified steps and capture exception flows."
+            qualityScore = 68,
+            summary = $"Initial BARTOK S8 SOP readiness assessment for '{intake.ProcessName}'. " +
+                      $"The intake provides foundational data (process owner, business unit, location) but several SOP sections require additional information from the process owner. " +
+                      $"Key gaps: monthly volumetrics, SLA metrics, SOP step detail, escalation paths, RACI assignments, and regulatory references. " +
+                      $"Tasks have been created for each gap section — complete them before generating the BARTOK S8 SOP document."
         });
     }
 
