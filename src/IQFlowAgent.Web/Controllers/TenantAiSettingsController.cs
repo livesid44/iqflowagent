@@ -20,6 +20,7 @@ public class TenantAiSettingsDto
     public string? AzureOpenAIDeploymentName    { get; set; }
     public string? AzureOpenAIApiVersion        { get; set; }
     public int    AzureOpenAIMaxTokens          { get; set; }
+    public string? AzureOpenAIModelVersion      { get; set; }
     public string? AzureStorageConnectionString { get; set; }
     public string? AzureStorageContainerName    { get; set; }
     public string? AzureSpeechRegion            { get; set; }
@@ -31,15 +32,18 @@ public class TenantAiSettingsController : Controller
 {
     private readonly ApplicationDbContext _db;
     private readonly ITenantContextService _tenantContext;
+    private readonly IAzureOpenAiService _aiService;
     private readonly ILogger<TenantAiSettingsController> _logger;
 
     public TenantAiSettingsController(
         ApplicationDbContext db,
         ITenantContextService tenantContext,
+        IAzureOpenAiService aiService,
         ILogger<TenantAiSettingsController> logger)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _aiService = aiService;
         _logger = logger;
     }
 
@@ -73,6 +77,14 @@ public class TenantAiSettingsController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> Save([FromForm] TenantAiSettingsDto model)
     {
+        if (!ModelState.IsValid)
+        {
+            var errors = string.Join("; ", ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage));
+            return Json(new { success = false, message = $"Validation failed: {errors}" });
+        }
+
         try
         {
             var tenantId = _tenantContext.GetCurrentTenantId();
@@ -98,6 +110,7 @@ public class TenantAiSettingsController : Controller
                     AzureOpenAIDeploymentName      = model.AzureOpenAIDeploymentName ?? string.Empty,
                     AzureOpenAIApiVersion          = model.AzureOpenAIApiVersion ?? "2025-01-01-preview",
                     AzureOpenAIMaxTokens           = model.AzureOpenAIMaxTokens > 0 ? model.AzureOpenAIMaxTokens : 4096,
+                    AzureOpenAIModelVersion        = model.AzureOpenAIModelVersion ?? "gpt-5.2",
                     AzureStorageConnectionString   = model.AzureStorageConnectionString ?? string.Empty,
                     AzureStorageContainerName      = model.AzureStorageContainerName ?? "intakes",
                     AzureSpeechRegion              = model.AzureSpeechRegion ?? string.Empty,
@@ -113,6 +126,7 @@ public class TenantAiSettingsController : Controller
                 existing.AzureOpenAIDeploymentName     = model.AzureOpenAIDeploymentName ?? string.Empty;
                 existing.AzureOpenAIApiVersion         = model.AzureOpenAIApiVersion ?? "2025-01-01-preview";
                 existing.AzureOpenAIMaxTokens          = model.AzureOpenAIMaxTokens > 0 ? model.AzureOpenAIMaxTokens : 4096;
+                existing.AzureOpenAIModelVersion       = model.AzureOpenAIModelVersion ?? "gpt-5.2";
                 existing.AzureStorageConnectionString  = model.AzureStorageConnectionString ?? string.Empty;
                 existing.AzureStorageContainerName     = model.AzureStorageContainerName ?? "intakes";
                 existing.AzureSpeechRegion             = model.AzureSpeechRegion ?? string.Empty;
@@ -127,10 +141,24 @@ public class TenantAiSettingsController : Controller
         }
         catch (Exception ex)
         {
-            // Full exception type + message + stack trace returned to admin browser
-            var fullError = $"{ex.GetType().Name}: {ex.Message}\n\n{ex.StackTrace}";
             _logger.LogError(ex, "TenantAiSettings/Save failed");
-            return Json(new { success = false, error = fullError, message = ex.Message });
+            return Json(new { success = false, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure OpenAI credentials by sending a lightweight prompt.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestConnection()
+    {
+        try
+        {
+            var (success, statusCode, message) = await _aiService.TestConnectionAsync();
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
         }
     }
 

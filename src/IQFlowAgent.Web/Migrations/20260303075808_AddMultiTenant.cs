@@ -14,28 +14,24 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<int>(
                 name: "TenantId",
                 table: "QcChecks",
-                type: "INTEGER",
                 nullable: false,
                 defaultValue: 1);
 
             migrationBuilder.AddColumn<int>(
                 name: "TenantId",
                 table: "MasterDepartments",
-                type: "INTEGER",
                 nullable: false,
                 defaultValue: 1);
 
             migrationBuilder.AddColumn<int>(
                 name: "TenantId",
                 table: "IntakeRecords",
-                type: "INTEGER",
                 nullable: false,
                 defaultValue: 1);
 
             migrationBuilder.AddColumn<int>(
                 name: "TenantId",
                 table: "AuthSettings",
-                type: "INTEGER",
                 nullable: false,
                 defaultValue: 1);
 
@@ -43,14 +39,15 @@ namespace IQFlowAgent.Web.Migrations
                 name: "Tenants",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
-                    Name = table.Column<string>(type: "TEXT", nullable: false),
-                    Slug = table.Column<string>(type: "TEXT", nullable: false),
-                    Color = table.Column<string>(type: "TEXT", nullable: false),
-                    Description = table.Column<string>(type: "TEXT", nullable: true),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    Name = table.Column<string>(nullable: false),
+                    Slug = table.Column<string>(nullable: false),
+                    Color = table.Column<string>(nullable: false),
+                    Description = table.Column<string>(nullable: true),
+                    IsActive = table.Column<bool>(nullable: false),
+                    CreatedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {
@@ -61,18 +58,19 @@ namespace IQFlowAgent.Web.Migrations
                 name: "TenantAiSettings",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
-                    TenantId = table.Column<int>(type: "INTEGER", nullable: false),
-                    AzureOpenAIEndpoint = table.Column<string>(type: "TEXT", nullable: false),
-                    AzureOpenAIApiKey = table.Column<string>(type: "TEXT", nullable: false),
-                    AzureOpenAIDeploymentName = table.Column<string>(type: "TEXT", nullable: false),
-                    AzureOpenAIApiVersion = table.Column<string>(type: "TEXT", nullable: false),
-                    AzureOpenAIMaxTokens = table.Column<int>(type: "INTEGER", nullable: false),
-                    AzureStorageConnectionString = table.Column<string>(type: "TEXT", nullable: false),
-                    AzureStorageContainerName = table.Column<string>(type: "TEXT", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    UpdatedByUserId = table.Column<string>(type: "TEXT", nullable: true)
+                    TenantId = table.Column<int>(nullable: false),
+                    AzureOpenAIEndpoint = table.Column<string>(nullable: false),
+                    AzureOpenAIApiKey = table.Column<string>(nullable: false),
+                    AzureOpenAIDeploymentName = table.Column<string>(nullable: false),
+                    AzureOpenAIApiVersion = table.Column<string>(nullable: false),
+                    AzureOpenAIMaxTokens = table.Column<int>(nullable: false),
+                    AzureStorageConnectionString = table.Column<string>(nullable: false),
+                    AzureStorageContainerName = table.Column<string>(nullable: false),
+                    UpdatedAt = table.Column<DateTime>(nullable: false),
+                    UpdatedByUserId = table.Column<string>(nullable: true)
                 },
                 constraints: table =>
                 {
@@ -89,13 +87,14 @@ namespace IQFlowAgent.Web.Migrations
                 name: "UserTenants",
                 columns: table => new
                 {
-                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    Id = table.Column<int>(nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1")
                         .Annotation("Sqlite:Autoincrement", true),
-                    UserId = table.Column<string>(type: "TEXT", nullable: false),
-                    TenantId = table.Column<int>(type: "INTEGER", nullable: false),
-                    TenantRole = table.Column<string>(type: "TEXT", nullable: false),
-                    IsDefault = table.Column<bool>(type: "INTEGER", nullable: false),
-                    AssignedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                    UserId = table.Column<string>(maxLength: 450, nullable: false),
+                    TenantId = table.Column<int>(nullable: false),
+                    TenantRole = table.Column<string>(nullable: false),
+                    IsDefault = table.Column<bool>(nullable: false),
+                    AssignedAt = table.Column<DateTime>(nullable: false)
                 },
                 constraints: table =>
                 {

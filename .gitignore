@@ -12,3 +12,11 @@ obj/
 # Local config overrides — may contain real credentials, never commit
 appsettings.Development.json
 appsettings.Local.json
+
+# Runtime data directories — database, uploaded files, generated reports
+**/App_Data/
+**/wwwroot/uploads/
+**/wwwroot/reports/
+
+# Production settings may contain real credentials, never commit
+appsettings.Production.json

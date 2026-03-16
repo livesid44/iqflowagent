@@ -22,68 +22,49 @@ namespace IQFlowAgent.Web.Migrations
 
             modelBuilder.Entity("IQFlowAgent.Web.Models.ApplicationUser", b =>
                 {
-                    b.Property<string>("Id")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Id");
 
-                    b.Property<int>("AccessFailedCount")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("AccessFailedCount");
 
                     b.Property<string>("ConcurrencyStamp")
-                        .IsConcurrencyToken()
-                        .HasColumnType("TEXT");
+                        .IsConcurrencyToken();
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
                     b.Property<string>("Email")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasMaxLength(256);
 
-                    b.Property<bool>("EmailConfirmed")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("EmailConfirmed");
 
                     b.Property<string>("FullName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsActive");
 
-                    b.Property<DateTime?>("LastLogin")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("LastLogin");
 
-                    b.Property<bool>("LockoutEnabled")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("LockoutEnabled");
 
-                    b.Property<DateTimeOffset?>("LockoutEnd")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTimeOffset?>("LockoutEnd");
 
                     b.Property<string>("NormalizedEmail")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasMaxLength(256);
 
                     b.Property<string>("NormalizedUserName")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasMaxLength(256);
 
-                    b.Property<string>("PasswordHash")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("PasswordHash");
 
-                    b.Property<string>("PhoneNumber")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("PhoneNumber");
 
-                    b.Property<bool>("PhoneNumberConfirmed")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("PhoneNumberConfirmed");
 
-                    b.Property<string>("SecurityStamp")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("SecurityStamp");
 
-                    b.Property<bool>("TwoFactorEnabled")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("TwoFactorEnabled");
 
                     b.Property<string>("UserName")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasMaxLength(256);
 
                     b.HasKey("Id");
 
@@ -100,39 +81,28 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.AuthSettings", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
                     b.Property<string>("AuthMode")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<string>("LdapBaseDn")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LdapBaseDn");
 
-                    b.Property<string>("LdapBindDn")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LdapBindDn");
 
-                    b.Property<string>("LdapBindPassword")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LdapBindPassword");
 
-                    b.Property<int>("LdapPort")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("LdapPort");
 
-                    b.Property<string>("LdapSearchFilter")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LdapSearchFilter");
 
-                    b.Property<string>("LdapServer")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LdapServer");
 
-                    b.Property<bool>("LdapUseSsl")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("LdapUseSsl");
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("UpdatedAt");
 
                     b.HasKey("Id");
 
@@ -142,31 +112,23 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.FinalReport", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
                     b.Property<string>("FilePath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<long>("FileSizeBytes")
-                        .HasColumnType("INTEGER");
+                    b.Property<long>("FileSizeBytes");
 
-                    b.Property<DateTime>("GeneratedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("GeneratedAt");
 
-                    b.Property<string>("GeneratedByName")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("GeneratedByName");
 
-                    b.Property<string>("GeneratedByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("GeneratedByUserId");
 
-                    b.Property<int>("IntakeRecordId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeRecordId");
 
                     b.Property<string>("ReportFileName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("Id");
 
@@ -178,51 +140,37 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.IntakeDocument", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<string>("ContentType")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ContentType");
 
                     b.Property<string>("DocumentType")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("FilePath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<long?>("FileSize")
-                        .HasColumnType("INTEGER");
+                    b.Property<long?>("FileSize");
 
-                    b.Property<int>("IntakeRecordId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeRecordId");
 
-                    b.Property<int?>("IntakeTaskId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int?>("IntakeTaskId");
 
-                    b.Property<string>("SopDocumentPath")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("SopDocumentPath");
 
                     b.Property<string>("TranscriptStatus")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<string>("TranscriptText")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("TranscriptText");
 
-                    b.Property<DateTime>("UploadedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("UploadedAt");
 
-                    b.Property<string>("UploadedByName")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UploadedByName");
 
-                    b.Property<string>("UploadedByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UploadedByUserId");
 
                     b.HasKey("Id");
 
@@ -236,101 +184,74 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.IntakeRecord", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<string>("AnalysisResult")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("AnalysisResult");
 
-                    b.Property<DateTime?>("AnalyzedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("AnalyzedAt");
 
                     b.Property<string>("BusinessUnit")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("City")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Country")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("CreatedByUserId");
 
                     b.Property<string>("Department")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("EstimatedVolumePerDay")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("EstimatedVolumePerDay");
 
                     b.Property<string>("IntakeId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Lob")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Priority")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("ProcessName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("ProcessOwnerEmail")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("ProcessOwnerName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("ProcessType")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("SiteLocation")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<DateTime?>("SubmittedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("SubmittedAt");
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
                     b.Property<string>("TimeZone")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<string>("UploadedFileContentType")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UploadedFileContentType");
 
-                    b.Property<string>("UploadedFileName")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UploadedFileName");
 
-                    b.Property<string>("UploadedFilePath")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UploadedFilePath");
 
-                    b.Property<long?>("UploadedFileSize")
-                        .HasColumnType("INTEGER");
+                    b.Property<long?>("UploadedFileSize");
 
                     b.HasKey("Id");
 
@@ -340,53 +261,39 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.IntakeTask", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("CompletedAt");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("CreatedByUserId");
 
                     b.Property<string>("Description")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<DateTime>("DueDate")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("DueDate");
 
-                    b.Property<int>("IntakeRecordId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeRecordId");
 
-                    b.Property<bool>("IsNotApplicable")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsNotApplicable");
 
-                    b.Property<string>("NaReason")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("NaReason");
 
                     b.Property<string>("Owner")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Priority")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("TaskId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("Id");
 
@@ -398,24 +305,18 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.MasterDepartment", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("Description")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Description");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsActive");
 
                     b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
                     b.HasKey("Id");
 
@@ -425,28 +326,21 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.MasterLob", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
                     b.Property<string>("DepartmentName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<string>("Description")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Description");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsActive");
 
                     b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
                     b.HasKey("Id");
 
@@ -456,36 +350,26 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.QcCheck", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("CompletedAt");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ErrorMessage");
 
-                    b.Property<int>("IntakeRecordId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeRecordId");
 
-                    b.Property<int>("OverallScore")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("OverallScore");
 
-                    b.Property<string>("RunByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("RunByUserId");
 
-                    b.Property<string>("ScoreBreakdownJson")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ScoreBreakdownJson");
 
                     b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
                     b.HasKey("Id");
 
@@ -497,36 +381,26 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.RagJob", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("CompletedAt");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ErrorMessage");
 
-                    b.Property<int>("IntakeRecordId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeRecordId");
 
-                    b.Property<string>("NotifyUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("NotifyUserId");
 
-                    b.Property<int>("ProcessedFiles")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("ProcessedFiles");
 
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("StartedAt");
 
                     b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("TotalFiles")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TotalFiles");
 
                     b.HasKey("Id");
 
@@ -538,49 +412,36 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.ReportFieldStatus", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime?>("AnalyzedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime?>("AnalyzedAt");
 
                     b.Property<string>("FieldKey")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("FieldLabel")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<string>("FillValue")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("FillValue");
 
-                    b.Property<int>("IntakeRecordId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeRecordId");
 
-                    b.Property<bool>("IsNA")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsNA");
 
-                    b.Property<string>("LinkedTaskId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LinkedTaskId");
 
-                    b.Property<string>("Notes")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Notes");
 
                     b.Property<string>("Section")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("TemplatePlaceholder")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("UpdatedAt");
 
                     b.HasKey("Id");
 
@@ -592,33 +453,24 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.TaskActionLog", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
                     b.Property<string>("ActionType")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<string>("Comment")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Comment");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("CreatedByName")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("CreatedByName");
 
-                    b.Property<string>("CreatedByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("CreatedByUserId");
 
-                    b.Property<int>("IntakeTaskId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("IntakeTaskId");
 
-                    b.Property<string>("NewStatus")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("NewStatus");
 
-                    b.Property<string>("OldStatus")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("OldStatus");
 
                     b.HasKey("Id");
 
@@ -630,29 +482,22 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.Tenant", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
                     b.Property<string>("Color")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("CreatedAt");
 
-                    b.Property<string>("Description")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Description");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsActive");
 
                     b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("Slug")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("Id");
 
@@ -662,52 +507,39 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.TenantAiSettings", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
                     b.Property<string>("AzureOpenAIApiKey")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("AzureOpenAIApiVersion")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("AzureOpenAIDeploymentName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("AzureOpenAIEndpoint")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("AzureOpenAIMaxTokens")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("AzureOpenAIMaxTokens");
 
                     b.Property<string>("AzureSpeechApiKey")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("AzureSpeechRegion")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("AzureStorageConnectionString")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("AzureStorageContainerName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("UpdatedAt");
 
-                    b.Property<string>("UpdatedByUserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UpdatedByUserId");
 
                     b.HasKey("Id");
 
@@ -719,25 +551,19 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("IQFlowAgent.Web.Models.UserTenant", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<DateTime>("AssignedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<DateTime>("AssignedAt");
 
-                    b.Property<bool>("IsDefault")
-                        .HasColumnType("INTEGER");
+                    b.Property<bool>("IsDefault");
 
-                    b.Property<int>("TenantId")
-                        .HasColumnType("INTEGER");
+                    b.Property<int>("TenantId");
 
                     b.Property<string>("TenantRole")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("Id");
 
@@ -750,20 +576,16 @@ namespace IQFlowAgent.Web.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
-                    b.Property<string>("Id")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Id");
 
                     b.Property<string>("ConcurrencyStamp")
-                        .IsConcurrencyToken()
-                        .HasColumnType("TEXT");
+                        .IsConcurrencyToken();
 
                     b.Property<string>("Name")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasMaxLength(256);
 
                     b.Property<string>("NormalizedName")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
+                        .HasMaxLength(256);
 
                     b.HasKey("Id");
 
@@ -777,18 +599,14 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<string>("ClaimType")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ClaimType");
 
-                    b.Property<string>("ClaimValue")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ClaimValue");
 
                     b.Property<string>("RoleId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("Id");
 
@@ -800,18 +618,14 @@ namespace IQFlowAgent.Web.Migrations
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<string>", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .ValueGeneratedOnAdd();
 
-                    b.Property<string>("ClaimType")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ClaimType");
 
-                    b.Property<string>("ClaimValue")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ClaimValue");
 
                     b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("Id");
 
@@ -822,18 +636,14 @@ namespace IQFlowAgent.Web.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<string>", b =>
                 {
-                    b.Property<string>("LoginProvider")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LoginProvider");
 
-                    b.Property<string>("ProviderKey")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ProviderKey");
 
-                    b.Property<string>("ProviderDisplayName")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("ProviderDisplayName");
 
                     b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                        .IsRequired();
 
                     b.HasKey("LoginProvider", "ProviderKey");
 
@@ -844,11 +654,9 @@ namespace IQFlowAgent.Web.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserRole<string>", b =>
                 {
-                    b.Property<string>("UserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UserId");
 
-                    b.Property<string>("RoleId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("RoleId");
 
                     b.HasKey("UserId", "RoleId");
 
@@ -859,17 +667,13 @@ namespace IQFlowAgent.Web.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<string>", b =>
                 {
-                    b.Property<string>("UserId")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("UserId");
 
-                    b.Property<string>("LoginProvider")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("LoginProvider");
 
-                    b.Property<string>("Name")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Name");
 
-                    b.Property<string>("Value")
-                        .HasColumnType("TEXT");
+                    b.Property<string>("Value");
 
                     b.HasKey("UserId", "LoginProvider", "Name");
 

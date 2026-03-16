@@ -12,6 +12,7 @@ public class IntakeRecord
     public string BusinessUnit { get; set; } = string.Empty;
     public string Department { get; set; } = string.Empty;
     public string Lob { get; set; } = string.Empty; // Line of Business (maps to Deployment)
+    public string SdcLots { get; set; } = string.Empty; // Lots or SDC (comma-separated multi-select)
     public string ProcessOwnerName { get; set; } = string.Empty;
     public string ProcessOwnerEmail { get; set; } = string.Empty;
     public string ProcessType { get; set; } = string.Empty; // Manual, Semi-Automated, Automated
@@ -33,6 +34,14 @@ public class IntakeRecord
     // Status & Analysis
     public string Status { get; set; } = "Draft"; // Draft, Submitted, Analyzing, Complete, Error
     public string? AnalysisResult { get; set; }      // JSON from Azure OpenAI
+
+    /// <summary>
+    /// JSON array of PII/SPII findings that were masked before the analysis was sent to the LLM.
+    /// Each element has the shape { "entityType": "…", "matchedText": "…" }.
+    /// Null when no PII was detected (or PII scanning was disabled at the time of analysis).
+    /// </summary>
+    public string? PiiMaskingLog { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SubmittedAt { get; set; }
     public DateTime? AnalyzedAt { get; set; }

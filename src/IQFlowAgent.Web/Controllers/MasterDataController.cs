@@ -223,5 +223,290 @@ public class MasterDataController : Controller
         TempData["Success"] = $"LOB '{lob.Name}' {(lob.IsActive ? "activated" : "deactivated")}.";
         return RedirectToAction(nameof(Lob));
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  LOT Country/City Mapping
+    // ═══════════════════════════════════════════════════════════
+
+    private static readonly string[] SdcLotOptions =
+    [
+        "Lot 1 – Global Customer Support",
+        "Lot 2 – Quote to Bill",
+        "Lot 3 – International Integrator",
+        "Lot 4 – One Post Sales"
+    ];
+
+    // GET /MasterData/LotCountryMapping
+    public async Task<IActionResult> LotCountryMapping()
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var mappings = await _db.LotCountryMappings
+            .Where(m => m.TenantId == tenantId)
+            .OrderBy(m => m.LotName)
+            .ThenBy(m => m.Country)
+            .ToListAsync();
+
+        var settings = await _db.TenantAiSettings
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId);
+
+        ViewBag.LotOptions = SdcLotOptions;
+        ViewBag.UseCountryFilterByLot = settings?.UseCountryFilterByLot ?? false;
+        return View(mappings);
+    }
+
+    // POST /MasterData/CreateLotCountryMapping
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> CreateLotCountryMapping(
+        string lotName, string country, string? cities)
+    {
+        if (string.IsNullOrWhiteSpace(lotName) || string.IsNullOrWhiteSpace(country))
+        {
+            TempData["Error"] = "LOT name and Country are required.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        var tenantId       = _tenantContext.GetCurrentTenantId();
+        var trimmedLot     = lotName.Trim();
+        var trimmedCountry = country.Trim();
+
+        // New cities submitted by the user (empty list = "all cities" wildcard)
+        var newCities = (cities ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+        var existing = await _db.LotCountryMappings.FirstOrDefaultAsync(m =>
+            m.TenantId == tenantId &&
+            m.LotName  == trimmedLot &&
+            m.Country.ToLower() == trimmedCountry.ToLower());
+
+        if (existing == null)
+        {
+            // No row yet for this LOT + Country — create fresh
+            _db.LotCountryMappings.Add(new LotCountryMapping
+            {
+                TenantId = tenantId,
+                LotName  = trimmedLot,
+                Country  = trimmedCountry,
+                Cities   = cities?.Trim() ?? string.Empty,
+                IsActive = true
+            });
+            await _db.SaveChangesAsync();
+            TempData["Success"] = $"Mapping '{trimmedCountry}' → '{trimmedLot}' created.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        // Row already exists — merge at city level
+        if (newCities.Count == 0)
+        {
+            // Submitting "all cities" when a row already exists is ambiguous; redirect to Edit
+            TempData["Error"] = $"'{trimmedCountry}' is already mapped under '{trimmedLot}'. Use Edit to update its cities.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        // If the existing row already covers "all cities" (empty Cities), any specific city is already included
+        if (string.IsNullOrWhiteSpace(existing.Cities))
+        {
+            TempData["Error"] = $"'{trimmedCountry}' under '{trimmedLot}' is already mapped for all cities. Use Edit to restrict it to specific cities.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        var existingCities = existing.Cities
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var toAdd = newCities.Where(c => !existingCities.Contains(c)).ToList();
+
+        if (toAdd.Count == 0)
+        {
+            var dupes = string.Join(", ", newCities);
+            TempData["Error"] = $"City/cities '{dupes}' already exist under '{trimmedCountry}' → '{trimmedLot}'.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        // Merge and save
+        existing.Cities = string.Join(",", existingCities.Concat(toAdd).OrderBy(c => c, StringComparer.OrdinalIgnoreCase));
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Added {toAdd.Count} city/cities ({string.Join(", ", toAdd)}) to '{trimmedCountry}' → '{trimmedLot}'.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/EditLotCountryMapping/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> EditLotCountryMapping(
+        int id, string lotName, string country, string? cities, bool isActive)
+    {
+        var mapping = await _db.LotCountryMappings.FindAsync(id);
+        if (mapping == null) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(lotName) || string.IsNullOrWhiteSpace(country))
+        {
+            TempData["Error"] = "LOT name and Country are required.";
+            return RedirectToAction(nameof(LotCountryMapping));
+        }
+
+        var trimmedLot     = lotName.Trim();
+        var trimmedCountry = country.Trim();
+        var tenantId       = _tenantContext.GetCurrentTenantId();
+
+        // If the LOT + Country target is being changed, ensure no city-level clash
+        // with any OTHER existing row for the new LOT + Country.
+        if (!string.Equals(mapping.LotName, trimmedLot, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(mapping.Country, trimmedCountry, StringComparison.OrdinalIgnoreCase))
+        {
+            var newCities = (cities ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var sibling = await _db.LotCountryMappings.FirstOrDefaultAsync(m =>
+                m.Id       != id &&
+                m.TenantId == tenantId &&
+                m.LotName  == trimmedLot &&
+                m.Country.ToLower() == trimmedCountry.ToLower());
+
+            if (sibling != null && newCities.Count > 0)
+            {
+                var siblingCities = sibling.Cities
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var clashes = newCities.Where(c => siblingCities.Contains(c)).ToList();
+
+                // A sibling row with empty Cities already covers all cities — every new city clashes
+                if (string.IsNullOrWhiteSpace(sibling.Cities) || clashes.Count > 0)
+                {
+                    var clashList = string.IsNullOrWhiteSpace(sibling.Cities)
+                        ? string.Join(", ", newCities)
+                        : string.Join(", ", clashes);
+                    TempData["Error"] = $"City/cities '{clashList}' already exist under '{trimmedCountry}' → '{trimmedLot}'.";
+                    return RedirectToAction(nameof(LotCountryMapping));
+                }
+            }
+        }
+
+        mapping.LotName  = trimmedLot;
+        mapping.Country  = trimmedCountry;
+        mapping.Cities   = cities?.Trim() ?? string.Empty;
+        mapping.IsActive = isActive;
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{trimmedCountry}' updated.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/DeleteLotCountryMapping/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Roles = "SuperAdmin")]
+    public async Task<IActionResult> DeleteLotCountryMapping(int id)
+    {
+        var mapping = await _db.LotCountryMappings.FindAsync(id);
+        if (mapping == null) return NotFound();
+
+        _db.LotCountryMappings.Remove(mapping);
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{mapping.Country}' deleted.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/ToggleLotCountryMapping/{id}
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ToggleLotCountryMapping(int id)
+    {
+        var mapping = await _db.LotCountryMappings.FindAsync(id);
+        if (mapping == null) return NotFound();
+
+        mapping.IsActive = !mapping.IsActive;
+        await _db.SaveChangesAsync();
+        TempData["Success"] = $"Mapping '{mapping.Country}' {(mapping.IsActive ? "activated" : "deactivated")}.";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // POST /MasterData/SaveLotFilterSetting — toggle UseCountryFilterByLot
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveLotFilterSetting(bool useCountryFilterByLot)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var settings = await _db.TenantAiSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
+        if (settings != null)
+        {
+            settings.UseCountryFilterByLot = useCountryFilterByLot;
+            await _db.SaveChangesAsync();
+        }
+        TempData["Success"] = useCountryFilterByLot
+            ? "Country/City filter by LOT is now enabled."
+            : "Country/City filter by LOT is now disabled (global master list will be used).";
+        return RedirectToAction(nameof(LotCountryMapping));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Intake Field Configuration
+    // ═══════════════════════════════════════════════════════════
+
+    // GET /MasterData/IntakeFields
+    public async Task<IActionResult> IntakeFields()
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var configs  = await EnsureIntakeFieldConfigsAsync(tenantId);
+        return View(configs);
+    }
+
+    // POST /MasterData/SaveIntakeFields — bulk save visibility / mandatory toggles
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SaveIntakeFields(IFormCollection form)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        var configs  = await _db.IntakeFieldConfigs
+            .Where(f => f.TenantId == tenantId)
+            .ToListAsync();
+
+        foreach (var config in configs)
+        {
+            config.IsVisible  = form.ContainsKey($"visible_{config.FieldName}");
+            // Mandatory only makes sense when the field is visible
+            config.IsMandatory = config.IsVisible && form.ContainsKey($"mandatory_{config.FieldName}");
+        }
+
+        await _db.SaveChangesAsync();
+        TempData["Success"] = "Intake field configuration saved successfully.";
+        return RedirectToAction(nameof(IntakeFields));
+    }
+
+    /// <summary>
+    /// Returns the intake field configs for a tenant, creating the default set
+    /// if none exist yet (e.g. for tenants created before this feature was added).
+    /// </summary>
+    private async Task<List<IntakeFieldConfig>> EnsureIntakeFieldConfigsAsync(int tenantId)
+    {
+        var existing = await _db.IntakeFieldConfigs
+            .Where(f => f.TenantId == tenantId)
+            .OrderBy(f => f.DisplayOrder)
+            .ToListAsync();
+
+        if (existing.Count > 0)
+            return existing;
+
+        // Provision defaults for this tenant
+        var defaults = IntakeFieldConfig.DefaultFields
+            .Select(d => new IntakeFieldConfig
+            {
+                TenantId    = tenantId,
+                FieldName   = d.FieldName,
+                DisplayName = d.DisplayName,
+                SectionName = d.SectionName,
+                IsVisible   = true,
+                IsMandatory = d.IsMandatory,
+                DisplayOrder = d.DisplayOrder,
+            })
+            .ToList();
+
+        _db.IntakeFieldConfigs.AddRange(defaults);
+        await _db.SaveChangesAsync();
+        return defaults;
+    }
 }
+
 

@@ -13,12 +13,20 @@ public class TenantAiSettings
     public string AzureOpenAIDeploymentName { get; set; } = string.Empty;
     public string AzureOpenAIApiVersion { get; set; } = "2025-01-01-preview";
     public int AzureOpenAIMaxTokens { get; set; } = 2000;
+    /// <summary>Active model version used in API calls: "gpt-4o" or "gpt-5.2".</summary>
+    public string AzureOpenAIModelVersion { get; set; } = "gpt-5.2";
     public string AzureStorageConnectionString { get; set; } = string.Empty;
     public string AzureStorageContainerName { get; set; } = "intakes";
 
     // Azure Speech-to-Text (for audio/video transcription)
     public string AzureSpeechRegion { get; set; } = string.Empty;
     public string AzureSpeechApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When true the intake form's Country/City dropdowns are filtered by the selected LOT(s)
+    /// using the LotCountryMapping table.  When false, the full global list is shown.
+    /// </summary>
+    public bool UseCountryFilterByLot { get; set; } = false;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public string? UpdatedByUserId { get; set; }

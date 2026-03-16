@@ -1,8 +1,24 @@
 @model IQFlowAgent.Web.ViewModels.IntakeViewModel
+@using IQFlowAgent.Web.Models
 @{
     Layout = "_Layout";
     ViewData["Title"] = "New Intake";
     ViewData["ActivePage"] = "intake";
+
+    // Field config dictionary — keyed by FieldName.
+    // Falls back to an always-visible, non-mandatory stub when the key is missing.
+    var fcRaw = ViewBag.FieldConfigs as Dictionary<string, IntakeFieldConfig>
+                ?? new Dictionary<string, IntakeFieldConfig>();
+
+    IntakeFieldConfig Fc(string key) =>
+        fcRaw.TryGetValue(key, out var c) ? c
+        : new IntakeFieldConfig { FieldName = key, IsVisible = true, IsMandatory = false };
+
+    // Emit " required" attribute string when field is mandatory
+    // Emit the required asterisk span
+    string ReqStar(string key) => Fc(key).IsMandatory ? "<span class=\"required\">*</span>" : "";
+    // Returns "required" or null — Razor omits null HTML attributes entirely
+    string? ReqAttr(string key) => Fc(key).IsMandatory ? "required" : null;
 }
 
 <style>
@@ -87,8 +103,16 @@
 @await Html.PartialAsync("_AppShell")
 
 <main class="app-main">
-    <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
         <a asp-action="Index" style="color:#888;text-decoration:none;font-size:0.85rem;"><i class="bi bi-arrow-left"></i> Back to Intakes</a>
+        <div style="display:flex;gap:8px;align-items:center;background:#f1f5f9;border-radius:8px;padding:4px;">
+            <span style="background:#1a2a5e;color:#fff;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;display:flex;align-items:center;gap:5px;">
+                <i class="bi bi-ui-checks-grid"></i> Form
+            </span>
+            <a asp-action="Chat" style="color:#666;text-decoration:none;padding:6px 14px;font-size:0.82rem;font-weight:500;display:flex;align-items:center;gap:5px;">
+                <i class="bi bi-robot"></i> Chat
+            </a>
+        </div>
     </div>
     <div class="page-title">New Process Intake</div>
     <div class="page-sub">Provide process meta information and optionally upload supporting documents for AI analysis</div>
@@ -101,7 +125,7 @@
         <div class="step active"><span class="num">4</span>Documents</div>
     </div>
 
-    <form asp-action="Create" method="post" enctype="multipart/form-data">
+    <form id="intakeCreateForm" asp-action="Create" method="post" enctype="multipart/form-data">
         @Html.AntiForgeryToken()
 
         <!-- ── SECTION 1: Process Information ───────────────────── -->
@@ -109,59 +133,128 @@
             <div class="form-section-title">
                 <i class="bi bi-diagram-3"></i> Process Information
             </div>
+            @if (Fc(IntakeFieldConfig.FProcessName).IsVisible)
+            {
             <div class="form-row">
                 <div class="form-group full">
-                    <label asp-for="ProcessName">Process Name <span class="required">*</span></label>
-                    <input asp-for="ProcessName" class="form-control" placeholder="e.g. Customer Service Call Handling" />
+                    <label asp-for="ProcessName">Process Name @Html.Raw(ReqStar(IntakeFieldConfig.FProcessName))</label>
+                    <input asp-for="ProcessName" class="form-control" placeholder="e.g. Customer Service Call Handling" required="@ReqAttr(IntakeFieldConfig.FProcessName)" />
                     <span asp-validation-for="ProcessName" class="text-danger"></span>
                 </div>
             </div>
+            }
+            @if (Fc(IntakeFieldConfig.FDescription).IsVisible)
+            {
             <div class="form-row">
                 <div class="form-group full">
-                    <label asp-for="Description">Description <span class="required">*</span></label>
-                    <textarea asp-for="Description" class="form-control" placeholder="Describe the business process in detail — what it does, who it involves, and key inputs/outputs…"></textarea>
+                    <label asp-for="Description">
+                        Description @Html.Raw(ReqStar(IntakeFieldConfig.FDescription))
+                        <button type="button" id="toggleAiAssist"
+                                onclick="toggleAiPanel()"
+                                style="margin-left:10px;background:none;border:1px solid #1a2a5e;color:#1a2a5e;border-radius:5px;
+                                       padding:2px 10px;font-size:0.75rem;font-weight:600;cursor:pointer;vertical-align:middle;"
+                                title="Generate description using AI from your key points">
+                            <i class="bi bi-stars me-1"></i>AI Assist
+                        </button>
+                    </label>
+                    <!-- AI Assist panel -->
+                    <div id="aiAssistPanel" style="display:none;background:#f8faff;border:1px solid #c8d5f0;
+                         border-radius:8px;padding:14px 16px;margin-bottom:8px;">
+                        <p style="font-size:0.8rem;color:#444;margin:0 0 8px;">
+                            Enter brief pointers or key notes (one per line). The AI will expand them into a full description.
+                        </p>
+                        <textarea id="aiPointers" rows="4"
+                                  style="width:100%;border:1px solid #ddd;border-radius:6px;padding:8px 10px;
+                                         font-size:0.87rem;resize:vertical;box-sizing:border-box;"
+                                  placeholder="e.g.&#10;- Process handles inbound customer calls&#10;- Agent verifies identity, logs issue&#10;- Escalates if unresolved in 5 min"></textarea>
+                        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                            <button type="button" id="aiGenerateBtn" onclick="generateDescription('Description','aiPointers','ProcessName','aiGenerateBtn','aiError')"
+                                    style="background:#1a2a5e;color:#fff;border:none;border-radius:6px;
+                                           padding:6px 18px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                <i class="bi bi-stars me-1"></i>Generate Description
+                            </button>
+                            <span id="aiError" style="color:#e31837;font-size:0.8rem;"></span>
+                        </div>
+                    </div>
+                    <textarea asp-for="Description" id="Description" class="form-control" required="@ReqAttr(IntakeFieldConfig.FDescription)"
+                              placeholder="Describe the business process in detail — what it does, who it involves, and key inputs/outputs…"></textarea>
                     <span asp-validation-for="Description" class="text-danger"></span>
                 </div>
             </div>
+            }
+            @{
+                var showProcessType = Fc(IntakeFieldConfig.FProcessType).IsVisible;
+                var showPriority    = Fc(IntakeFieldConfig.FPriority).IsVisible;
+                var showVolume      = Fc(IntakeFieldConfig.FEstimatedVolumePerDay).IsVisible;
+            }
+            @if (showProcessType || showPriority || showVolume)
+            {
             <div class="form-row">
+                @if (showProcessType)
+                {
                 <div class="form-group">
-                    <label asp-for="ProcessType">Process Type</label>
-                    <select asp-for="ProcessType" class="form-control">
+                    <label asp-for="ProcessType">Process Type @Html.Raw(ReqStar(IntakeFieldConfig.FProcessType))</label>
+                    <select asp-for="ProcessType" class="form-control" required="@ReqAttr(IntakeFieldConfig.FProcessType)">
                         <option value="Manual">Manual</option>
                         <option value="Semi-Automated">Semi-Automated</option>
                         <option value="Automated">Automated</option>
                     </select>
                 </div>
+                }
+                @if (showPriority)
+                {
                 <div class="form-group">
-                    <label asp-for="Priority">Priority</label>
-                    <select asp-for="Priority" class="form-control">
+                    <label asp-for="Priority">Priority @Html.Raw(ReqStar(IntakeFieldConfig.FPriority))</label>
+                    <select asp-for="Priority" class="form-control" required="@ReqAttr(IntakeFieldConfig.FPriority)">
                         <option value="High">High</option>
                         <option value="Medium" selected>Medium</option>
                         <option value="Low">Low</option>
                     </select>
                 </div>
+                }
+                @if (showVolume)
+                {
                 <div class="form-group">
-                    <label asp-for="EstimatedVolumePerDay">Est. Volume / Day</label>
-                    <input asp-for="EstimatedVolumePerDay" class="form-control" type="number" min="0" placeholder="e.g. 500" />
+                    <label asp-for="EstimatedVolumePerDay">Est. Volume / Day @Html.Raw(ReqStar(IntakeFieldConfig.FEstimatedVolumePerDay))</label>
+                    <input asp-for="EstimatedVolumePerDay" class="form-control" type="number" min="0" placeholder="e.g. 500" required="@ReqAttr(IntakeFieldConfig.FEstimatedVolumePerDay)" />
                     <span asp-validation-for="EstimatedVolumePerDay" class="text-danger"></span>
                 </div>
+                }
             </div>
+            }
         </div>
 
         <!-- ── SECTION 2: Ownership ──────────────────────────────── -->
+        @{
+            var showBU    = Fc(IntakeFieldConfig.FBusinessUnit).IsVisible;
+            var showDept  = Fc(IntakeFieldConfig.FDepartment).IsVisible;
+            var showLob   = Fc(IntakeFieldConfig.FLob).IsVisible;
+            var showLots  = Fc(IntakeFieldConfig.FSdcLots).IsVisible;
+            var showOwner = Fc(IntakeFieldConfig.FProcessOwnerName).IsVisible;
+            var showEmail = Fc(IntakeFieldConfig.FProcessOwnerEmail).IsVisible;
+        }
+        @if (showBU || showDept || showLob || showLots || showOwner || showEmail)
+        {
         <div class="form-card">
             <div class="form-section-title">
                 <i class="bi bi-people"></i> Ownership &amp; Organisation
             </div>
+            @if (showBU || showDept || showLob || showLots)
+            {
             <div class="form-row">
+                @if (showBU)
+                {
                 <div class="form-group">
-                    <label asp-for="BusinessUnit">Business Unit <span class="required">*</span></label>
-                    <input asp-for="BusinessUnit" class="form-control" placeholder="e.g. Operations" />
+                    <label asp-for="BusinessUnit">Business Unit @Html.Raw(ReqStar(IntakeFieldConfig.FBusinessUnit))</label>
+                    <input asp-for="BusinessUnit" class="form-control" placeholder="e.g. Operations" required="@ReqAttr(IntakeFieldConfig.FBusinessUnit)" />
                     <span asp-validation-for="BusinessUnit" class="text-danger"></span>
                 </div>
+                }
+                @if (showDept)
+                {
                 <div class="form-group">
-                    <label asp-for="Department">Department</label>
-                    <select asp-for="Department" id="deptSelect" class="form-control" onchange="onDeptChange(this.value)">
+                    <label asp-for="Department">Department @Html.Raw(ReqStar(IntakeFieldConfig.FDepartment))</label>
+                    <select asp-for="Department" id="deptSelect" class="form-control" onchange="onDeptChange(this.value)" required="@ReqAttr(IntakeFieldConfig.FDepartment)">
                         <option value="">— Select Department —</option>
                         @foreach (var dept in (ViewBag.Departments as List<string> ?? new()))
                         {
@@ -169,35 +262,73 @@
                         }
                     </select>
                 </div>
+                }
+                @if (showLob)
+                {
                 <div class="form-group">
-                    <label asp-for="Lob">Line of Business (LOB)</label>
-                    <select asp-for="Lob" id="lobSelect" class="form-control">
+                    <label asp-for="Lob">Line of Business (LOB) @Html.Raw(ReqStar(IntakeFieldConfig.FLob))</label>
+                    <select asp-for="Lob" id="lobSelect" class="form-control" required="@ReqAttr(IntakeFieldConfig.FLob)">
                         <option value="">— Select LOB —</option>
                     </select>
                 </div>
-            </div>
-            <div class="form-row">
+                }
+                @if (showLots)
+                {
                 <div class="form-group">
-                    <label asp-for="ProcessOwnerName">Process Owner Name <span class="required">*</span></label>
-                    <input asp-for="ProcessOwnerName" class="form-control" placeholder="Full name" />
+                    <label asp-for="SdcLots">Lots or SDC @Html.Raw(ReqStar(IntakeFieldConfig.FSdcLots)) <span style="font-size:0.78rem;font-weight:400;color:#888;">(multi-select)</span></label>
+                    <div class="ms-container" id="sdcLotsContainer" style="cursor:pointer;" onclick="document.getElementById('sdcLotsInput').focus()">
+                        <input type="text" id="sdcLotsInput" class="ms-input" placeholder="Select lots…" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" />
+                        <div class="ms-dropdown" id="sdcLotsDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;"></div>
+                    </div>
+                    <input type="hidden" asp-for="SdcLots" id="sdcLotsHidden" />
+                </div>
+                }
+            </div>
+            }
+            @if (showOwner || showEmail)
+            {
+            <div class="form-row">
+                @if (showOwner)
+                {
+                <div class="form-group">
+                    <label asp-for="ProcessOwnerName">Process Owner Name @Html.Raw(ReqStar(IntakeFieldConfig.FProcessOwnerName))</label>
+                    <input asp-for="ProcessOwnerName" class="form-control" placeholder="Full name" required="@ReqAttr(IntakeFieldConfig.FProcessOwnerName)" />
                     <span asp-validation-for="ProcessOwnerName" class="text-danger"></span>
                 </div>
+                }
+                @if (showEmail)
+                {
                 <div class="form-group">
-                    <label asp-for="ProcessOwnerEmail">Process Owner Email <span class="required">*</span></label>
-                    <input asp-for="ProcessOwnerEmail" class="form-control" type="email" placeholder="owner@company.com" />
+                    <label asp-for="ProcessOwnerEmail">Process Owner Email @Html.Raw(ReqStar(IntakeFieldConfig.FProcessOwnerEmail))</label>
+                    <input asp-for="ProcessOwnerEmail" class="form-control" type="email" placeholder="owner@company.com" required="@ReqAttr(IntakeFieldConfig.FProcessOwnerEmail)" />
                     <span asp-validation-for="ProcessOwnerEmail" class="text-danger"></span>
                 </div>
+                }
             </div>
+            }
         </div>
+        }
 
         <!-- ── SECTION 3: Location ───────────────────────────────── -->
+        @{
+            var showCountry  = Fc(IntakeFieldConfig.FCountry).IsVisible;
+            var showCity     = Fc(IntakeFieldConfig.FCity).IsVisible;
+            var showSiteLoc  = Fc(IntakeFieldConfig.FSiteLocation).IsVisible;
+            var showTimeZone = Fc(IntakeFieldConfig.FTimeZone).IsVisible;
+        }
+        @if (showCountry || showCity || showSiteLoc || showTimeZone)
+        {
         <div class="form-card">
             <div class="form-section-title">
                 <i class="bi bi-geo-alt"></i> Location
             </div>
+            @if (showCountry || showCity)
+            {
             <div class="form-row">
+                @if (showCountry)
+                {
                 <div class="form-group">
-                    <label>Country <span class="required">*</span></label>
+                    <label>Country @Html.Raw(ReqStar(IntakeFieldConfig.FCountry))</label>
                     <div class="ms-container" id="countryContainer">
                         <input type="text" id="countryInput" class="ms-input" placeholder="Search countries…" autocomplete="off" />
                         <div class="ms-dropdown" id="countryDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;"></div>
@@ -205,23 +336,35 @@
                     <input type="hidden" asp-for="Country" id="countryHidden" />
                     <span asp-validation-for="Country" class="text-danger"></span>
                 </div>
+                }
+                @if (showCity)
+                {
                 <div class="form-group">
-                    <label>City</label>
+                    <label>City @Html.Raw(ReqStar(IntakeFieldConfig.FCity))</label>
                     <div class="ms-container" id="cityContainer">
                         <input type="text" id="cityInput" class="ms-input" placeholder="Search cities…" autocomplete="off" />
                         <div class="ms-dropdown" id="cityDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;"></div>
                     </div>
                     <input type="hidden" asp-for="City" id="cityHidden" />
                 </div>
+                }
             </div>
+            }
+            @if (showSiteLoc || showTimeZone)
+            {
             <div class="form-row">
+                @if (showSiteLoc)
+                {
                 <div class="form-group">
-                    <label asp-for="SiteLocation">Site / Office Location</label>
-                    <input asp-for="SiteLocation" class="form-control" placeholder="Building / floor / campus" />
+                    <label asp-for="SiteLocation">Site / Office Location @Html.Raw(ReqStar(IntakeFieldConfig.FSiteLocation))</label>
+                    <input asp-for="SiteLocation" class="form-control" placeholder="Building / floor / campus" required="@ReqAttr(IntakeFieldConfig.FSiteLocation)" />
                 </div>
+                }
+                @if (showTimeZone)
+                {
                 <div class="form-group">
-                    <label asp-for="TimeZone">Time Zone</label>
-                    <select asp-for="TimeZone" class="form-control">
+                    <label asp-for="TimeZone">Time Zone @Html.Raw(ReqStar(IntakeFieldConfig.FTimeZone))</label>
+                    <select asp-for="TimeZone" class="form-control" required="@ReqAttr(IntakeFieldConfig.FTimeZone)">
                         <option value="">— Select —</option>
                         <option value="UTC-12:00">UTC-12:00 (Baker Island)</option>
                         <option value="UTC-11:00">UTC-11:00 (Samoa)</option>
@@ -247,10 +390,15 @@
                         <option value="UTC+12:00">UTC+12:00 (Auckland)</option>
                     </select>
                 </div>
+                }
             </div>
+            }
         </div>
+        }
 
         <!-- ── SECTION 4: Document Upload ───────────────────────── -->
+        @if (Fc(IntakeFieldConfig.FDocument).IsVisible)
+        {
         <div class="form-card">
             <div class="form-section-title">
                 <i class="bi bi-file-earmark-arrow-up"></i> Document Upload <span style="font-weight:400;color:#999;font-size:0.8rem;">(optional — multiple files supported)</span>
@@ -263,7 +411,7 @@
             <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="1.5" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                 <p><strong>Click to select files</strong> or drag and drop</p>
-                <p style="margin-top:4px;color:#aaa;">PDF, DOCX, TXT, CSV, JSON, MD, MP3, MP4, WAV, M4A — max 20 MB each</p>
+                <p style="margin-top:4px;color:#aaa;">PDF, DOCX, TXT, CSV, JSON, MD, MP3, MP4, WAV, M4A — max 250 MB each</p>
             </div>
             @* Primary document (bound to model) *@
             <input type="file" id="fileInput" asp-for="Document"
@@ -279,16 +427,44 @@
                 + Add more files
             </button>
         </div>
+        }
 
         <!-- ── Actions ──────────────────────────────────────────── -->
         <div class="form-actions">
-            <button type="submit" class="btn-submit">
+            <button type="submit" id="intakeSubmitBtn" class="btn-submit">
                 <i class="bi bi-send me-2"></i>Submit &amp; Analyse
             </button>
             <a asp-action="Index" class="btn-cancel">Cancel</a>
         </div>
     </form>
 </main>
+</div>
+
+<!-- ── Upload Progress Overlay ──────────────────────────────────────── -->
+<div id="uploadOverlay" role="status" aria-live="polite"
+     style="display:none;position:fixed;inset:0;background:rgba(26,42,94,0.88);z-index:9999;
+            align-items:center;justify-content:center;flex-direction:column;">
+    <div style="text-align:center;max-width:420px;width:90%;padding:32px;background:rgba(255,255,255,0.08);
+                border-radius:16px;backdrop-filter:blur(4px);">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="1.5"
+             style="margin-bottom:16px;" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <h2 id="uploadOverlayTitle" style="color:#fff;font-size:1.25rem;margin:0 0 8px;">Saving Files to Server…</h2>
+        <p id="uploadOverlaySubtitle"
+           style="color:rgba(255,255,255,0.7);font-size:0.9rem;margin:0 0 20px;line-height:1.5;">
+            Please keep this tab open. Files are saved to the server<br>and processing will continue in the background.
+        </p>
+        <div style="background:rgba(255,255,255,0.18);border-radius:99px;height:10px;overflow:hidden;">
+            <div id="uploadProgressBar"
+                 style="height:100%;background:#22c55e;border-radius:99px;width:0%;transition:width 0.3s ease;"></div>
+        </div>
+        <p id="uploadProgressPct" style="color:rgba(255,255,255,0.8);font-size:0.9rem;margin-top:10px;">0%</p>
+    </div>
+</div>
+
 </div><!-- close app-layout -->
 
 @section Scripts {
@@ -442,17 +618,220 @@
 
     // Country multi-select — initialise after DOM ready
     document.addEventListener('DOMContentLoaded', () => {
-        let cityMs;
-        const countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
-            COUNTRY_LIST, true,
+
+        // Lots or SDC multi-select (fixed 4-option list)
+        const SDC_LOTS = [
+            'Lot 1 – Global Customer Support',
+            'Lot 2 – Quote to Bill',
+            'Lot 3 – International Integrator',
+            'Lot 4 – One Post Sales'
+        ];
+
+        // ── LOT-aware country/city filtering ────────────────────────
+        const USE_LOT_FILTER   = @Html.Raw((ViewBag.UseCountryFilterByLot ?? false) ? "true" : "false");
+        const LOT_COUNTRY_MAP  = @Html.Raw(ViewBag.LotCountryMapJson ?? "{}");
+
+        function getCountriesForLots(selectedLots) {
+            if (!USE_LOT_FILTER || !selectedLots || selectedLots.length === 0)
+                return COUNTRY_LIST;
+            const countries = new Set();
+            selectedLots.forEach(lot => {
+                const entries = LOT_COUNTRY_MAP[lot] || [];
+                entries.forEach(e => countries.add(e.country));
+            });
+            return countries.size > 0 ? [...countries].sort() : COUNTRY_LIST;
+        }
+
+        function getCitiesForCountriesAndLots(selectedCountries, selectedLots) {
+            if (!USE_LOT_FILTER || !selectedLots || selectedLots.length === 0)
+                return getCitiesForCountries(selectedCountries);
+            const result = new Set();
+            selectedLots.forEach(lot => {
+                const entries = (LOT_COUNTRY_MAP[lot] || []).filter(e => selectedCountries.includes(e.country));
+                entries.forEach(e => {
+                    if (e.cities && e.cities.length > 0) {
+                        e.cities.forEach(c => result.add(c));
+                    } else {
+                        // empty cities list means "all cities for this country"
+                        (COUNTRY_CITY_MAP[e.country] || []).forEach(c => result.add(c));
+                    }
+                });
+            });
+            return result.size > 0 ? [...result].sort() : getCitiesForCountries(selectedCountries);
+        }
+
+        // Build LOT multiselect first; on change, update country list
+        const lotsMs = buildMultiSelect('sdcLotsContainer', 'sdcLotsInput', 'sdcLotsDropdown', 'sdcLotsHidden',
+            SDC_LOTS, true, function(selLots) {
+                const newCountries = getCountriesForLots(selLots);
+                countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
+                    newCountries, true, function(selCts) {
+                        cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
+                            getCitiesForCountriesAndLots(selCts, lotsMs.getSelected()), true, null);
+                    });
+            });
+
+        let countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
+            getCountriesForLots(lotsMs.getSelected()), true,
             function(sel) {
-                const cities = getCitiesForCountries(sel);
-                cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden', cities, true, null);
+                cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
+                    getCitiesForCountriesAndLots(sel, lotsMs.getSelected()), true, null);
             }
         );
-        cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
-            getCitiesForCountries(countryMs.getSelected()), true, null
+        let cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
+            getCitiesForCountriesAndLots(countryMs.getSelected(), lotsMs.getSelected()), true, null
         );
     });
+</script>
+
+<script>
+// ── XHR upload with progress overlay ─────────────────────────────────────────
+(function () {
+    const form    = document.getElementById('intakeCreateForm');
+    const overlay = document.getElementById('uploadOverlay');
+    const bar     = document.getElementById('uploadProgressBar');
+    const pct     = document.getElementById('uploadProgressPct');
+    const title   = document.getElementById('uploadOverlayTitle');
+    const sub     = document.getElementById('uploadOverlaySubtitle');
+    const btn     = document.getElementById('intakeSubmitBtn');
+
+    function showOverlay() { overlay.style.display = 'flex'; }
+    function hideOverlay() { overlay.style.display = 'none'; }
+
+    function setProgress(value, label) {
+        bar.style.width = value + '%';
+        pct.textContent = label || (value + '%');
+    }
+
+    function showErrors(errors) {
+        hideOverlay();
+        if (btn) btn.disabled = false;
+        const existing = document.getElementById('xhrErrorBanner');
+        if (existing) existing.remove();
+        const banner = document.createElement('div');
+        banner.id = 'xhrErrorBanner';
+        banner.style.cssText = 'background:#fde8ec;border:1px solid #fca5a5;border-radius:8px;' +
+            'padding:12px 16px;margin-bottom:20px;color:#c01530;';
+        const heading = document.createElement('strong');
+        heading.textContent = 'Please fix the following errors:';
+        banner.appendChild(heading);
+        const ul = document.createElement('ul');
+        ul.style.margin = '8px 0 0 0';
+        errors.forEach(function (msg) {
+            const li = document.createElement('li');
+            li.textContent = msg;
+            ul.appendChild(li);
+        });
+        banner.appendChild(ul);
+        form.insertBefore(banner, form.firstChild);
+        banner.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (btn) btn.disabled = true;
+
+        const data = new FormData(form);
+        showOverlay();
+        setProgress(0);
+        title.textContent = 'Saving Files to Server\u2026';
+        sub.textContent   = 'Please keep this tab open. Files are saved to the server and processing continues in the background.';
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', form.action || window.location.href, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.upload.addEventListener('progress', function (e) {
+            if (e.lengthComputable) {
+                const p = Math.round(e.loaded / e.total * 100);
+                setProgress(p);
+                if (p >= 100) {
+                    title.textContent = 'Saving\u2026';
+                    setProgress(100, 'Queuing for processing\u2026');
+                }
+            }
+        });
+
+        xhr.addEventListener('load', function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    if (res.success && res.redirectUrl) {
+                        title.textContent = 'Files Saved!';
+                        setProgress(100, 'Redirecting\u2026');
+                        sub.textContent = 'Files saved. Background processing will notify you when done.';
+                        window.location.href = res.redirectUrl;
+                        return;
+                    }
+                    showErrors(res.errors || [res.message || 'An unexpected error occurred.']);
+                } catch (_) {
+                    showErrors(['An unexpected error occurred. Please try again.']);
+                }
+            } else if (xhr.status === 400) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    showErrors(res.errors || [res.message || 'Validation failed.']);
+                } catch (_) {
+                    showErrors(['Validation failed. Please check all fields.']);
+                }
+            } else {
+                showErrors(['Upload failed (HTTP\u00a0' + xhr.status + '). Please try again.']);
+            }
+        });
+
+        xhr.addEventListener('error', function () {
+            showErrors(['Network error. Please check your connection and try again.']);
+        });
+
+        xhr.send(data);
+    });
+}());
+
+    // ── AI Description Assist ────────────────────────────────────────────────
+    function toggleAiPanel() {
+        const panel = document.getElementById('aiAssistPanel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function generateDescription(descFieldId, pointersFieldId, nameFieldId, btnId, errId) {
+        const pointers = document.getElementById(pointersFieldId)?.value?.trim();
+        const errEl    = document.getElementById(errId);
+        const btn      = document.getElementById(btnId);
+        if (errEl) errEl.textContent = '';
+
+        if (!pointers) {
+            if (errEl) errEl.textContent = 'Please enter some key points first.';
+            return;
+        }
+
+        const processName = document.getElementById(nameFieldId)?.value?.trim() ?? '';
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Generating…';
+
+        try {
+            const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+            const resp  = await fetch('/Intake/GenerateDescription', {
+                method:  'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: JSON.stringify({ processName, pointers })
+            });
+            const json = await resp.json();
+            if (json.success) {
+                document.getElementById(descFieldId).value = json.description;
+                document.getElementById('aiAssistPanel').style.display = 'none';
+            } else {
+                if (errEl) errEl.textContent = json.error ?? 'Generation failed. Please type the description manually.';
+            }
+        } catch (e) {
+            if (errEl) errEl.textContent = 'Network error. Please try again.';
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-stars me-1"></i>Generate Description';
+        }
+    }
 </script>
 }

@@ -16,6 +16,11 @@
         try { analysis = JsonSerializer.Deserialize<JsonElement>(record.AnalysisResult); } catch { }
     }
 
+    // Determine whether this result came from a real LLM or the mock fallback
+    string analysisSource = "unknown";
+    if (analysis.HasValue && analysis.Value.TryGetProperty("_source", out var srcEl))
+        analysisSource = srcEl.GetString() ?? "unknown";
+
     int confidence   = analysis.HasValue && analysis.Value.TryGetProperty("confidenceScore",  out var cv)  ? cv.GetInt32()  : 0;
     int quality      = analysis.HasValue && analysis.Value.TryGetProperty("qualityScore",      out var qv)  ? qv.GetInt32()  : 0;
     int steps        = analysis.HasValue && analysis.Value.TryGetProperty("stepsIdentified",   out var sv2) ? sv2.GetInt32() : 0;
@@ -106,6 +111,18 @@
     .select-prompt { text-align:center; padding:50px 20px; color:#aaa; }
     .select-prompt .bi { font-size:2.8rem; display:block; margin-bottom:12px; color:#d0d5e8; }
     .select-prompt p { font-size:.9rem; }
+
+    /* ── Data source badge ─────────────────────────────── */
+    .source-badge {
+        display:inline-flex; align-items:center; gap:5px;
+        padding:4px 10px; border-radius:20px; font-size:.73rem; font-weight:600;
+        border:1.5px solid transparent;
+    }
+    .source-badge.llm  { background:#d1fae5; color:#065f46; border-color:#6ee7b7; }
+    .source-badge.mock { background:#fef3c7; color:#92400e; border-color:#fcd34d; }
+    .source-badge .dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .source-badge.llm  .dot { background:#059669; }
+    .source-badge.mock .dot { background:#d97706; }
 </style>
 
 @await Html.PartialAsync("_AppShell")
@@ -113,7 +130,6 @@
 <main class="app-main">
     <div class="page-title"><i class="bi bi-cpu me-2" style="color:#e31837;"></i>AI Analysis Dashboard</div>
     <div class="page-sub">Select an intake below to view its LLM-powered process analysis</div>
-
     @* ── Intake picker ─────────────────────────────────────── *@
     @await Html.PartialAsync("_IntakePicker")
 
@@ -216,9 +232,19 @@
                 <div class="analysis-card">
                     <div class="analysis-card-header">
                         <h3><i class="bi bi-lightbulb me-2" style="color:#e31837;"></i>Key Insights</h3>
-                        <span class="conf-badge @(confidence >= 85 ? "conf-high" : confidence >= 65 ? "conf-medium" : "conf-low")">
-                            @confidence% Confidence
-                        </span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            @if (analysisSource == "llm")
+                            {
+                                <span class="source-badge llm"><span class="dot"></span>Live LLM</span>
+                            }
+                            else if (analysisSource == "mock")
+                            {
+                                <span class="source-badge mock"><span class="dot"></span>Mock Data</span>
+                            }
+                            <span class="conf-badge @(confidence >= 85 ? "conf-high" : confidence >= 65 ? "conf-medium" : "conf-low")">
+                                @confidence% Confidence
+                            </span>
+                        </div>
                     </div>
                     <div class="analysis-card-body">
                         <ul class="insights-list">

@@ -15,6 +15,7 @@ public class AzureSpeechService : IAzureSpeechService
     private readonly IHttpClientFactory _httpFactory;
     private readonly ApplicationDbContext _db;
     private readonly ILogger<AzureSpeechService> _logger;
+    private readonly IAuditLogService _auditLog;
 
     // Polling constants — 5 min max (60 polls × 5 s)
     private static readonly TimeSpan MaxPollDuration = TimeSpan.FromMinutes(5);
@@ -22,11 +23,12 @@ public class AzureSpeechService : IAzureSpeechService
     private static readonly int MaxPollAttempts = (int)(MaxPollDuration.TotalMilliseconds / PollIntervalMs);
 
     public AzureSpeechService(IHttpClientFactory httpFactory, ApplicationDbContext db,
-        ILogger<AzureSpeechService> logger)
+        ILogger<AzureSpeechService> logger, IAuditLogService auditLog)
     {
         _httpFactory = httpFactory;
         _db          = db;
         _logger      = logger;
+        _auditLog    = auditLog;
     }
 
     // ─── IsConfigured ────────────────────────────────────────────────────────
@@ -44,6 +46,7 @@ public class AzureSpeechService : IAzureSpeechService
 
     public async Task<string> TranscribeAsync(string filePathOrUrl, int tenantId, string fileName)
     {
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
         var settings = await _db.TenantAiSettings.FirstOrDefaultAsync(x => x.TenantId == tenantId);
 
         if (settings is null
@@ -52,6 +55,17 @@ public class AzureSpeechService : IAzureSpeechService
             || settings.AzureSpeechApiKey.Equals("YOUR_SPEECH_KEY", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Azure Speech not configured for tenant {TenantId} — using mock transcript.", tenantId);
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "SpeechTranscribe",
+                eventType      : "SpeechApi",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : null,
+                httpStatusCode : null,
+                durationMs     : 0,
+                isMocked       : true,
+                outcome        : "MockResponse");
             return GenerateMockTranscript(fileName);
         }
 
@@ -59,20 +73,65 @@ public class AzureSpeechService : IAzureSpeechService
         if (!filePathOrUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Speech transcription requires a blob URL; '{Path}' is a local path — using mock.", filePathOrUrl);
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "SpeechTranscribe",
+                eventType      : "SpeechApi",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : null,
+                httpStatusCode : null,
+                durationMs     : 0,
+                isMocked       : true,
+                outcome        : "MockResponse");
             return GenerateMockTranscript(fileName);
         }
 
+        var baseUrl    = $"https://{settings.AzureSpeechRegion}.api.cognitive.microsoft.com/speechtotext/v3.2";
+        var requestUrl = $"{baseUrl}/transcriptions";
+        var sw         = System.Diagnostics.Stopwatch.StartNew();
+
         try
         {
-            return await RunBatchTranscriptionAsync(
+            var result = await RunBatchTranscriptionAsync(
                 filePathOrUrl,
                 settings.AzureSpeechRegion,
                 settings.AzureSpeechApiKey,
                 fileName);
+            sw.Stop();
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "SpeechTranscribe",
+                eventType      : "SpeechApi",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : requestUrl,
+                httpStatusCode : 200,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Success");
+
+            return result;
         }
         catch (Exception ex)
         {
+            sw.Stop();
             _logger.LogError(ex, "Azure Speech transcription failed for file '{File}' in tenant {TenantId}.", fileName, tenantId);
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "SpeechTranscribe",
+                eventType      : "SpeechApi",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : requestUrl,
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
+
             return GenerateMockTranscript(fileName);
         }
     }

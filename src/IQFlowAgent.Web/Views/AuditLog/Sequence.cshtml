@@ -1,0 +1,241 @@
+@model IEnumerable<IQFlowAgent.Web.Models.AuditLog>
+@using IQFlowAgent.Web.Controllers
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Audit Log — Sequence View";
+    ViewData["ActivePage"] = "auditlog";
+
+    var logs           = Model.ToList();
+    var findingsByLogId = ViewBag.FindingsByLogId as Dictionary<int, List<PiiAuditFinding>> ?? [];
+    var intake          = ViewBag.LinkedIntake    as IQFlowAgent.Web.Models.IntakeRecord;
+    string corrId       = ViewBag.CorrelationId   as string ?? "";
+
+    // Split into PII scans and LLM calls for the sequence view
+    var piiScans  = logs.Where(l => l.EventType == "PiiScan").ToList();
+    var llmCalls  = logs.Where(l => l.EventType == "LlmCall").ToList();
+    bool anyPiiDetected = piiScans.Any(l => l.PiiFindingCount > 0);
+    bool anyBlocked     = piiScans.Any(l => l.WasBlocked);
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
+
+<main class="app-main">
+<div class="page-title">Sequence View</div>
+<div class="page-sub">
+    Correlation: <span style="font-family:monospace;color:#6366f1;">@corrId</span>
+    &nbsp;·&nbsp;
+    <a href="/AuditLog/Index" style="color:#888;text-decoration:none;">← Back to Audit Log</a>
+</div>
+
+<style>
+    .seq-header        { display:flex; gap:16px; margin:18px 0 20px; flex-wrap:wrap; }
+    .seq-stat          { background:#fff; border-radius:10px; padding:14px 20px; min-width:120px; box-shadow:0 2px 8px rgba(0,0,0,.06); flex:1; text-align:center; }
+    .seq-stat .num     { font-size:1.5rem; font-weight:700; color:#1a2a5e; }
+    .seq-stat .lbl     { font-size:0.75rem; color:#888; margin-top:2px; }
+    .seq-stat.warn .num{ color:#d97706; }
+    .seq-stat.danger .num{ color:#dc2626; }
+    .seq-stat.ok .num  { color:#059669; }
+
+    /* Flow diagram */
+    .flow              { position:relative; padding:24px 0; }
+    .flow-step         { display:flex; align-items:flex-start; gap:16px; margin-bottom:8px; position:relative; }
+    .flow-step::before { content:''; position:absolute; left:23px; top:48px; width:2px; height:calc(100% + 8px); background:#e2e8f0; }
+    .flow-step:last-child::before { display:none; }
+
+    .step-icon         { width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1.2rem; flex-shrink:0; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+    .step-icon.pii     { background:#f5f3ff; border:2px solid #7c3aed; }
+    .step-icon.llm     { background:#eff6ff; border:2px solid #1a2a5e; }
+    .step-icon.pii.pass{ background:#f0fdf4; border-color:#22c55e; }
+    .step-icon.pii.fail{ background:#fef2f2; border-color:#ef4444; }
+    .step-icon.pii.blocked{ background:#fffbeb; border-color:#f59e0b; }
+
+    .step-body         { background:#fff; border-radius:10px; padding:14px 18px; box-shadow:0 2px 8px rgba(0,0,0,.06); flex:1; min-height:46px; }
+    .step-title        { font-size:0.9rem; font-weight:700; color:#1a2a5e; margin-bottom:4px; }
+    .step-subtitle     { font-size:0.79rem; color:#888; margin-bottom:8px; }
+    .step-meta         { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .badge             { display:inline-block; padding:2px 9px; border-radius:12px; font-size:0.75rem; font-weight:600; }
+    .badge-success     { background:#d1fae5; color:#065f46; }
+    .badge-mock        { background:#e0e7ff; color:#3730a3; }
+    .badge-error       { background:#fee2e2; color:#991b1b; }
+    .badge-blocked     { background:#fef3c7; color:#92400e; }
+    .badge-redacted    { background:#fce7f3; color:#9d174d; }
+    .badge-clean       { background:#d1fae5; color:#065f46; }
+    .badge-default     { background:#f1f5f9; color:#64748b; }
+    .badge-pii-fail    { background:#fee2e2; color:#991b1b; }
+    .badge-pii-pass    { background:#d1fae5; color:#065f46; }
+    .dur-chip          { font-size:0.75rem; color:#94a3b8; }
+
+    /* Findings collapse */
+    .findings-toggle   { background:none; border:1px solid #fca5a5; border-radius:6px; padding:4px 12px; font-size:0.77rem; color:#ef4444; cursor:pointer; margin-top:8px; }
+    .findings-toggle:hover { background:#fee2e2; }
+    .findings-body     { margin-top:10px; }
+    .finding-table     { width:100%; border-collapse:collapse; }
+    .finding-table th  { font-size:0.74rem; color:#666; text-transform:uppercase; padding:7px 12px; background:#f9fafb; border-bottom:1px solid #e5e7eb; text-align:left; }
+    .finding-table td  { font-size:0.81rem; padding:7px 12px; border-bottom:1px solid #f3f4f6; }
+    .finding-table tr:last-child td { border-bottom:none; }
+    .entity-chip       { display:inline-block; padding:2px 8px; border-radius:12px; font-size:0.74rem; background:#fee2e2; color:#991b1b; font-weight:600; }
+    .masked-val        { font-family:monospace; color:#6b7280; }
+
+    /* Summary banner */
+    .summary-banner    { border-radius:10px; padding:14px 18px; margin-bottom:20px; }
+    .summary-banner.ok { background:#f0fdf4; border:1px solid #86efac; }
+    .summary-banner.warn { background:#fffbeb; border:1px solid #fde68a; }
+    .summary-banner.danger { background:#fef2f2; border:1px solid #fca5a5; }
+
+    .intake-box        { background:#fff; border-radius:10px; padding:14px 18px; box-shadow:0 2px 8px rgba(0,0,0,.06); margin-bottom:20px; font-size:0.85rem; }
+    .detail-btn        { font-size:0.78rem; color:#6366f1; text-decoration:none; margin-left:auto; }
+    .detail-btn:hover  { text-decoration:underline; }
+</style>
+
+<!-- ── Stats ── -->
+<div class="seq-header">
+    <div class="seq-stat">
+        <div class="num">@piiScans.Count</div>
+        <div class="lbl">PII Scans</div>
+    </div>
+    <div class="seq-stat @(anyPiiDetected ? "warn" : "ok")">
+        <div class="num">@piiScans.Sum(l => l.PiiFindingCount)</div>
+        <div class="lbl">PII Findings</div>
+    </div>
+    <div class="seq-stat @(anyBlocked ? "danger" : "ok")">
+        <div class="num">@(anyBlocked ? "Yes" : "No")</div>
+        <div class="lbl">Any Blocked?</div>
+    </div>
+    <div class="seq-stat">
+        <div class="num">@llmCalls.Count</div>
+        <div class="lbl">LLM Calls</div>
+    </div>
+    <div class="seq-stat">
+        <div class="num">@(llmCalls.Any() ? (llmCalls.Sum(l => l.DurationMs ?? 0) + " ms") : "—")</div>
+        <div class="lbl">Total Duration</div>
+    </div>
+</div>
+
+<!-- ── Summary banner ── -->
+@{
+    string bannerClass = anyBlocked ? "danger" : anyPiiDetected ? "warn" : "ok";
+    string bannerMsg   = anyBlocked
+        ? "🚫 One or more calls were BLOCKED because PII was detected and BlockOnDetection is enabled."
+        : anyPiiDetected
+            ? "⚠️ PII/SPII was detected and redacted before the LLM call. The LLM received masked content."
+            : "✅ No PII/SPII detected — all content was forwarded to the LLM without modification.";
+}
+<div class="summary-banner @bannerClass">@bannerMsg</div>
+
+<!-- ── Linked intake ── -->
+@if (intake != null)
+{
+    <div class="intake-box">
+        <strong>Linked Intake:</strong>
+        <a href="/Intake/Details/@intake.Id" style="color:#1a2a5e; text-decoration:none; font-weight:600; margin-left:8px;">@intake.IntakeId — @intake.ProcessName</a>
+        <span style="color:#888; font-size:0.8rem; margin-left:12px;">@intake.BusinessUnit</span>
+    </div>
+}
+
+<!-- ── Sequence flow ── -->
+<div class="flow">
+    @foreach (var log in logs)
+    {
+        bool isPiiLog = log.EventType == "PiiScan";
+        string piiStatusCss = isPiiLog ? (log.PiiScanStatus == "Pass" ? "pass" : log.PiiScanStatus == "Blocked" ? "blocked" : "fail") : "";
+        string stepTypeCss  = isPiiLog ? $"pii {piiStatusCss}" : "llm";
+        string stepIcon     = isPiiLog
+            ? (log.PiiScanStatus == "Pass" ? "✅" : log.PiiScanStatus == "Blocked" ? "🚫" : "⚠️")
+            : (log.IsMocked ? "🤖" : "🧠");
+
+        string outClass = log.Outcome switch {
+            "Success"      => "badge-success",
+            "MockResponse" => "badge-mock",
+            "Error"        => "badge-error",
+            "Blocked"      => "badge-blocked",
+            "Redacted"     => "badge-redacted",
+            "Clean"        => "badge-clean",
+            _              => "badge-default"
+        };
+
+        var findings = findingsByLogId.TryGetValue(log.Id, out var f) ? f : [];
+
+        <div class="flow-step">
+            <div class="step-icon @stepTypeCss">@stepIcon</div>
+            <div class="step-body">
+                <div class="step-title">
+                    @log.EventType — @log.CallSite
+                    <a href="/AuditLog/Details/@log.Id" class="detail-btn">Details →</a>
+                </div>
+                <div class="step-subtitle">@log.CreatedAt.ToString("HH:mm:ss.fff") UTC</div>
+                <div class="step-meta">
+                    <span class="badge @outClass">@log.Outcome</span>
+
+                    @if (isPiiLog)
+                    {
+                        <span class="badge @(log.PiiScanStatus == "Pass" ? "badge-pii-pass" : "badge-pii-fail")">
+                            PII: @log.PiiScanStatus @(log.PiiFindingCount > 0 ? $"({log.PiiFindingCount})" : "")
+                        </span>
+                    }
+
+                    @if (log.DurationMs.HasValue && log.DurationMs > 0)
+                    {
+                        <span class="dur-chip">⏱ @log.DurationMs ms</span>
+                    }
+
+                    @if (log.IsMocked)
+                    {
+                        <span class="badge badge-mock">Mock</span>
+                    }
+
+                    @if (log.HttpStatusCode.HasValue)
+                    {
+                        <span class="dur-chip">HTTP @log.HttpStatusCode</span>
+                    }
+                </div>
+
+                @* Show findings for PII scan with toggle *@
+                @if (findings.Count > 0)
+                {
+                    <button class="findings-toggle" onclick="toggleFindings(@log.Id)">
+                        🔍 Show @findings.Count PII finding(s) — masked values
+                    </button>
+                    <div id="findings-@log.Id" class="findings-body" style="display:none;">
+                        <table class="finding-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Entity Type</th>
+                                    <th>Value (masked)</th>
+                                    <th>Replaced With</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var (finding, idx) in findings.Select((x, i) => (x, i + 1)))
+                                {
+                                    <tr>
+                                        <td style="color:#94a3b8;">@idx</td>
+                                        <td><span class="entity-chip">@finding.EntityType</span></td>
+                                        <td><span class="masked-val">@finding.MatchedText</span></td>
+                                        <td><span class="masked-val" style="color:#6366f1;">[@finding.EntityType.Replace(" ", "_").Replace("/", "_").ToUpperInvariant()]</span></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(log.ErrorMessage))
+                {
+                    <div style="background:#fee2e2;color:#991b1b;border-radius:6px;padding:8px 12px;font-size:0.8rem;margin-top:8px;">⚠ @log.ErrorMessage</div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@section Scripts {
+<script>
+function toggleFindings(id) {
+    var el = document.getElementById('findings-' + id);
+    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+</script>
+}
+
+</main>
+</div>

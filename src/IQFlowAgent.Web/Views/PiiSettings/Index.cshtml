@@ -1,0 +1,305 @@
+@model IQFlowAgent.Web.Models.TenantPiiSettings
+@{
+    ViewData["Title"] = "PII / SPII Safeguard";
+    var tenant = ViewBag.Tenant as IQFlowAgent.Web.Models.Tenant;
+}
+@await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "piisettings" } })
+<main class="app-main">
+    <div class="page-title">PII / SPII Safeguard</div>
+    <div class="page-subtitle">
+        Configure local, on-premise PII detection for <strong>@tenant?.Name</strong>.
+        Detected sensitive data is either <em>redacted</em> or the LLM call is <em>blocked</em> before any data leaves the server.
+    </div>
+
+    <div class="alert-error-bar"   id="save-error" style="display:none"></div>
+    <div class="alert-success-bar" id="save-ok"    style="display:none"></div>
+
+    <form id="pii-settings-form" asp-action="Save" method="post" onsubmit="return saveSettings(event)">
+        @Html.AntiForgeryToken()
+        <input type="hidden" asp-for="Id" />
+        <input type="hidden" asp-for="TenantId" />
+
+        <!-- ── Master toggle ─────────────────────────────────────── -->
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">Safeguard Control</div>
+            <div class="card-body">
+                <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+                    <label class="toggle-label" style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" asp-for="IsEnabled" id="isEnabledToggle" class="toggle-checkbox"
+                               onchange="onMasterToggle(this.checked)" />
+                        <span class="toggle-track" id="masterToggleTrack"></span>
+                        <span style="font-weight:600;font-size:.95rem;">Enable PII / SPII scanning</span>
+                    </label>
+                    <span style="color:#888;font-size:.83rem;">
+                        When enabled, all content sent to the LLM is first scanned locally for personally
+                        identifiable information.
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Response policy ───────────────────────────────────── -->
+        <div class="data-card" style="margin-bottom:24px;" id="policyCard">
+            <div class="card-header">Response Policy</div>
+            <div class="card-body">
+                <p style="font-size:.85rem;color:#444;margin-bottom:14px;">
+                    Choose what happens when PII/SPII is detected in content that is about to be sent to the AI:
+                </p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                        <input type="radio" name="BlockOnDetection" value="false"
+                               @(Model.BlockOnDetection ? "" : "checked") style="margin-top:3px;" />
+                        <span>
+                            <strong>Redact &amp; Continue</strong> — replace the detected PII with a placeholder
+                            (e.g. <code>[EMAIL_ADDRESS]</code>) and forward the sanitised content to the AI.
+                            <em>Recommended for most tenants.</em>
+                        </span>
+                    </label>
+                    <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                        <input type="radio" name="BlockOnDetection" value="true"
+                               @(Model.BlockOnDetection ? "checked" : "") style="margin-top:3px;" />
+                        <span>
+                            <strong>Block Request</strong> — abort the AI call and return an error to the user
+                            whenever PII/SPII is detected.  Use this for high-compliance environments.
+                        </span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Entity types ──────────────────────────────────────── -->
+        <div class="data-card" style="margin-bottom:24px;" id="entitiesCard">
+            <div class="card-header">Entity Types to Detect</div>
+            <div class="card-body">
+                <p style="font-size:.85rem;color:#444;margin-bottom:16px;">
+                    Select which categories of sensitive data the scanner should look for.
+                    All detection runs <strong>locally on the server</strong> — no data is sent to any external
+                    classification service.
+                </p>
+                <div class="form-grid-2">
+                    @{
+                        (string PropName, string Label, string Description)[] entities =
+                        [
+                            ("DetectEmailAddresses",    "Email Addresses",     "Matches user@@domain.com patterns"),
+                            ("DetectPhoneNumbers",      "Phone Numbers",       "International E.164 and common formatted numbers"),
+                            ("DetectCreditCardNumbers", "Credit Card Numbers", "Visa, Mastercard, Amex, Discover"),
+                            ("DetectSsnNumbers",        "SSN / National IDs",  "US Social Security Number format"),
+                            ("DetectIpAddresses",       "IP Addresses",        "IPv4 addresses (e.g. 192.168.1.1)"),
+                            ("DetectPassportNumbers",   "Passport / ID Numbers", "Broad pattern covering UK, US, EU formats"),
+                            ("DetectDatesOfBirth",      "Dates of Birth",      "DD/MM/YYYY and similar formats — may cause false positives in process dates"),
+                            ("DetectUrls",              "URLs",                "http/https/ftp links"),
+                            ("DetectPersonNames",       "Person Names",        "Two or more capitalised words — conservative heuristic, may have false positives"),
+                        ];
+                    }
+                    @foreach (var (propName, label, desc) in entities)
+                    {
+                        var currentVal = (bool)(typeof(IQFlowAgent.Web.Models.TenantPiiSettings)
+                            .GetProperty(propName)!.GetValue(Model) ?? false);
+                        <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #f5f5f5;">
+                            <div style="padding-top:2px;">
+                                <input type="checkbox" name="@propName" value="true" id="chk_@propName"
+                                       @(currentVal ? "checked" : "") />
+                                <input type="hidden" name="@propName" value="false" />
+                            </div>
+                            <div>
+                                <label for="chk_@propName" style="font-weight:600;cursor:pointer;">@label</label>
+                                <div style="font-size:.78rem;color:#888;">@desc</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @if (Model.UpdatedAt != default)
+        {
+            <p style="color:#888;font-size:12px;margin-bottom:16px;">
+                Last updated: @Model.UpdatedAt.ToString("dd MMM yyyy HH:mm") UTC
+                @if (!string.IsNullOrEmpty(Model.UpdatedByUserId)) { <text> by @Model.UpdatedByUserId</text> }
+            </p>
+        }
+
+        <button type="submit" class="btn-primary" id="save-btn">Save Settings</button>
+    </form>
+
+    <!-- ── Live scan tester ───────────────────────────────────────────── -->
+    <div class="data-card" style="margin-top:32px;">
+        <div class="card-header">
+            <i class="bi bi-search me-2" style="color:#e31837;"></i>Live PII Scanner &amp; Preview
+        </div>
+        <div class="card-body">
+            <p style="font-size:.85rem;color:#444;margin-bottom:12px;">
+                Paste any text below to test the scanner <em>using the entity types currently checked above</em>.
+                The scan runs entirely on the server — nothing is sent to an AI service.
+            </p>
+            <textarea id="scanInput" class="form-input" rows="5" style="width:100%;font-family:monospace;font-size:.83rem;"
+                placeholder="Paste text here… e.g. Contact john.smith@example.com or call +1-800-555-1234"></textarea>
+            <div style="margin-top:10px;display:flex;gap:10px;align-items:center;">
+                <button type="button" class="btn-primary" onclick="runScan()" id="scan-btn">
+                    <i class="bi bi-shield-check me-1"></i>Scan Text
+                </button>
+                <span id="scan-status" style="font-size:.83rem;color:#888;"></span>
+            </div>
+
+            <div id="scan-result" style="display:none;margin-top:16px;">
+                <div id="scan-summary" style="padding:10px 14px;border-radius:8px;font-size:.87rem;margin-bottom:12px;"></div>
+                <div id="scan-findings" style="display:none;">
+                    <strong style="font-size:.88rem;">Findings:</strong>
+                    <table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:.83rem;">
+                        <thead>
+                            <tr style="background:#f5f5f5;">
+                                <th style="padding:6px 10px;text-align:left;border:1px solid #e5e5e5;">Entity Type</th>
+                                <th style="padding:6px 10px;text-align:left;border:1px solid #e5e5e5;">Matched Text</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scan-findings-body"></tbody>
+                    </table>
+                </div>
+                <div style="margin-top:12px;" id="redacted-section">
+                    <strong style="font-size:.88rem;">Redacted Output:</strong>
+                    <pre id="scan-redacted" style="background:#f8faff;border:1px solid #c8d5f0;border-radius:8px;padding:12px;font-size:.82rem;white-space:pre-wrap;margin-top:6px;"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+</div>
+</div>
+
+@section Scripts {
+<script>
+// ── Master toggle UI ──────────────────────────────────────────────────
+function onMasterToggle(enabled) {
+    ['policyCard','entitiesCard'].forEach(id => {
+        document.getElementById(id).style.opacity = enabled ? '1' : '0.45';
+        document.getElementById(id).style.pointerEvents = enabled ? '' : 'none';
+    });
+}
+// Initialise on page load
+(function() {
+    onMasterToggle(document.getElementById('isEnabledToggle').checked);
+})();
+
+// ── Save settings ─────────────────────────────────────────────────────
+async function saveSettings(e) {
+    e.preventDefault();
+    const btn   = document.getElementById('save-btn');
+    const errEl = document.getElementById('save-error');
+    const okEl  = document.getElementById('save-ok');
+    errEl.style.display = 'none';
+    okEl.style.display  = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+        const form = document.getElementById('pii-settings-form');
+        const resp = await fetch(form.action, {
+            method: 'POST',
+            body: new FormData(form),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const ct = resp.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+            const text = await resp.text();
+            console.error('[PII Settings] Unexpected response:', text);
+            errEl.textContent = 'Unexpected server response (HTTP ' + resp.status + ')';
+            errEl.style.display = 'block';
+            btn.disabled = false; btn.textContent = 'Save Settings';
+            return;
+        }
+        const data = await resp.json();
+        if (data.success) {
+            okEl.textContent = data.message || 'Settings saved.';
+            okEl.style.display = 'block';
+        } else {
+            errEl.textContent = 'Failed to save: ' + (data.message || 'Unknown error');
+            errEl.style.display = 'block';
+        }
+    } catch (ex) {
+        errEl.textContent = 'Network error: ' + ex.message;
+        errEl.style.display = 'block';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Save Settings';
+    return false;
+}
+
+// ── Live PII scanner ──────────────────────────────────────────────────
+async function runScan() {
+    const text = document.getElementById('scanInput').value.trim();
+    if (!text) { alert('Please paste some text to scan first.'); return; }
+
+    const btn    = document.getElementById('scan-btn');
+    const status = document.getElementById('scan-status');
+    btn.disabled = true;
+    status.textContent = 'Scanning…';
+
+    // Collect currently-checked entity types from the form
+    const getChk = name => {
+        const els = document.querySelectorAll(`input[name="${name}"]`);
+        for (const el of els) { if (el.type === 'checkbox') return el.checked; }
+        return false;
+    };
+
+    const payload = {
+        text,
+        detectEmailAddresses:    getChk('DetectEmailAddresses'),
+        detectPhoneNumbers:      getChk('DetectPhoneNumbers'),
+        detectCreditCardNumbers: getChk('DetectCreditCardNumbers'),
+        detectSsnNumbers:        getChk('DetectSsnNumbers'),
+        detectIpAddresses:       getChk('DetectIpAddresses'),
+        detectPassportNumbers:   getChk('DetectPassportNumbers'),
+        detectDatesOfBirth:      getChk('DetectDatesOfBirth'),
+        detectUrls:              getChk('DetectUrls'),
+        detectPersonNames:       getChk('DetectPersonNames'),
+    };
+
+    try {
+        const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+        const resp  = await fetch('/PiiSettings/Scan', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'RequestVerificationToken': token },
+            body:    JSON.stringify(payload)
+        });
+        const data = await resp.json();
+
+        const resultEl   = document.getElementById('scan-result');
+        const summaryEl  = document.getElementById('scan-summary');
+        const findingsEl = document.getElementById('scan-findings');
+        const bodyEl     = document.getElementById('scan-findings-body');
+        const redactedEl = document.getElementById('scan-redacted');
+
+        resultEl.style.display = 'block';
+
+        if (data.hasPii) {
+            summaryEl.style.background = '#fde8ec';
+            summaryEl.style.color      = '#c01530';
+            summaryEl.style.border     = '1px solid #fca5a5';
+            summaryEl.innerHTML = `<strong>⚠ PII detected</strong> — ${data.findingCount} finding(s) found. ` +
+                `Content would be <strong>${document.querySelector('input[name="BlockOnDetection"]:checked')?.value === 'true' ? 'blocked' : 'redacted'}</strong> before sending to the AI.`;
+
+            findingsEl.style.display = 'block';
+            bodyEl.innerHTML = data.findings.map(f =>
+                `<tr><td style="padding:5px 10px;border:1px solid #e5e5e5;">${esc(f.entityType)}</td>` +
+                `<td style="padding:5px 10px;border:1px solid #e5e5e5;font-family:monospace;">${esc(f.matchedText)}</td></tr>`
+            ).join('');
+        } else {
+            summaryEl.style.background = '#d1fae5';
+            summaryEl.style.color      = '#065f46';
+            summaryEl.style.border     = '1px solid #6ee7b7';
+            summaryEl.innerHTML        = '<strong>✓ No PII detected</strong> — this content is safe to forward to the AI.';
+            findingsEl.style.display   = 'none';
+        }
+
+        redactedEl.textContent = data.redactedText;
+        status.textContent = '';
+    } catch (ex) {
+        status.textContent = 'Scan error: ' + ex.message;
+    }
+    btn.disabled = false;
+}
+
+function esc(t) {
+    return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+}
