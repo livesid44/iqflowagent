@@ -9,7 +9,7 @@
 --   sqlcmd -S <server> -d <database> -i database-migrate.sql
 --
 -- This script is the authoritative source for the database schema.
--- It covers all migrations up to: 20260311000000_FixAllTablesIdentity
+-- It covers all migrations up to: 20260316063823_AddModelVersionToTenantAiSettings
 -- =============================================================================
 
 IF OBJECT_ID(N'[__EFMigrationsHistory]') IS NULL
@@ -1265,6 +1265,153 @@ GO
 
 IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260311000000_FixAllTablesIdentity')
     INSERT INTO [__EFMigrationsHistory] VALUES (N'20260311000000_FixAllTablesIdentity', N'8.0.13');
+GO
+
+COMMIT;
+GO
+
+-- =============================================================================
+-- 20260312035530_AddPiiMaskingLog
+-- =============================================================================
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260312035530_AddPiiMaskingLog')
+BEGIN
+    -- Add PiiMaskingLog column to IntakeRecords if it does not already exist
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns c
+        JOIN sys.tables t ON c.object_id = t.object_id
+        WHERE t.name = N'IntakeRecords' AND c.name = N'PiiMaskingLog'
+    )
+        ALTER TABLE [IntakeRecords] ADD [PiiMaskingLog] nvarchar(max) NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260312035530_AddPiiMaskingLog')
+    INSERT INTO [__EFMigrationsHistory] VALUES (N'20260312035530_AddPiiMaskingLog', N'8.0.13');
+GO
+
+COMMIT;
+GO
+
+-- =============================================================================
+-- 20260313050649_AddAuditLogs
+-- =============================================================================
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260313050649_AddAuditLogs')
+BEGIN
+    IF OBJECT_ID(N'[AuditLogs]', N'U') IS NULL
+    BEGIN
+        CREATE TABLE [AuditLogs] (
+            [Id]              int            NOT NULL IDENTITY(1,1),
+            [TenantId]        int            NOT NULL,
+            [IntakeRecordId]  int            NULL,
+            [CorrelationId]   nvarchar(max)  NOT NULL,
+            [EventType]       nvarchar(max)  NOT NULL,
+            [CallSite]        nvarchar(max)  NOT NULL,
+            [PiiScanStatus]   nvarchar(max)  NOT NULL,
+            [PiiFindingsJson] nvarchar(max)  NULL,
+            [PiiFindingCount] int            NOT NULL,
+            [WasBlocked]      bit            NOT NULL,
+            [RequestUrl]      nvarchar(max)  NULL,
+            [HttpStatusCode]  int            NULL,
+            [DurationMs]      bigint         NULL,
+            [IsMocked]        bit            NOT NULL,
+            [Outcome]         nvarchar(max)  NOT NULL,
+            [ErrorMessage]    nvarchar(max)  NULL,
+            [UserId]          nvarchar(max)  NULL,
+            [CreatedAt]       datetime2      NOT NULL,
+            CONSTRAINT [PK_AuditLogs] PRIMARY KEY ([Id])
+        );
+    END
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260313050649_AddAuditLogs')
+    INSERT INTO [__EFMigrationsHistory] VALUES (N'20260313050649_AddAuditLogs', N'8.0.13');
+GO
+
+COMMIT;
+GO
+
+-- =============================================================================
+-- 20260313073600_FixAuditLogsColumnTypes
+-- Repairs the AuditLogs table in case it was created with SQLite types (TEXT/INTEGER)
+-- instead of SQL Server types (nvarchar/bit/bigint/IDENTITY).
+-- If the table was already created with correct types above, the guard prevents
+-- the DROP+CREATE so this block becomes a no-op.
+-- =============================================================================
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260313073600_FixAuditLogsColumnTypes')
+BEGIN
+    IF OBJECT_ID(N'[AuditLogs]', N'U') IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM sys.identity_columns ic
+            JOIN sys.tables t ON ic.object_id = t.object_id
+            WHERE t.name = N'AuditLogs' AND ic.name = N'Id'
+        )
+    BEGIN
+        DROP TABLE [AuditLogs];
+        CREATE TABLE [AuditLogs] (
+            [Id]              int            NOT NULL IDENTITY(1,1),
+            [TenantId]        int            NOT NULL,
+            [IntakeRecordId]  int            NULL,
+            [CorrelationId]   nvarchar(max)  NOT NULL,
+            [EventType]       nvarchar(max)  NOT NULL,
+            [CallSite]        nvarchar(max)  NOT NULL,
+            [PiiScanStatus]   nvarchar(max)  NOT NULL,
+            [PiiFindingsJson] nvarchar(max)  NULL,
+            [PiiFindingCount] int            NOT NULL,
+            [WasBlocked]      bit            NOT NULL,
+            [RequestUrl]      nvarchar(max)  NULL,
+            [HttpStatusCode]  int            NULL,
+            [DurationMs]      bigint         NULL,
+            [IsMocked]        bit            NOT NULL,
+            [Outcome]         nvarchar(max)  NOT NULL,
+            [ErrorMessage]    nvarchar(max)  NULL,
+            [UserId]          nvarchar(max)  NULL,
+            [CreatedAt]       datetime2      NOT NULL,
+            CONSTRAINT [PK_AuditLogs] PRIMARY KEY ([Id])
+        );
+    END
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260313073600_FixAuditLogsColumnTypes')
+    INSERT INTO [__EFMigrationsHistory] VALUES (N'20260313073600_FixAuditLogsColumnTypes', N'8.0.13');
+GO
+
+COMMIT;
+GO
+
+-- =============================================================================
+-- 20260316063823_AddModelVersionToTenantAiSettings
+-- Adds the AzureOpenAIModelVersion column so administrators can choose between
+-- GPT-4o and GPT-5.2 per tenant.  Existing rows default to 'gpt-5.2'.
+-- =============================================================================
+BEGIN TRANSACTION;
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260316063823_AddModelVersionToTenantAiSettings')
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM sys.columns c
+        JOIN sys.tables t ON c.object_id = t.object_id
+        WHERE t.name = N'TenantAiSettings' AND c.name = N'AzureOpenAIModelVersion'
+    )
+        ALTER TABLE [TenantAiSettings]
+            ADD [AzureOpenAIModelVersion] nvarchar(max) NOT NULL
+                CONSTRAINT [DF_TenantAiSettings_AzureOpenAIModelVersion] DEFAULT N'gpt-5.2';
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20260316063823_AddModelVersionToTenantAiSettings')
+    INSERT INTO [__EFMigrationsHistory] VALUES (N'20260316063823_AddModelVersionToTenantAiSettings', N'8.0.13');
 GO
 
 COMMIT;
