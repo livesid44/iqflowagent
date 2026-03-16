@@ -87,6 +87,9 @@
                     var openTasks      = openTaskCounts.TryGetValue(intake.Id, out var ot) ? ot : 0;
                     var hasAnalysis    = !string.IsNullOrWhiteSpace(intake.AnalysisResult);
                     var isQcReady      = openTasks == 0 && hasAnalysis;
+                    var qcBtnTitle = !isQcReady
+                        ? (openTasks > 0 ? $"{openTasks} task(s) still open — close all tasks first" : "AI analysis pending — run analysis first")
+                        : "Run QC check";
                     <tr>
                         <td><span class="intake-id">@intake.IntakeId</span></td>
                         <td><strong>@intake.ProcessName</strong></td>
@@ -146,7 +149,7 @@
                                     <input type="hidden" name="intakeId" value="@intake.Id" />
                                     <button type="submit" class="btn-run-qc"
                                         disabled="@(!isQcReady)"
-                                        title="@(!isQcReady ? (openTasks > 0 ? $"{openTasks} task(s) still open — close all tasks first" : "AI analysis pending — run analysis first") : "Run QC check")"
+                                        title="@qcBtnTitle"
                                         onclick="return @(isQcReady ? $"confirmQc('{intake.IntakeId}')" : "false")">
                                         @(qc?.Status == "Complete" ? "↺ Re-run QC" : "▶ Run QC")
                                     </button>

@@ -250,6 +250,16 @@
                     </button>
                 </form>
             }
+            @if (Model.Status == "Closed")
+            {
+                <form asp-action="Reopen" asp-route-id="@Model.Id" method="post" style="margin:0;"
+                      onsubmit="return confirm('Reopen this intake? This will allow re-running AI analysis, updating tasks, and regenerating the document.');">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn-reanalyze" style="background:#d97706;color:#fff;">
+                        🔓 Reopen Intake
+                    </button>
+                </form>
+            }
         </div>
     </div>
 
