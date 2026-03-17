@@ -242,7 +242,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             if (string.IsNullOrWhiteSpace(content))
                 return GenerateMockAnalysis(intake);
 
-            return InjectSourceField(content, "llm");
+            return InjectSourceField(StripMarkdownFences(content), "llm");
         }
         catch (Exception ex)
         {
@@ -352,7 +352,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             if (string.IsNullOrWhiteSpace(content))
                 return GenerateMockVerification(intake, tasks);
 
-            return InjectSourceField(content, "llm");
+            return InjectSourceField(StripMarkdownFences(content), "llm");
         }
         catch (Exception ex)
         {
@@ -606,7 +606,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 
             return string.IsNullOrWhiteSpace(content)
                 ? GenerateMockFieldAnalysis(intake, fieldDefinitionsJson, analysisJson)
-                : content;
+                : StripMarkdownFences(content);
         }
         catch (Exception ex)
         {
@@ -2591,6 +2591,29 @@ public class AzureOpenAiService : IAzureOpenAiService
         {
             return json;
         }
+    }
+
+    /// <summary>
+    /// Strips leading/trailing markdown code fences (e.g. ```json ... ```) that the AI
+    /// sometimes adds despite being instructed not to, so the result can be parsed as JSON.
+    /// </summary>
+    private static string StripMarkdownFences(string content)
+    {
+        var s = content.Trim();
+
+        // Remove opening fence: ```json or ``` (optionally with language hint)
+        if (s.StartsWith("```", StringComparison.Ordinal))
+        {
+            var newline = s.IndexOf('\n');
+            if (newline >= 0)
+                s = s[(newline + 1)..].TrimStart();
+        }
+
+        // Remove closing fence
+        if (s.EndsWith("```", StringComparison.Ordinal))
+            s = s[..^3].TrimEnd();
+
+        return s;
     }
 
     // ── GenerateDescriptionAsync ───────────────────────────────────────────────
