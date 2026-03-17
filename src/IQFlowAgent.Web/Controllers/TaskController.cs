@@ -122,6 +122,11 @@ public class TaskController : Controller
         var intake = await _db.IntakeRecords.FindAsync(intakeRecordId);
         if (intake == null) return NotFound();
 
+        // Reject sentinel titles used by the "Create All" batch buttons; they must never
+        // result in a real task even if the client-side filtering somehow lets them through.
+        if (string.IsNullOrWhiteSpace(title) || title == "[BATCH]" || title == "[BATCH-CP]")
+            return BadRequest("Invalid task title.");
+
         // Guard: if a task with the same title already exists, redirect to it
         var existing = await _db.IntakeTasks
             .FirstOrDefaultAsync(t => t.IntakeRecordId == intakeRecordId && t.Title == title);

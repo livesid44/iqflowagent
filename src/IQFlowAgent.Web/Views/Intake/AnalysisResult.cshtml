@@ -920,9 +920,12 @@
 
     // Collect all action items and submit them one by one via fetch
     function createAllTasks() {
-        // Filter once: exclude the hidden "createAllForm" placeholder
+        // Exclude both batch-placeholder forms and checkpoint-specific forms so that
+        // (a) the [BATCH-CP] sentinel is never submitted as a real task, and
+        // (b) checkpoint tasks are not created as an unintended side-effect of clicking
+        //     "Create All as Tasks" for action items.
         const forms = Array.from(document.querySelectorAll('form[action*="CreateFromAction"]'))
-            .filter(f => f.id !== 'createAllForm');
+            .filter(f => f.id !== 'createAllForm' && f.id !== 'createAllCpForm' && !f.classList.contains('cp-task-form'));
         if (!forms.length) return;
 
         let idx = 0;
