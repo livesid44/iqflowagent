@@ -857,6 +857,10 @@ public class IntakeController : Controller
                 ? (record.CreatedByUserId ?? "Unassigned")
                 : record.ProcessOwnerEmail;
 
+            // Track BARTOK sections already covered by action item tasks to avoid creating
+            // duplicate checkpoint tasks for the same missing information.
+            var coveredSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // ── Action Items ────────────────────────────────────────────────────
             if (root.TryGetProperty("actionItems", out var actionItems))
             {
@@ -879,6 +883,9 @@ public class IntakeController : Controller
 
                         if (!string.IsNullOrWhiteSpace(sectionName))
                         {
+                            // Mark this section as covered so the checkpoint task is not duplicated
+                            coveredSections.Add(sectionName);
+
                             description = description.TrimEnd();
                             description += $"""
 
@@ -907,6 +914,9 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
                     var cpNote  = cp.TryGetProperty("note",  out var cn) ? cn.GetString() ?? "" : "";
 
                     if (string.IsNullOrWhiteSpace(cpLabel)) continue;
+
+                    // Skip if an action item task already covers this BARTOK section
+                    if (coveredSections.Contains(cpLabel)) continue;
 
                     var title       = $"[Checkpoint] {cpLabel}";
                     var description = string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote;

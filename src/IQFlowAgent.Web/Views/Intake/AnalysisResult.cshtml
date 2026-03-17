@@ -653,6 +653,25 @@
             var failCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Fail");
             var warningCount = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Warning");
             var pendingCount = failCount + warningCount;
+
+            @* Build set of BARTOK sections already covered by existing action item tasks.
+               A checkpoint for a section that has a matching action item task is considered
+               covered and should not prompt for a separate task to be created. *@
+            var sectionsCoveredByTasks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (analysis!.Value.TryGetProperty("actionItems", out var actionItemsForCoverage))
+            {
+                foreach (var ai in actionItemsForCoverage.EnumerateArray())
+                {
+                    var aiTitle = ai.TryGetProperty("title", out var at) ? at.GetString() ?? "" : "";
+                    if (existingTitles.Contains(aiTitle) && ai.TryGetProperty("bartokSection", out var bsEl))
+                    {
+                        var sect = bsEl.GetString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(sect))
+                            sectionsCoveredByTasks.Add(sect);
+                    }
+                }
+            }
+
             <div class="analysis-card">
                 <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                     <span><i class="bi bi-check2-square"></i> Check Points
@@ -666,10 +685,10 @@
                     </span>
                     @if (pendingCount > 0)
                     {
-                        @* Check whether all pending checkpoints already have tasks *@
+                        @* Check whether all pending checkpoints already have tasks (direct or via action item) *@
                         var allCpTasksExist = checkPoints.EnumerateArray()
                             .Where(c => { var st = c.TryGetProperty("status", out var sv) ? sv.GetString() : ""; return st == "Fail" || st == "Warning"; })
-                            .All(c => { var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : ""; return existingTitles.Contains($"[Checkpoint] {lbl}"); });
+                            .All(c => { var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : ""; return existingTitles.Contains($"[Checkpoint] {lbl}") || sectionsCoveredByTasks.Contains(lbl); });
                         if (allCpTasksExist)
                         {
                             <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
@@ -713,6 +732,7 @@
                             var cpTaskTitle = $"[Checkpoint] {cpLabel}";
                             var cpPriority  = cpStatus == "Fail" ? "High" : "Medium";
                             var cpIsPending = cpStatus == "Fail" || cpStatus == "Warning";
+                            var cpTaskExists = existingTitles.Contains(cpTaskTitle) || sectionsCoveredByTasks.Contains(cpLabel);
                             <tr>
                                 <td>@cpLabel</td>
                                 <td>
@@ -724,7 +744,7 @@
                                 <td>
                                     @if (cpIsPending)
                                     {
-                                        @if (existingTitles.Contains(cpTaskTitle))
+                                        @if (cpTaskExists)
                                         {
                                             <span class="task-created-badge">
                                                 <i class="bi bi-check-circle-fill me-1"></i>Task Created

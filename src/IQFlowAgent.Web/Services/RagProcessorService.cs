@@ -370,8 +370,21 @@ public class RagProcessorService : BackgroundService
                 .ToListAsync(ct);
             var titleSet = existingTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+            // Build set of BARTOK sections already covered by action items to avoid
+            // creating duplicate checkpoint tasks for the same missing information.
+            var coveredSections = GetJsonArraySafe(doc.RootElement, "actionItems")
+                .Select(item => item.TryGetProperty("bartokSection", out var bs) ? bs.GetString() ?? "" : "")
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             var items = GetJsonArraySafe(doc.RootElement, "actionItems")
-                .Concat(GetJsonArraySafe(doc.RootElement, "checkPoints").Where(IsFailOrWarn))
+                .Concat(GetJsonArraySafe(doc.RootElement, "checkPoints")
+                    .Where(cp =>
+                    {
+                        if (!IsFailOrWarn(cp)) return false;
+                        var label = cp.TryGetProperty("label", out var lbl) ? lbl.GetString() ?? "" : "";
+                        return !coveredSections.Contains(label);
+                    }))
                 .ToList();
 
             foreach (var item in items)
