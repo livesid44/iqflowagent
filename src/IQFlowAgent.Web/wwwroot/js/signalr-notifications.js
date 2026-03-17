@@ -2,6 +2,12 @@
  * IQFlowAgent — SignalR notification client
  * Connects to /hubs/notifications and listens for RAG job completion events.
  * Displays a dismissible toast notification when analysis is ready.
+ *
+ * Transport strategy:
+ *   1. First attempt uses the default transport order (WebSockets → SSE → LongPolling).
+ *   2. If the connection fails (common when a reverse proxy blocks WebSocket upgrades),
+ *      a fresh connection is built using only SSE + LongPolling (both work over plain
+ *      HTTP/HTTPS and are not affected by WebSocket proxy restrictions).
  */
 (function () {
     'use strict';
@@ -12,50 +18,83 @@
         return;
     }
 
-    const connection = new signalR.HubConnectionBuilder()
-        .withUrl('/hubs/notifications')
-        .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
-        .configureLogging(signalR.LogLevel.Warning)
-        .build();
+    let connection;
+    let usedFallback = false;
 
-    // ── Event handlers ────────────────────────────────────────────────────────
+    // ── Build a connection with a specific transport (or default if omitted) ──
 
-    connection.on('AnalysisReady', function (data) {
-        showToast(
-            '✅ Analysis Ready',
-            `AI analysis for <strong>${data.processName}</strong> (${data.intakeId}) is complete. ` +
-            `${data.filesProcessed} file(s) processed.`,
-            'success',
-            `/Intake/AnalysisResult/${data.intakeDbId}`
-        );
-    });
+    function createConnection(transportType) {
+        const urlOpts = (transportType !== undefined) ? { transport: transportType } : {};
 
-    connection.on('AnalysisFailed', function (data) {
-        showToast(
-            '❌ Analysis Failed',
-            `Processing failed for <strong>${data.intakeId}</strong>: ${data.error}`,
-            'error',
-            null
-        );
-    });
+        const conn = new signalR.HubConnectionBuilder()
+            .withUrl('/hubs/notifications', urlOpts)
+            .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
+            .configureLogging(signalR.LogLevel.Warning)
+            .build();
+
+        attachHandlers(conn);
+        return conn;
+    }
+
+    // ── Event handlers (registered on every new connection instance) ─────────
+
+    function attachHandlers(conn) {
+        conn.on('AnalysisReady', function (data) {
+            showToast(
+                '✅ Analysis Ready',
+                `AI analysis for <strong>${data.processName}</strong> (${data.intakeId}) is complete. ` +
+                `${data.filesProcessed} file(s) processed.`,
+                'success',
+                `/Intake/AnalysisResult/${data.intakeDbId}`
+            );
+        });
+
+        conn.on('AnalysisFailed', function (data) {
+            showToast(
+                '❌ Analysis Failed',
+                `Processing failed for <strong>${data.intakeId}</strong>: ${data.error}`,
+                'error',
+                null
+            );
+        });
+
+        conn.onclose(async () => {
+            console.warn('[IQFlow] SignalR disconnected.');
+        });
+    }
 
     // ── Connection lifecycle ──────────────────────────────────────────────────
 
     async function start() {
         try {
             await connection.start();
-            console.info('[IQFlow] SignalR connected.');
+            console.info('[IQFlow] SignalR connected' + (usedFallback ? ' (LongPolling fallback)' : '') + '.');
             await connection.invoke('JoinUserGroup');
         } catch (err) {
-            console.warn('[IQFlow] SignalR connection failed:', err);
-            setTimeout(start, 10000);
+            const errMsg = (err && err.message) ? err.message.toLowerCase() : '';
+            const isProxyError =
+                errMsg.includes('websocket') ||
+                errMsg.includes('transport') ||
+                errMsg.includes('failed to start');
+
+            if (!usedFallback && isProxyError) {
+                // WebSocket upgrade blocked by reverse proxy — rebuild connection using
+                // SSE and LongPolling only (both use normal HTTP requests that proxies pass through).
+                usedFallback = true;
+                console.warn('[IQFlow] WebSocket blocked by proxy; switching to SSE/LongPolling fallback.');
+                connection = createConnection(
+                    signalR.HttpTransportType.ServerSentEvents |
+                    signalR.HttpTransportType.LongPolling
+                );
+                setTimeout(start, 1000);
+            } else {
+                console.warn('[IQFlow] SignalR connection failed:', err);
+                setTimeout(start, 15000);
+            }
         }
     }
 
-    connection.onclose(async () => {
-        console.warn('[IQFlow] SignalR disconnected.');
-    });
-
+    connection = createConnection(); // default: WebSockets → SSE → LongPolling
     start();
 
     // ── Toast notification ────────────────────────────────────────────────────

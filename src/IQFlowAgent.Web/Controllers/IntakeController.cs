@@ -755,6 +755,27 @@ public class IntakeController : Controller
         return RedirectToAction(nameof(AnalysisResult), new { id });
     }
 
+    // POST /Intake/Reopen/5 — reopen a closed intake so it can be re-analysed
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Reopen(int id)
+    {
+        var record = await _db.IntakeRecords.FindAsync(id);
+        if (record == null) return NotFound();
+
+        if (record.Status != "Closed")
+        {
+            TempData["Error"] = "Only Closed intakes can be reopened.";
+            return RedirectToAction(nameof(AnalysisResult), new { id });
+        }
+
+        record.Status = "Complete";
+        await _db.SaveChangesAsync();
+
+        TempData["Success"] = "Intake reopened. You can now re-run the AI analysis, update tasks, and regenerate the document.";
+        return RedirectToAction(nameof(AnalysisResult), new { id });
+    }
+
     private async Task RunAnalysisInBackgroundAsync(int intakeId, string? filePath, string webRoot)
     {
         using var scope = _services.CreateScope();
@@ -849,6 +870,25 @@ public class IntakeController : Controller
 
                     if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
                         continue;
+
+                    // Append a BARTOK output-document section block when the task targets a specific template section
+                    if (item.TryGetProperty("bartokSection", out var bartokSectionEl))
+                    {
+                        var sectionName  = bartokSectionEl.GetString() ?? "";
+                        var requiredInfo = item.TryGetProperty("requiredInfo", out var ri) ? ri.GetString() ?? "" : "";
+
+                        if (!string.IsNullOrWhiteSpace(sectionName))
+                        {
+                            description = description.TrimEnd();
+                            description += $"""
+
+
+📄 BARTOK S8 SOP — Output Document Section
+Section : {sectionName}
+Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description above." : requiredInfo)}
+""";
+                        }
+                    }
 
                     AddTask(db, record, title, description, priority, owner, now,
                         $"Task automatically created from AI analysis of intake {record.IntakeId}.");

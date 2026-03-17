@@ -196,16 +196,38 @@
         }
     }
 
-    <!-- Toolbar -->
+    <!-- Toolbar: contextual — show ONE primary action based on state -->
     <div class="toolbar">
-        <form method="post" action="/Report/AnalyzeFields">
-            @Html.AntiForgeryToken()
-            <input type="hidden" name="intakeId" value="@intakeId" />
-            <button type="submit" class="btn-analyze">🤖 @(hasFields ? "Re-run AI Field Analysis" : "Run AI Field Analysis")</button>
-        </form>
-        @if (hasFields)
+        @if (!hasFields)
         {
-            if (allReady)
+            @* No analysis run yet — only show the analysis button *@
+            <form method="post" action="/Report/AnalyzeFields">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="intakeId" value="@intakeId" />
+                <button type="submit" class="btn-analyze">🤖 Run AI Field Analysis</button>
+            </form>
+        }
+        else if (existingReport != null)
+        {
+            @* Document already generated — primary is Download, secondary is Re-run *@
+            @if (existingReport.FilePath.StartsWith("http"))
+            {
+                <a href="@existingReport.FilePath" target="_blank" class="btn-generate">⬇️ Download Report (Word)</a>
+            }
+            else
+            {
+                <a href="/Report/Download?intakeId=@intakeId" class="btn-generate">⬇️ Download Report (Word)</a>
+            }
+            <form method="post" action="/Report/AnalyzeFields">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="intakeId" value="@intakeId" />
+                <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
+            </form>
+        }
+        else
+        {
+            @* Analysis done but no document yet — primary is Generate, secondary is Re-run *@
+            @if (allReady)
             {
                 <form method="post" action="/Report/Generate" onsubmit="return confirm('Generate final BARTOK DD report and close this intake? This action cannot be undone.');">
                     @Html.AntiForgeryToken()
@@ -219,6 +241,11 @@
                     📄 Generate Final Report
                 </button>
             }
+            <form method="post" action="/Report/AnalyzeFields">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="intakeId" value="@intakeId" />
+                <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
+            </form>
         }
     </div>
 

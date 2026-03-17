@@ -3,7 +3,8 @@
     Layout = "_Layout";
     ViewData["Title"] = "QC Check";
     ViewData["ActivePage"] = "qc";
-    var latestQcs = ViewBag.LatestQcs as Dictionary<int, IQFlowAgent.Web.Models.QcCheck> ?? new();
+    var latestQcs      = ViewBag.LatestQcs as Dictionary<int, IQFlowAgent.Web.Models.QcCheck> ?? new();
+    var openTaskCounts = ViewBag.OpenTaskCounts as Dictionary<int, int> ?? new();
 }
 @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData))
 
@@ -29,6 +30,7 @@
         .score-bar-fill { height:8px; border-radius:6px; transition:width .4s; }
         .btn-run-qc     { background:#1a2a5e; color:#fff; border:none; border-radius:7px; padding:7px 18px; font-size:0.82rem; font-weight:600; cursor:pointer; }
         .btn-run-qc:hover { background:#0f1d45; }
+        .btn-run-qc:disabled { background:#b0b8d1; cursor:not-allowed; opacity:0.7; }
         .btn-view-qc    { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; border-radius:7px; padding:7px 14px; font-size:0.82rem; cursor:pointer; text-decoration:none; display:inline-block; }
         .btn-view-qc:hover { background:#dcfce7; }
         .btn-dash       { background:#e31837; color:#fff; border:none; border-radius:8px; padding:9px 20px; font-size:0.88rem; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; }
@@ -38,6 +40,9 @@
         .empty-state    { text-align:center; padding:48px 24px; color:#aaa; }
         .toast-success  { background:#d1fae5; border:1px solid #6ee7b7; color:#065f46; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:0.88rem; }
         .toast-error-box{ background:#fee2e2; border:1px solid #fca5a5; color:#991b1b; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:0.88rem; }
+        .readiness-ready    { color:#059669; font-size:0.8rem; font-weight:600; }
+        .readiness-tasks    { color:#d97706; font-size:0.8rem; font-weight:600; }
+        .readiness-analysis { color:#6366f1; font-size:0.8rem; font-weight:600; }
     </style>
 
     @if (TempData["Success"] != null)
@@ -62,6 +67,7 @@
                     <th>Process Name</th>
                     <th>Business Unit</th>
                     <th>Closed</th>
+                    <th>Readiness</th>
                     <th>Last QC Score</th>
                     <th>QC Status</th>
                     <th>Actions</th>
@@ -77,11 +83,36 @@
                     var barColor   = qc == null ? "#ccc" :
                                      qc.OverallScore >= 80 ? "#10b981" :
                                      qc.OverallScore >= 60 ? "#f59e0b" : "#ef4444";
+
+                    var openTasks      = openTaskCounts.TryGetValue(intake.Id, out var ot) ? ot : 0;
+                    var hasAnalysis    = !string.IsNullOrWhiteSpace(intake.AnalysisResult);
+                    var isQcReady      = openTasks == 0 && hasAnalysis;
+                    var qcBtnTitle = !isQcReady
+                        ? (openTasks > 0 ? $"{openTasks} task(s) still open — close all tasks first" : "AI analysis pending — run analysis first")
+                        : "Run QC check";
                     <tr>
                         <td><span class="intake-id">@intake.IntakeId</span></td>
                         <td><strong>@intake.ProcessName</strong></td>
                         <td>@intake.BusinessUnit</td>
                         <td style="color:#888">@intake.AnalyzedAt?.ToString("dd MMM yyyy")</td>
+                        <td>
+                            @if (openTasks > 0)
+                            {
+                                <span class="readiness-tasks" title="Close all tasks before running QC">
+                                    ⏳ @openTasks task@(openTasks != 1 ? "s" : "") still open
+                                </span>
+                            }
+                            else if (!hasAnalysis)
+                            {
+                                <span class="readiness-analysis" title="Run intake analysis before running QC">
+                                    🔍 AI analysis pending
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="readiness-ready">✅ Ready for QC</span>
+                            }
+                        </td>
                         <td>
                             @if (qc?.Status == "Complete")
                             {
@@ -117,7 +148,9 @@
                                     @Html.AntiForgeryToken()
                                     <input type="hidden" name="intakeId" value="@intake.Id" />
                                     <button type="submit" class="btn-run-qc"
-                                        onclick="return confirm('Run QC check for @intake.IntakeId?')">
+                                        disabled="@(!isQcReady)"
+                                        title="@qcBtnTitle"
+                                        onclick="return @(isQcReady ? $"confirmQc('{intake.IntakeId}')" : "false")">
                                         @(qc?.Status == "Complete" ? "↺ Re-run QC" : "▶ Run QC")
                                     </button>
                                 </form>
@@ -132,7 +165,7 @@
                 @if (!Model.Any())
                 {
                     <tr>
-                        <td colspan="7">
+                        <td colspan="8">
                             <div class="empty-state">
                                 <div style="font-size:2.5rem;margin-bottom:12px">🔍</div>
                                 <div style="font-size:1rem;font-weight:600;color:#666">No Closed Intakes</div>
@@ -145,4 +178,9 @@
         </table>
     </div>
 </main>
+<script>
+    function confirmQc(intakeId) {
+        return confirm('Run QC check for ' + intakeId + '?');
+    }
+</script>
 </div>
