@@ -128,6 +128,7 @@ public class ReportController : Controller
         var tasks = await _db.IntakeTasks
             .Where(t => t.IntakeRecordId == intakeId)
             .Include(t => t.Documents)
+            .Include(t => t.ActionLogs)
             .ToListAsync();
         var artifactText = await AggregateArtifactTextAsync(tasks);
 
@@ -335,6 +336,7 @@ public class ReportController : Controller
         var tasks = await _db.IntakeTasks
             .Where(t => t.IntakeRecordId == intake.Id)
             .Include(t => t.Documents)
+            .Include(t => t.ActionLogs)
             .ToListAsync();
         var artifactText = await AggregateArtifactTextAsync(tasks);
 
@@ -482,31 +484,70 @@ public class ReportController : Controller
     private async Task<string?> AggregateArtifactTextAsync(List<IntakeTask> tasks)
     {
         var sb = new System.Text.StringBuilder();
-        var textExtensions = new[] { ".txt", ".csv", ".json", ".xml", ".md" };
 
         foreach (var task in tasks)
         {
+            // ── Task comments from action logs ────────────────────────────────
+            var comments = task.ActionLogs
+                .Where(l => l.ActionType == "Comment" && !string.IsNullOrWhiteSpace(l.Comment))
+                .OrderBy(l => l.CreatedAt)
+                .ToList();
+            if (comments.Count > 0)
+            {
+                sb.AppendLine($"--- Comments on Task {task.TaskId}: {task.Title} ---");
+                foreach (var c in comments)
+                    sb.AppendLine(c.Comment);
+                sb.AppendLine();
+            }
+
+            // ── Uploaded artifact files ────────────────────────────────────────
             foreach (var doc in task.Documents.Where(d => d.DocumentType == "TaskArtifact"))
             {
                 var ext = Path.GetExtension(doc.FileName ?? "").ToLowerInvariant();
-                if (!textExtensions.Contains(ext)) continue;
 
                 try
                 {
                     string? content = null;
-                    if (await _blobService.IsConfiguredAsync() && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                        content = await _blobService.DownloadTextAsync(doc.FilePath);
-                    else
+
+                    if (ext is ".xlsx" or ".docx")
                     {
-                        var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
-                        if (System.IO.File.Exists(fullPath))
-                            content = await System.IO.File.ReadAllTextAsync(fullPath);
+                        // Binary document: download bytes then extract text
+                        byte[]? bytes = null;
+                        if (await _blobService.IsConfiguredAsync()
+                            && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        {
+                            bytes = await _blobService.DownloadBytesAsync(doc.FilePath);
+                        }
+                        else
+                        {
+                            var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
+                            if (System.IO.File.Exists(fullPath))
+                                bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+                        }
+
+                        if (bytes != null)
+                            content = DocumentTextExtractor.Extract(bytes, ext);
+                    }
+                    else if (ext is ".txt" or ".csv" or ".json" or ".xml" or ".md")
+                    {
+                        if (await _blobService.IsConfiguredAsync()
+                            && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        {
+                            content = await _blobService.DownloadTextAsync(doc.FilePath);
+                        }
+                        else
+                        {
+                            var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
+                            if (System.IO.File.Exists(fullPath))
+                                content = await System.IO.File.ReadAllTextAsync(fullPath);
+                        }
                     }
 
                     if (!string.IsNullOrWhiteSpace(content))
                     {
                         sb.AppendLine($"--- {doc.FileName} (Task: {task.TaskId}) ---");
                         sb.AppendLine(content.Length > MaxArtifactCharsPerFile ? content[..MaxArtifactCharsPerFile] + "[...truncated]" : content);
+                        sb.AppendLine();
                     }
                 }
                 catch (Exception ex)

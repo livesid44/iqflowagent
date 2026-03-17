@@ -146,6 +146,56 @@ public class BlobStorageService : IBlobStorageService
         }
     }
 
+    public async Task<byte[]?> DownloadBytesAsync(string blobUrl)
+    {
+        var tenantId      = _tenantContext.GetCurrentTenantId();
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        var sw            = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var (conn, containerName) = await GetStorageConfigAsync();
+            var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
+            var credentialedClient = new BlobClient(conn!, containerName, blobName);
+
+            var response = await credentialedClient.DownloadContentAsync();
+            sw.Stop();
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDownloadBytes",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : 200,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Success");
+
+            return response.Value.Content.ToArray();
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogWarning(ex, "Could not download binary content from blob {BlobUrl}", blobUrl);
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDownloadBytes",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
+
+            return null;
+        }
+    }
+
     public async Task DeleteAsync(string blobUrl)
     {
         var correlationId = Guid.NewGuid().ToString("N")[..12];

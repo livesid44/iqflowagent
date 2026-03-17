@@ -16,6 +16,12 @@ public interface IBlobStorageService
     /// </summary>
     Task<string?> DownloadTextAsync(string blobUrl);
 
+    /// <summary>
+    /// Downloads the blob at <paramref name="blobUrl"/> as raw bytes,
+    /// or <c>null</c> if the download fails.
+    /// </summary>
+    Task<byte[]?> DownloadBytesAsync(string blobUrl);
+
     /// <summary>Deletes the blob at <paramref name="blobUrl"/> if it exists.</summary>
     Task DeleteAsync(string blobUrl);
 
