@@ -189,9 +189,18 @@
         @if (allReady)
         {
             <div class="report-ready-box">
-                <h3>🎉 All fields are ready! You can now generate the final report.</h3>
-                <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated, uploaded to storage, and the intake will be marked as <strong>Closed</strong>.</p>
-                <p style="font-size:0.82rem;color:#047857;">Click the <strong>"Generate Final Report &amp; Close Intake"</strong> button below.</p>
+                @if (existingReport != null)
+                {
+                    <h3>✅ All fields are ready! You can re-generate the report with updated values.</h3>
+                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). A new document will be generated reflecting the latest field values — the previous version will remain available via the Download button.</p>
+                    <p style="font-size:0.82rem;color:#047857;">Click <strong>"Re-generate Report (Word)"</strong> below to create an updated copy.</p>
+                }
+                else
+                {
+                    <h3>🎉 All fields are ready! You can now generate the final report.</h3>
+                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated, uploaded to storage, and the intake will be marked as <strong>Closed</strong>.</p>
+                    <p style="font-size:0.82rem;color:#047857;">Click the <strong>"Generate Final Report &amp; Close Intake"</strong> button below.</p>
+                }
             </div>
         }
     }
@@ -209,7 +218,7 @@
         }
         else if (existingReport != null)
         {
-            @* Document already generated — primary is Download, secondary is Re-run *@
+            @* Document already generated — show Download, Re-generate (if ready), and Re-run Analysis *@
             @if (existingReport.FilePath.StartsWith("http"))
             {
                 <a href="@existingReport.FilePath" target="_blank" class="btn-generate">⬇️ Download Report (Word)</a>
@@ -217,6 +226,25 @@
             else
             {
                 <a href="/Report/Download?intakeId=@intakeId" class="btn-generate">⬇️ Download Report (Word)</a>
+            }
+            @if (allReady)
+            {
+                <form method="post" action="/Report/Generate"
+                      onsubmit="return confirm('Re-generate the BARTOK DD report with the latest field values?\n\nA new document will be saved and the download link will update to the latest version.');">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="intakeId" value="@intakeId" />
+                    <button type="submit" class="btn-generate" style="background:linear-gradient(135deg,#0891b2,#0e7490);">
+                        🔄 Re-generate Report (Word)
+                    </button>
+                </form>
+            }
+            else
+            {
+                <button class="btn-generate" disabled
+                        title="@missingFields missing field(s) must be resolved before re-generating"
+                        style="background:#9ca3af;cursor:not-allowed;">
+                    🔄 Re-generate Report
+                </button>
             }
             <form method="post" action="/Report/AnalyzeFields">
                 @Html.AntiForgeryToken()
