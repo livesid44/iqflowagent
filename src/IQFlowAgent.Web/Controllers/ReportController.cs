@@ -153,6 +153,15 @@ public class ReportController : Controller
         var aiJson = await _aiService.AnalyzeReportFieldsAsync(
             intake, fieldDefsJson, intake.AnalysisResult, artifactText);
 
+        // Run offline (deterministic) extraction — always takes priority over AI
+        var offlineValues = !string.IsNullOrWhiteSpace(artifactText)
+            ? OfflineFieldExtractor.Extract(artifactText, intake)
+            : new Dictionary<string, string>();
+
+        _logger.LogInformation(
+            "Offline field extraction for intake {IntakeId}: {Count} field(s) matched.",
+            intake.IntakeId, offlineValues.Count);
+
         // Parse AI response and upsert field statuses
         var now = DateTime.UtcNow;
         var existingStatuses = await _db.ReportFieldStatuses
@@ -179,48 +188,60 @@ public class ReportController : Controller
             {
                 var existing = existingStatuses.FirstOrDefault(s => s.FieldKey == fd.Key);
                 aiResults.TryGetValue(fd.Key, out var aiResult);
+                offlineValues.TryGetValue(fd.Key, out var offlineVal);
+
+                // Offline extraction wins whenever it found a real value.
+                // Treat AI "To be confirmed…" / "not in document" answers as absent.
+                var aiValue = aiResult?.FillValue;
+                if (!string.IsNullOrWhiteSpace(aiValue) && IsPlaceholderText(aiValue))
+                    aiValue = null;
+
+                var fillValue = !string.IsNullOrWhiteSpace(offlineVal) ? offlineVal : aiValue;
+                var status    = !string.IsNullOrWhiteSpace(fillValue)
+                    ? "Available"
+                    : (aiResult?.Status ?? "Missing");
+                var notes = !string.IsNullOrWhiteSpace(offlineVal)
+                    ? "Extracted directly from task documents and comments."
+                    : aiResult?.Notes;
 
                 if (existing == null)
                 {
-                    // Create new
-                    var newStatus = new ReportFieldStatus
+                    _db.ReportFieldStatuses.Add(new ReportFieldStatus
                     {
                         IntakeRecordId      = intakeId,
                         FieldKey            = fd.Key,
                         FieldLabel          = fd.Label,
                         Section             = fd.Section,
                         TemplatePlaceholder = fd.TemplatePlaceholder,
-                        Status              = aiResult?.Status ?? "Missing",
-                        FillValue           = aiResult?.FillValue,
-                        Notes               = aiResult?.Notes,
+                        Status              = status,
+                        FillValue           = fillValue,
+                        Notes               = notes,
                         AnalyzedAt          = now,
                         UpdatedAt           = now
-                    };
-                    _db.ReportFieldStatuses.Add(newStatus);
+                    });
                 }
                 else
                 {
-                    // Always refresh metadata so stale DB copies (written by an older code version
-                    // with different placeholder text) are updated and generation works correctly.
                     existing.TemplatePlaceholder = fd.TemplatePlaceholder;
                     existing.FieldLabel          = fd.Label;
                     existing.Section             = fd.Section;
                     existing.UpdatedAt           = now;
 
-                    // Always apply LLM results so every re-analysis refreshes the entire document.
-                    // NA is the only status that represents a deliberate user decision — preserve it.
                     if (existing.Status != "NA")
                     {
-                        existing.Status     = aiResult?.Status ?? existing.Status;
-                        existing.FillValue  = aiResult?.FillValue ?? existing.FillValue;
-                        existing.Notes      = aiResult?.Notes ?? existing.Notes;
+                        existing.Status     = status;
+                        existing.FillValue  = fillValue ?? existing.FillValue;
+                        existing.Notes      = notes ?? existing.Notes;
                         existing.AnalyzedAt = now;
                     }
                 }
             }
 
             await _db.SaveChangesAsync();
-            TempData["Success"] = "AI field analysis complete. Review and adjust values below.";
+            var offlineCount = offlineValues.Count;
+            TempData["Success"] = offlineCount > 0
+                ? $"Analysis complete. {offlineCount} field(s) filled directly from task documents; remaining fields filled by AI. Review values below."
+                : "AI field analysis complete. Review and adjust values below.";
         }
         catch (JsonException ex)
         {
@@ -611,4 +632,17 @@ public class ReportController : Controller
 
         return null;
     }
+
+    /// <summary>
+    /// Returns true when <paramref name="value"/> is an AI-generated placeholder that
+    /// carries no real information (e.g. "To be confirmed with process owner").
+    /// Offline-extracted values should replace these.
+    /// </summary>
+    private static bool IsPlaceholderText(string value) =>
+        value.Contains("to be confirmed", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("not in document",  StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("not provided",     StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("not specified",    StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("tbc",              StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("n/a — not",        StringComparison.OrdinalIgnoreCase);
 }

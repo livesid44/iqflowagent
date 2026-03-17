@@ -1,6 +1,5 @@
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
-using DocumentFormat.OpenXml.Wordprocessing;
 
 namespace IQFlowAgent.Web.Services;
 
@@ -77,19 +76,19 @@ internal static class DocumentTextExtractor
             // tables distinctly, preserving table column structure.
             foreach (var element in body.ChildElements)
             {
-                if (element is Paragraph para)
+                if (element is DocumentFormat.OpenXml.Wordprocessing.Paragraph para)
                 {
                     var text = para.InnerText;
                     if (!string.IsNullOrWhiteSpace(text))
                         sb.AppendLine(text);
                 }
-                else if (element is Table table)
+                else if (element is DocumentFormat.OpenXml.Wordprocessing.Table table)
                 {
-                    foreach (var row in table.Elements<TableRow>())
+                    foreach (var row in table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>())
                     {
                         // Join each cell's full inner text with a tab so the columns
                         // are distinguishable downstream (e.g. OCC Reference\tObligation\t…)
-                        var cells = row.Elements<TableCell>()
+                        var cells = row.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>()
                             .Select(c => c.InnerText.Trim())
                             .ToList();
                         var line = string.Join("\t", cells);
