@@ -210,7 +210,7 @@
         @if (!hasFields)
         {
             @* No analysis run yet — only show the analysis button *@
-            <form method="post" action="/Report/AnalyzeFields">
+            <form method="post" action="/Report/AnalyzeFields" onsubmit="startAnalysis()">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="intakeId" value="@intakeId" />
                 <button type="submit" class="btn-analyze">🤖 Run AI Field Analysis</button>
@@ -246,7 +246,7 @@
                     🔄 Re-generate Report
                 </button>
             }
-            <form method="post" action="/Report/AnalyzeFields">
+            <form method="post" action="/Report/AnalyzeFields" onsubmit="startAnalysis()">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="intakeId" value="@intakeId" />
                 <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
@@ -269,13 +269,54 @@
                     📄 Generate Final Report
                 </button>
             }
-            <form method="post" action="/Report/AnalyzeFields">
+            <form method="post" action="/Report/AnalyzeFields" onsubmit="startAnalysis()">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="intakeId" value="@intakeId" />
                 <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
             </form>
         }
     </div>
+
+    <!-- Analysis loading overlay — shown while section-by-section AI analysis runs -->
+    <div id="analysisOverlay"
+         style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;
+                align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:16px;padding:40px 48px;text-align:center;
+                    max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+            <div style="font-size:2.5rem;margin-bottom:16px;">🔬</div>
+            <div style="font-weight:700;font-size:1.15rem;color:#1e293b;margin-bottom:10px;">
+                Running Section-by-Section AI Analysis
+            </div>
+            <div style="color:#64748b;font-size:0.88rem;line-height:1.6;margin-bottom:20px;">
+                Each BARTOK section is being analyzed with a focused AI call using only
+                the artifacts from that section's task (e.g. the Volume Excel goes directly
+                to the Volumetrics AI call). This takes <strong>1–2 minutes</strong> but
+                produces much more accurate results.
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;
+                        color:#2563eb;font-size:0.9rem;font-weight:600;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5"
+                     style="animation:spin 1s linear infinite;">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83
+                             M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+                Analyzing…
+            </div>
+        </div>
+    </div>
+    <style>
+        @@keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script>
+        function startAnalysis() {
+            var overlay = document.getElementById('analysisOverlay');
+            if (overlay) overlay.style.display = 'flex';
+            // Disable all analysis buttons to prevent double-submit
+            document.querySelectorAll('.btn-analyze').forEach(function(b) { b.disabled = true; });
+            return true;
+        }
+    </script>
 
     @if (hasFields)
     {

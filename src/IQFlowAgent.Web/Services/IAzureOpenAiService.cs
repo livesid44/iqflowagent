@@ -70,4 +70,24 @@ public interface IAzureOpenAiService
     /// Returns the description as plain text, or an empty string if AI is unavailable.
     /// </summary>
     Task<string> GenerateDescriptionAsync(string processName, string pointers);
+
+    /// <summary>
+    /// Analyzes a single BARTOK section using only the artifact text gathered for that
+    /// section's checkpoint tasks (e.g. the Volume task's Excel → Volume section).
+    /// Runs at low temperature (0.1) for maximum extraction fidelity.
+    /// <para>
+    /// <paramref name="taskArtifactText"/> is the PRIMARY source — extracted from files
+    /// attached when the section's task(s) were completed (Excel volume tables, Word SLA
+    /// documents, etc.).  <paramref name="globalDocText"/> is used as background context.
+    /// </para>
+    /// Returns a dictionary of fieldKey → fillValue (only fields with real values
+    /// are included; empty dict when AI is not configured).
+    /// </summary>
+    Task<Dictionary<string, string>> AnalyzeSectionFieldsAsync(
+        IntakeRecord intake,
+        string sectionName,
+        IList<FieldDefinition> sectionFields,
+        string? taskArtifactText,
+        string? globalDocText,
+        string? analysisJson);
 }

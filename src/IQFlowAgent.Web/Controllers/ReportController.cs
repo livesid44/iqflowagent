@@ -15,12 +15,13 @@ public class ReportController : Controller
     private readonly IDocxReportService _docxService;
     private readonly IAzureOpenAiService _aiService;
     private readonly IBlobStorageService _blobService;
+    private readonly IDocumentIntelligenceService _docIntelligence;
     private readonly ILogger<ReportController> _logger;
     private readonly IWebHostEnvironment _env;
     private readonly ITenantContextService _tenantContext;
 
     private const string TemplateName = "BARTOK_S8_SOP_Template_v2.docx";
-    private const int MaxArtifactCharsPerFile = 4000;
+    private const int MaxArtifactCharsPerFile = 8_000;  // per-file cap when aggregating task artifacts
 
     private static string GenerateTaskId() =>
         "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
@@ -30,17 +31,19 @@ public class ReportController : Controller
         IDocxReportService docxService,
         IAzureOpenAiService aiService,
         IBlobStorageService blobService,
+        IDocumentIntelligenceService docIntelligence,
         ILogger<ReportController> logger,
         IWebHostEnvironment env,
         ITenantContextService tenantContext)
     {
-        _db = db;
-        _docxService = docxService;
-        _aiService = aiService;
-        _blobService = blobService;
-        _logger = logger;
-        _env = env;
-        _tenantContext = tenantContext;
+        _db              = db;
+        _docxService     = docxService;
+        _aiService       = aiService;
+        _blobService     = blobService;
+        _docIntelligence = docIntelligence;
+        _logger          = logger;
+        _env             = env;
+        _tenantContext   = tenantContext;
     }
 
     // ── GET /Report/Prepare?selectedId=&search=&country=&businessUnit=&processType= ─
@@ -124,130 +127,162 @@ public class ReportController : Controller
 
         var fieldDefs = _docxService.GetFieldDefinitions();
 
-        // Aggregate artifact text from tasks (comments + uploaded files)
+        // Load all tasks with their artifacts and action logs
         var tasks = await _db.IntakeTasks
             .Where(t => t.IntakeRecordId == intakeId)
             .Include(t => t.Documents)
             .Include(t => t.ActionLogs)
             .ToListAsync();
-        var taskArtifactText = await AggregateArtifactTextAsync(tasks);
 
-        // Aggregate text from intake-level documents (original uploads)
-        var intakeDocs = await _db.IntakeDocuments
-            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null)
-            .ToListAsync();
-        var intakeDocText = await AggregateIntakeDocumentsTextAsync(intakeDocs);
-
-        // Combine: intake documents first (original context), then task artifacts (user-provided updates)
-        var combined = string.Join("\n", new[] { intakeDocText, taskArtifactText }
-            .Where(s => !string.IsNullOrWhiteSpace(s)));
-        var artifactText = string.IsNullOrWhiteSpace(combined) ? null : combined;
-        var fieldDefsJson = JsonSerializer.Serialize(fieldDefs.Select(f => new
-        {
-            key        = f.Key,
-            label      = f.Label,
-            section    = f.Section,
-            autoSource = f.AutoSource
-        }));
-
-        var aiJson = await _aiService.AnalyzeReportFieldsAsync(
-            intake, fieldDefsJson, intake.AnalysisResult, artifactText);
-
-        // Run offline (deterministic) extraction — always takes priority over AI
-        var offlineValues = !string.IsNullOrWhiteSpace(artifactText)
-            ? OfflineFieldExtractor.Extract(artifactText, intake)
-            : new Dictionary<string, string>();
-
-        _logger.LogInformation(
-            "Offline field extraction for intake {IntakeId}: {Count} field(s) matched.",
-            intake.IntakeId, offlineValues.Count);
-
-        // Parse AI response and upsert field statuses
-        var now = DateTime.UtcNow;
+        // Existing field statuses — needed to resolve LinkedTaskId
         var existingStatuses = await _db.ReportFieldStatuses
             .Where(r => r.IntakeRecordId == intakeId)
             .ToListAsync();
 
-        try
+        // Intake-level documents (original uploads) — used as global background context
+        var intakeDocs = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null)
+            .ToListAsync();
+        var globalDocText = await AggregateIntakeDocumentsTextAsync(intakeDocs);
+
+        // ── Build field-key → related-tasks map ─────────────────────────────
+        // A task is related to a field when:
+        //   (a) its title matches "[Report] Gather: {field.Label}"  (auto-created by CreateTaskForField), OR
+        //   (b) a field status has LinkedTaskId pointing to this task.
+        const string reportGatherPrefix = "[Report] Gather: ";
+        var fieldTaskMap = new Dictionary<string, List<IntakeTask>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fd in fieldDefs)
         {
-            using var doc = JsonDocument.Parse(aiJson);
-            if (!doc.RootElement.TryGetProperty("fields", out var fieldsEl))
-                throw new JsonException("Missing 'fields' property");
+            fieldTaskMap[fd.Key] = tasks
+                .Where(t =>
+                    t.Title.Equals(reportGatherPrefix + fd.Label, StringComparison.OrdinalIgnoreCase)
+                    || existingStatuses.Any(s =>
+                        s.FieldKey == fd.Key
+                        && !string.IsNullOrWhiteSpace(s.LinkedTaskId)
+                        && s.LinkedTaskId == t.TaskId))
+                .ToList();
+        }
 
-            var aiResults = fieldsEl.EnumerateArray()
-                .Select(el => new
-                {
-                    Key       = el.TryGetProperty("key",       out var k) ? k.GetString() ?? "" : "",
-                    Status    = el.TryGetProperty("status",    out var s) ? s.GetString() ?? "Missing" : "Missing",
-                    FillValue = el.TryGetProperty("fillValue", out var v) ? v.GetString() ?? "" : "",
-                    Notes     = el.TryGetProperty("notes",     out var n) ? n.GetString() ?? "" : ""
-                })
-                .ToDictionary(x => x.Key, StringComparer.OrdinalIgnoreCase);
+        // ── Per-section AI analysis ──────────────────────────────────────────
+        // One focused Azure OpenAI call per BARTOK section.  Each call receives only
+        // the artifacts from the task(s) that were created to gather that section's data.
+        // This prevents volume Excel data from being drowned out by unrelated documents.
+        var aiValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int sectionsAnalyzed = 0;
 
-            foreach (var fd in fieldDefs)
+        foreach (var section in fieldDefs.GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase))
+        {
+            var sectionFields = section.ToList();
+
+            // Collect tasks specific to any field in this section (deduplicated)
+            var sectionTasks = sectionFields
+                .SelectMany(f => fieldTaskMap.TryGetValue(f.Key, out var ts)
+                    ? ts : Enumerable.Empty<IntakeTask>())
+                .Distinct()
+                .ToList();
+
+            // Extract artifacts from section-specific tasks only
+            var sectionArtifactText = sectionTasks.Count > 0
+                ? await AggregateArtifactTextAsync(sectionTasks)
+                : null;
+
+            var sectionValues = await _aiService.AnalyzeSectionFieldsAsync(
+                intake, section.Key, sectionFields,
+                sectionArtifactText, globalDocText, intake.AnalysisResult);
+
+            foreach (var kv in sectionValues)
+                aiValues[kv.Key] = kv.Value;
+
+            sectionsAnalyzed++;
+        }
+
+        // ── Offline extraction — fallback for fields still empty after AI ────
+        // Runs deterministic patterns across ALL combined artifacts so structural
+        // data (OCC codes, operating hours, known system names) is never missed.
+        var allArtifactText = await AggregateArtifactTextAsync(tasks);
+        var combinedText    = string.Join("\n",
+            new[] { globalDocText, allArtifactText }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var offlineValues = !string.IsNullOrWhiteSpace(combinedText)
+            ? OfflineFieldExtractor.Extract(combinedText, intake)
+            : new Dictionary<string, string>();
+
+        _logger.LogInformation(
+            "Section-by-section analysis for intake {IntakeId}: {Sections} sections, " +
+            "{AiCount} AI values, {OfflineCount} offline values.",
+            intake.IntakeId, sectionsAnalyzed, aiValues.Count, offlineValues.Count);
+
+        // ── Upsert field statuses ────────────────────────────────────────────
+        var now = DateTime.UtcNow;
+        int aiFilledCount = 0, offlineFilledCount = 0;
+
+        foreach (var fd in fieldDefs)
+        {
+            var existing = existingStatuses.FirstOrDefault(s => s.FieldKey == fd.Key);
+
+            aiValues.TryGetValue(fd.Key, out var aiVal);
+            // Discard AI values that are just placeholder text
+            if (!string.IsNullOrWhiteSpace(aiVal) && IsPlaceholderText(aiVal))
+                aiVal = null;
+
+            offlineValues.TryGetValue(fd.Key, out var offlineVal);
+
+            // Priority: AI (focused, accurate) → offline (deterministic patterns) → empty
+            var fillValue = !string.IsNullOrWhiteSpace(aiVal)      ? aiVal
+                          : !string.IsNullOrWhiteSpace(offlineVal) ? offlineVal
+                          : null;
+
+            var status = !string.IsNullOrWhiteSpace(fillValue) ? "Available" : "Missing";
+            var notes  = !string.IsNullOrWhiteSpace(aiVal)
+                ? "Extracted by AI from task artifacts (section-by-section analysis)."
+                : !string.IsNullOrWhiteSpace(offlineVal)
+                ? "Extracted directly from task documents."
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(aiVal))      aiFilledCount++;
+            else if (!string.IsNullOrWhiteSpace(offlineVal)) offlineFilledCount++;
+
+            if (existing == null)
             {
-                var existing = existingStatuses.FirstOrDefault(s => s.FieldKey == fd.Key);
-                aiResults.TryGetValue(fd.Key, out var aiResult);
-                offlineValues.TryGetValue(fd.Key, out var offlineVal);
-
-                // Offline extraction wins whenever it found a real value.
-                // Treat AI "To be confirmed…" / "not in document" answers as absent.
-                var aiValue = aiResult?.FillValue;
-                if (!string.IsNullOrWhiteSpace(aiValue) && IsPlaceholderText(aiValue))
-                    aiValue = null;
-
-                var fillValue = !string.IsNullOrWhiteSpace(offlineVal) ? offlineVal : aiValue;
-                var status    = !string.IsNullOrWhiteSpace(fillValue)
-                    ? "Available"
-                    : (aiResult?.Status ?? "Missing");
-                var notes = !string.IsNullOrWhiteSpace(offlineVal)
-                    ? "Extracted directly from task documents and comments."
-                    : aiResult?.Notes;
-
-                if (existing == null)
+                _db.ReportFieldStatuses.Add(new ReportFieldStatus
                 {
-                    _db.ReportFieldStatuses.Add(new ReportFieldStatus
-                    {
-                        IntakeRecordId      = intakeId,
-                        FieldKey            = fd.Key,
-                        FieldLabel          = fd.Label,
-                        Section             = fd.Section,
-                        TemplatePlaceholder = fd.TemplatePlaceholder,
-                        Status              = status,
-                        FillValue           = fillValue,
-                        Notes               = notes,
-                        AnalyzedAt          = now,
-                        UpdatedAt           = now
-                    });
-                }
-                else
-                {
-                    existing.TemplatePlaceholder = fd.TemplatePlaceholder;
-                    existing.FieldLabel          = fd.Label;
-                    existing.Section             = fd.Section;
-                    existing.UpdatedAt           = now;
+                    IntakeRecordId      = intakeId,
+                    FieldKey            = fd.Key,
+                    FieldLabel          = fd.Label,
+                    Section             = fd.Section,
+                    TemplatePlaceholder = fd.TemplatePlaceholder,
+                    Status              = status,
+                    FillValue           = fillValue,
+                    Notes               = notes,
+                    AnalyzedAt          = now,
+                    UpdatedAt           = now
+                });
+            }
+            else
+            {
+                existing.TemplatePlaceholder = fd.TemplatePlaceholder;
+                existing.FieldLabel          = fd.Label;
+                existing.Section             = fd.Section;
+                existing.UpdatedAt           = now;
 
-                    if (existing.Status != "NA")
-                    {
-                        existing.Status     = status;
-                        existing.FillValue  = fillValue ?? existing.FillValue;
-                        existing.Notes      = notes ?? existing.Notes;
-                        existing.AnalyzedAt = now;
-                    }
+                if (existing.Status != "NA")
+                {
+                    existing.Status     = status;
+                    existing.FillValue  = fillValue ?? existing.FillValue;
+                    existing.Notes      = notes ?? existing.Notes;
+                    existing.AnalyzedAt = now;
                 }
             }
+        }
 
-            await _db.SaveChangesAsync();
-            var offlineCount = offlineValues.Count;
-            TempData["Success"] = offlineCount > 0
-                ? $"Analysis complete. {offlineCount} field(s) filled directly from task documents; remaining fields filled by AI. Review values below."
-                : "AI field analysis complete. Review and adjust values below.";
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to parse AI field analysis for intake {IntakeId}", intake.IntakeId);
-            TempData["Error"] = "AI analysis returned an unexpected response. Please try again.";
-        }
+        await _db.SaveChangesAsync();
+
+        var totalFilled = aiFilledCount + offlineFilledCount;
+        TempData["Success"] = totalFilled > 0
+            ? $"Section-by-section analysis complete ({sectionsAnalyzed} sections). " +
+              $"{aiFilledCount} field(s) filled by AI from task artifacts; " +
+              $"{offlineFilledCount} field(s) filled by document pattern extraction."
+            : "Analysis complete. No data found in task artifacts — please ensure completed " +
+              "task documents are uploaded and try again.";
 
         return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
     }
@@ -599,7 +634,10 @@ public class ReportController : Controller
     {
         var ext = Path.GetExtension(doc.FileName ?? "").ToLowerInvariant();
 
-        if (ext is ".xlsx" or ".docx")
+        // ── Binary formats: try Azure Document Intelligence first ─────────────
+        // Document Intelligence handles Excel tables, Word tables, and PDF layouts
+        // with far greater accuracy than raw OpenXML text extraction.
+        if (ext is ".xlsx" or ".docx" or ".pdf")
         {
             byte[]? bytes = null;
             if (await _blobService.IsConfiguredAsync()
@@ -614,9 +652,24 @@ public class ReportController : Controller
                     bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
             }
 
-            return bytes != null ? DocumentTextExtractor.Extract(bytes, ext) : null;
+            if (bytes != null)
+            {
+                // Primary: Azure Document Intelligence (accurate table + paragraph extraction)
+                if (_docIntelligence.IsConfigured())
+                {
+                    var diText = await _docIntelligence.ExtractTextAsync(bytes, doc.FileName ?? "file" + ext);
+                    if (!string.IsNullOrWhiteSpace(diText)) return diText;
+                }
+
+                // Fallback: local OpenXML extraction (no external service needed)
+                if (ext is ".xlsx" or ".docx")
+                    return DocumentTextExtractor.Extract(bytes, ext);
+            }
+
+            return null;
         }
 
+        // ── Plain-text formats ────────────────────────────────────────────────
         if (ext is ".txt" or ".csv" or ".json" or ".xml" or ".md")
         {
             if (await _blobService.IsConfiguredAsync()

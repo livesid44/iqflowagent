@@ -2638,7 +2638,214 @@ public class AzureOpenAiService : IAzureOpenAiService
         return s;
     }
 
+    // ─── AnalyzeSectionFieldsAsync ────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<Dictionary<string, string>> AnalyzeSectionFieldsAsync(
+        IntakeRecord intake,
+        string sectionName,
+        IList<FieldDefinition> sectionFields,
+        string? taskArtifactText,
+        string? globalDocText,
+        string? analysisJson)
+    {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
+
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
+
+        // When AI is not configured return empty — caller will fall back to OfflineFieldExtractor.
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Azure OpenAI not configured — skipping section AI analysis for '{Section}' on intake {IntakeId}.",
+                sectionName, intake.IntakeId);
+            return new Dictionary<string, string>();
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+        {
+            _logger.LogWarning(
+                "Azure OpenAI endpoint invalid — skipping section analysis for '{Section}'.", sectionName);
+            return new Dictionary<string, string>();
+        }
+
+        var requestUrl =
+            $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions" +
+            $"?api-version={apiVersion}";
+
+        // ── System prompt ─────────────────────────────────────────────────────
+        var fieldKeys = string.Join(", ", sectionFields.Select(f => $"\"{f.Key}\""));
+        var systemPrompt =
+            $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
+            "SOP document at TechM.  You will be given:\n" +
+            "  1. TASK ARTIFACTS — files (Excel, Word, PDF, comments) collected specifically for\n" +
+            "     this section.  This is the PRIMARY and most authoritative source.\n" +
+            "  2. GLOBAL INTAKE DOCUMENTS — the original process document uploaded with the intake.\n" +
+            "     Use this as background context only.\n\n" +
+            "CRITICAL EXTRACTION RULES — follow each one exactly:\n" +
+            "1. Task Artifacts are the PRIMARY source.  Extract data EXACTLY as it appears — preserve\n" +
+            "   all numbers, dates, names, and units without rounding or paraphrasing.\n" +
+            "2. TABULAR DATA (e.g. an Excel spreadsheet, a volume table, an SLA table):\n" +
+            "   - Read EVERY row from top to bottom — do NOT skip any row.\n" +
+            "   - For volume / transaction data: include EACH month label plus its corresponding\n" +
+            "     received and/or handled count in the format \"Mon-YY: N received / N handled\".\n" +
+            "   - For SLA data: include each metric name, its target value, and its actual value.\n" +
+            "   - Include rows that say \"not available\" or show errors — flag them explicitly.\n" +
+            "3. Do NOT write \"To be confirmed\" or \"not available\" if the data IS present anywhere\n" +
+            "   in the Task Artifacts.\n" +
+            "4. Do NOT invent data that is not present in the provided content.\n" +
+            "5. Keep fillValues concise but complete: 1-3 sentences for narrative fields; full data\n" +
+            "   lists for volume / SLA fields.\n" +
+            "6. You MUST respond ONLY with valid JSON (no markdown fences, no extra commentary):\n" +
+            "   {\"fields\": [{\"key\": \"field_key\", \"fillValue\": \"the value\"}]}\n" +
+            $"   Include ONLY keys from this set: {fieldKeys}\n" +
+            "   Omit any field you genuinely cannot fill from the provided data.";
+
+        // ── User message ──────────────────────────────────────────────────────
+        var sb = new System.Text.StringBuilder();
+
+        sb.AppendLine($"=== SECTION: {sectionName} ===");
+        sb.AppendLine("Fields to fill (return ONLY these keys):");
+        foreach (var f in sectionFields)
+            sb.AppendLine($"  key={f.Key}  label=\"{f.Label}\"");
+
+        sb.AppendLine();
+        sb.AppendLine("=== INTAKE METADATA ===");
+        sb.AppendLine($"Process Name: {intake.ProcessName}");
+        sb.AppendLine($"Description: {intake.Description}");
+        sb.AppendLine($"Business Unit: {intake.BusinessUnit}");
+        sb.AppendLine($"Department: {intake.Department}");
+        sb.AppendLine($"Process Owner: {intake.ProcessOwnerName} ({intake.ProcessOwnerEmail})");
+        sb.AppendLine($"Country: {intake.Country}  Location: {intake.City}, {intake.SiteLocation}");
+        sb.AppendLine($"Process Type: {intake.ProcessType}  Time Zone: {intake.TimeZone}");
+        sb.AppendLine($"Volume/Day: {intake.EstimatedVolumePerDay}");
+
+        // Task-specific artifacts are the PRIMARY source — give them the most token budget
+        if (!string.IsNullOrWhiteSpace(taskArtifactText))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== TASK ARTIFACTS FOR THIS SECTION (PRIMARY SOURCE) ===");
+            sb.AppendLine("IMPORTANT: Extract ALL tabular data rows exactly as they appear.");
+            const int taskCap = 12_000;
+            sb.AppendLine(taskArtifactText.Length > taskCap
+                ? taskArtifactText[..taskCap] + "\n[...artifact truncated — extract from above]"
+                : taskArtifactText);
+        }
+
+        // Global docs as background / supplementary context
+        if (!string.IsNullOrWhiteSpace(globalDocText))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== GLOBAL INTAKE DOCUMENTS (background context) ===");
+            const int globalCap = 3_000;
+            sb.AppendLine(globalDocText.Length > globalCap
+                ? globalDocText[..globalCap] + "\n[...document truncated]"
+                : globalDocText);
+        }
+
+        if (!string.IsNullOrWhiteSpace(analysisJson))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== PRIOR AI ANALYSIS (reference only) ===");
+            const int analysisCap = 1_500;
+            sb.AppendLine(analysisJson.Length > analysisCap
+                ? analysisJson[..analysisCap] + "\n[...truncated]"
+                : analysisJson);
+        }
+
+        var userMessage = sb.ToString();
+
+        try
+        {
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "AnalyzeSectionFields") }
+                },
+                max_tokens  = Math.Min(maxTokens, 1_500),
+                temperature = 0.1,  // very low — maximise extraction fidelity
+                top_p       = 1.0,
+                model       = modelVersion
+            };
+
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
+
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "AnalyzeSectionFields");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Azure OpenAI returned HTTP {Code} for section '{Section}' on intake {IntakeId}: {Body}",
+                    (int)response.StatusCode, sectionName, intake.IntakeId, errBody);
+                return new Dictionary<string, string>();
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(responseText);
+            var content = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                return new Dictionary<string, string>();
+
+            return ParseSectionFieldsResponse(StripMarkdownFences(content), sectionFields);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "AnalyzeSectionFieldsAsync failed for section '{Section}' on intake {IntakeId}.",
+                sectionName, intake.IntakeId);
+            return new Dictionary<string, string>();
+        }
+    }
+
+    /// <summary>
+    /// Parses the JSON returned by <see cref="AnalyzeSectionFieldsAsync"/>.
+    /// Only keys present in <paramref name="expectedFields"/> are accepted (security guard).
+    /// </summary>
+    private static Dictionary<string, string> ParseSectionFieldsResponse(
+        string json, IList<FieldDefinition> expectedFields)
+    {
+        var result    = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var validKeys = new HashSet<string>(
+            expectedFields.Select(f => f.Key), StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("fields", out var fieldsEl))
+                return result;
+
+            foreach (var el in fieldsEl.EnumerateArray())
+            {
+                var key = el.TryGetProperty("key",       out var k) ? k.GetString() ?? "" : "";
+                var val = el.TryGetProperty("fillValue", out var v) ? v.GetString() ?? "" : "";
+
+                if (validKeys.Contains(key) && !string.IsNullOrWhiteSpace(val))
+                    result[key] = val;
+            }
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON from AI — return whatever we parsed so far
+        }
+
+        return result;
+    }
+
     // ── GenerateDescriptionAsync ───────────────────────────────────────────────
+
     /// <summary>
     /// Expands brief pointers into a detailed, professional process description.
     /// Returns the generated text, or an empty string when AI is not configured / unavailable.
