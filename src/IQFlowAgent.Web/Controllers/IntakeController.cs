@@ -128,6 +128,12 @@ public class IntakeController : Controller
         if (!IsFieldMandatory(Models.IntakeFieldConfig.FDescription))
             ModelState.Remove(nameof(model.Description));
 
+        // The [EmailAddress] data annotation fails for empty strings because it checks for '@'.
+        // Remove the format error when no email was provided — an empty email is only invalid
+        // when the field is marked as required (validated separately by ValidateMandatoryFields).
+        if (string.IsNullOrWhiteSpace(model.ProcessOwnerEmail))
+            ModelState.Remove(nameof(model.ProcessOwnerEmail));
+
         ValidateMandatoryFields(model, fieldConfig);
 
         if (!ModelState.IsValid)
