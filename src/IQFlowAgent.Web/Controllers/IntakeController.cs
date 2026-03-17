@@ -863,6 +863,22 @@ public class IntakeController : Controller
                 ? (record.CreatedByUserId ?? "Unassigned")
                 : record.ProcessOwnerEmail;
 
+            // Pre-build the set of BARTOK sections that already have a Fail/Warning checkpoint.
+            // Checkpoint tasks take priority: when a checkpoint covers a section the corresponding
+            // action item is skipped so only one task is created per section.
+            var checkpointSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("checkPoints", out var checkPointsEarly))
+            {
+                foreach (var cp in checkPointsEarly.EnumerateArray())
+                {
+                    var st = cp.TryGetProperty("status", out var sv) ? sv.GetString() ?? "" : "";
+                    if (st != "Fail" && st != "Warning") continue;
+                    var lbl = cp.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : "";
+                    if (!string.IsNullOrWhiteSpace(lbl))
+                        checkpointSections.Add(lbl);
+                }
+            }
+
             // ── Action Items ────────────────────────────────────────────────────
             if (root.TryGetProperty("actionItems", out var actionItems))
             {
@@ -873,6 +889,18 @@ public class IntakeController : Controller
                     var priority    = item.TryGetProperty("priority",    out var p) ? p.GetString() ?? "Medium" : "Medium";
 
                     if (string.IsNullOrWhiteSpace(title)) continue;
+
+                    // If a Fail/Warning checkpoint already covers this BARTOK section, the checkpoint
+                    // task (created below) is the authoritative task — skip the duplicate action item.
+                    if (item.TryGetProperty("bartokSection", out var bsCheck))
+                    {
+                        var bsValue = bsCheck.GetString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(bsValue) &&
+                            checkpointSections.Any(lbl =>
+                                lbl.Contains(bsValue, StringComparison.OrdinalIgnoreCase) ||
+                                bsValue.Contains(lbl, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                    }
 
                     if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
                         continue;
@@ -902,6 +930,8 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
             }
 
             // ── Pending Check Points (Fail / Warning) ────────────────────────
+            // Checkpoint tasks are always created for every Fail/Warning section and
+            // supersede any action item for the same section (skipped above).
             if (root.TryGetProperty("checkPoints", out var checkPoints))
             {
                 foreach (var cp in checkPoints.EnumerateArray())

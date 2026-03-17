@@ -370,13 +370,29 @@ public class RagProcessorService : BackgroundService
                 .ToListAsync(ct);
             var titleSet = existingTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // Combine all action items with all Fail/Warning checkpoint items so that
-            // the maximum number of tasks is created — checkpoints are not deduplicated
-            // against action items; both are created and each checkpoint is mapped to
-            // its corresponding BARTOK output-document section.
-            var items = GetJsonArraySafe(doc.RootElement, "actionItems")
-                .Concat(GetJsonArraySafe(doc.RootElement, "checkPoints")
-                    .Where(IsFailOrWarn))
+            // Build the set of BARTOK sections already covered by a Fail/Warning checkpoint.
+            // Checkpoint tasks take priority — action items for the same section are skipped
+            // so that exactly one task is created per section.
+            var checkpointSections = GetJsonArraySafe(doc.RootElement, "checkPoints")
+                .Where(IsFailOrWarn)
+                .Select(cp => GetStringProp(cp, "label") ?? "")
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // Combine checkpoints (Fail/Warning) with action items that are NOT covered by a
+            // checkpoint, so that the checkpoint version is the single authoritative task.
+            var items = GetJsonArraySafe(doc.RootElement, "checkPoints")
+                .Where(IsFailOrWarn)
+                .Concat(GetJsonArraySafe(doc.RootElement, "actionItems")
+                    .Where(item =>
+                    {
+                        var bs = item.TryGetProperty("bartokSection", out var bsEl) ? bsEl.GetString() ?? "" : "";
+                        if (string.IsNullOrWhiteSpace(bs)) return true;
+                        // Skip if any checkpoint label contains (or is contained by) the bartokSection value
+                        return !checkpointSections.Any(lbl =>
+                            lbl.Contains(bs, StringComparison.OrdinalIgnoreCase) ||
+                            bs.Contains(lbl, StringComparison.OrdinalIgnoreCase));
+                    }))
                 .ToList();
 
             foreach (var item in items)
