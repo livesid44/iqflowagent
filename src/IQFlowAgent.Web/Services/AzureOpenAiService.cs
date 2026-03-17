@@ -9,7 +9,9 @@ public class AzureOpenAiService : IAzureOpenAiService
     private const int MaxDocumentChars = 8000;
     private const int DefaultMaxOutputTokens = 2000;
     private const int MaxAnalysisJsonChars = 4000;  // max chars from AI analysis sent in field-analysis prompt
-    private const int MaxArtifactCharsPerReport = 20000;  // aggregate artifact chars for report field analysis
+    // 20 000 chars covers multiple multi-sheet Excel files + Word docs + task comments while
+    // staying comfortably within the 128 k-token context window of gpt-4o / gpt-4-turbo.
+    private const int MaxArtifactCharsPerReport = 20000;
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
@@ -514,9 +516,10 @@ public class AzureOpenAiService : IAzureOpenAiService
             databases, or other outside sources.
 
             DATA PRIORITY ORDER (most authoritative first):
-            1. TASK NOTES, COMMENTS AND UPLOADED DOCUMENT CONTENT — this section contains information
-               directly provided by the process owner when completing tasks. It is the MOST IMPORTANT
-               source. Always extract and use values from here if they are present.
+            1. INTAKE DOCUMENTS AND TASK NOTES / COMMENTS — this section contains the original
+               documents uploaded with the intake, files attached when completing tasks, and notes
+               written by the process owner. It is the MOST IMPORTANT source. Always extract and
+               use values from here if they are present.
             2. INTAKE INFORMATION — the original intake form data.
             3. PRIOR AI ANALYSIS — use only as supporting reference.
 
@@ -666,8 +669,10 @@ public class AzureOpenAiService : IAzureOpenAiService
         if (!string.IsNullOrWhiteSpace(artifactText))
         {
             sb.AppendLine();
-            sb.AppendLine("=== TASK NOTES, COMMENTS AND UPLOADED DOCUMENT CONTENT ===");
-            sb.AppendLine("IMPORTANT: The following content was provided by the process owner when completing tasks.");
+            sb.AppendLine("=== INTAKE DOCUMENTS AND TASK NOTES / COMMENTS ===");
+            sb.AppendLine("IMPORTANT: The following content comes from documents uploaded for this intake");
+            sb.AppendLine("(original intake uploads AND files attached when completing tasks) PLUS any notes");
+            sb.AppendLine("written by the process owner when completing tasks.");
             sb.AppendLine("It is the PRIMARY source for filling fields. Extract ALL relevant values directly from this text.");
             var truncated = artifactText.Length > MaxArtifactCharsPerReport
                 ? artifactText[..MaxArtifactCharsPerReport] + "\n[...truncated]"

@@ -124,15 +124,24 @@ public class ReportController : Controller
 
         var fieldDefs = _docxService.GetFieldDefinitions();
 
-        // Aggregate artifact text from tasks
+        // Aggregate artifact text from tasks (comments + uploaded files)
         var tasks = await _db.IntakeTasks
             .Where(t => t.IntakeRecordId == intakeId)
             .Include(t => t.Documents)
             .Include(t => t.ActionLogs)
             .ToListAsync();
-        var artifactText = await AggregateArtifactTextAsync(tasks);
+        var taskArtifactText = await AggregateArtifactTextAsync(tasks);
 
-        // Build field definitions JSON for the AI prompt
+        // Aggregate text from intake-level documents (original uploads)
+        var intakeDocs = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null)
+            .ToListAsync();
+        var intakeDocText = await AggregateIntakeDocumentsTextAsync(intakeDocs);
+
+        // Combine: intake documents first (original context), then task artifacts (user-provided updates)
+        var combined = string.Join("\n", new[] { intakeDocText, taskArtifactText }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var artifactText = string.IsNullOrWhiteSpace(combined) ? null : combined;
         var fieldDefsJson = JsonSerializer.Serialize(fieldDefs.Select(f => new
         {
             key        = f.Key,
@@ -332,13 +341,23 @@ public class ReportController : Controller
         // Aggregate analysis JSON from intake
         var analysisJson = intake.AnalysisResult;
 
-        // Aggregate artifact text from tasks
+        // Aggregate artifact text from tasks (comments + uploaded files)
         var tasks = await _db.IntakeTasks
             .Where(t => t.IntakeRecordId == intake.Id)
             .Include(t => t.Documents)
             .Include(t => t.ActionLogs)
             .ToListAsync();
-        var artifactText = await AggregateArtifactTextAsync(tasks);
+        var taskArtifactText = await AggregateArtifactTextAsync(tasks);
+
+        // Aggregate text from intake-level documents (original uploads)
+        var intakeDocs = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intake.Id && d.IntakeTaskId == null)
+            .ToListAsync();
+        var intakeDocText = await AggregateIntakeDocumentsTextAsync(intakeDocs);
+
+        var combinedDocText = string.Join("\n", new[] { intakeDocText, taskArtifactText }
+            .Where(s => !string.IsNullOrWhiteSpace(s)));
+        var artifactText = string.IsNullOrWhiteSpace(combinedDocText) ? null : combinedDocText;
 
         var generated = await _aiService.GenerateSingleFieldAsync(
             intake, field.FieldKey, field.FieldLabel, userContext, analysisJson, artifactText);
@@ -508,46 +527,9 @@ public class ReportController : Controller
             // ── Uploaded artifact files ────────────────────────────────────────
             foreach (var doc in task.Documents.Where(d => d.DocumentType == "TaskArtifact"))
             {
-                var ext = Path.GetExtension(doc.FileName ?? "").ToLowerInvariant();
-
                 try
                 {
-                    string? content = null;
-
-                    if (ext is ".xlsx" or ".docx")
-                    {
-                        // Binary document: download bytes then extract text
-                        byte[]? bytes = null;
-                        if (await _blobService.IsConfiguredAsync()
-                            && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                        {
-                            bytes = await _blobService.DownloadBytesAsync(doc.FilePath);
-                        }
-                        else
-                        {
-                            var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
-                            if (System.IO.File.Exists(fullPath))
-                                bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
-                        }
-
-                        if (bytes != null)
-                            content = DocumentTextExtractor.Extract(bytes, ext);
-                    }
-                    else if (ext is ".txt" or ".csv" or ".json" or ".xml" or ".md")
-                    {
-                        if (await _blobService.IsConfiguredAsync()
-                            && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                        {
-                            content = await _blobService.DownloadTextAsync(doc.FilePath);
-                        }
-                        else
-                        {
-                            var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
-                            if (System.IO.File.Exists(fullPath))
-                                content = await System.IO.File.ReadAllTextAsync(fullPath);
-                        }
-                    }
-
+                    var content = await ReadDocumentContentAsync(doc);
                     if (!string.IsNullOrWhiteSpace(content))
                     {
                         sb.AppendLine($"--- {doc.FileName} (Task: {task.TaskId}) ---");
@@ -563,5 +545,70 @@ public class ReportController : Controller
         }
 
         return sb.Length > 0 ? sb.ToString() : null;
+    }
+
+    // ── Helper: aggregate text from intake-level documents (original uploads) ─
+    private async Task<string?> AggregateIntakeDocumentsTextAsync(List<IntakeDocument> intakeDocs)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        foreach (var doc in intakeDocs)
+        {
+            try
+            {
+                var content = await ReadDocumentContentAsync(doc);
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    sb.AppendLine($"--- {doc.FileName} ---");
+                    sb.AppendLine(content.Length > MaxArtifactCharsPerFile ? content[..MaxArtifactCharsPerFile] + "[...truncated]" : content);
+                    sb.AppendLine();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read intake document {FileName}", doc.FileName);
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString() : null;
+    }
+
+    // ── Helper: read text content from a single document (blob or local) ──────
+    private async Task<string?> ReadDocumentContentAsync(IntakeDocument doc)
+    {
+        var ext = Path.GetExtension(doc.FileName ?? "").ToLowerInvariant();
+
+        if (ext is ".xlsx" or ".docx")
+        {
+            byte[]? bytes = null;
+            if (await _blobService.IsConfiguredAsync()
+                && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                bytes = await _blobService.DownloadBytesAsync(doc.FilePath);
+            }
+            else
+            {
+                var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
+                if (System.IO.File.Exists(fullPath))
+                    bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+            }
+
+            return bytes != null ? DocumentTextExtractor.Extract(bytes, ext) : null;
+        }
+
+        if (ext is ".txt" or ".csv" or ".json" or ".xml" or ".md")
+        {
+            if (await _blobService.IsConfiguredAsync()
+                && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                return await _blobService.DownloadTextAsync(doc.FilePath);
+            }
+
+            var fullPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
+            if (System.IO.File.Exists(fullPath))
+                return await System.IO.File.ReadAllTextAsync(fullPath);
+        }
+
+        return null;
     }
 }

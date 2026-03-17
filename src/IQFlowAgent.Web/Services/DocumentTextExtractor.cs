@@ -11,72 +11,67 @@ internal static class DocumentTextExtractor
 {
     /// <summary>
     /// Extracts readable text from a binary document.
-    /// Returns <c>null</c> if the format is unsupported or extraction fails.
+    /// Returns <c>null</c> if the format is unsupported (<see cref="ext"/> is neither
+    /// ".xlsx" nor ".docx") or if the document body is empty after extraction.
+    /// Throws on extraction errors so callers can log with full file context.
     /// </summary>
     public static string? Extract(byte[] bytes, string ext)
     {
-        try
+        using var ms = new MemoryStream(bytes);
+        var sb = new System.Text.StringBuilder();
+
+        if (ext == ".xlsx")
         {
-            using var ms = new MemoryStream(bytes);
-            var sb = new System.Text.StringBuilder();
+            using var spreadsheet = SpreadsheetDocument.Open(ms, false);
+            var workbookPart = spreadsheet.WorkbookPart;
+            if (workbookPart == null) return null;
 
-            if (ext == ".xlsx")
+            // Build shared strings table for cell value lookup
+            var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable
+                .Elements<SharedStringItem>()
+                .Select(s => s.InnerText)
+                .ToList() ?? [];
+
+            foreach (var sheetPart in workbookPart.WorksheetParts)
             {
-                using var spreadsheet = SpreadsheetDocument.Open(ms, false);
-                var workbookPart = spreadsheet.WorkbookPart;
-                if (workbookPart == null) return null;
+                var sheet = sheetPart.Worksheet.GetFirstChild<SheetData>();
+                if (sheet == null) continue;
 
-                // Build shared strings table for cell value lookup
-                var sharedStrings = workbookPart.SharedStringTablePart?.SharedStringTable
-                    .Elements<SharedStringItem>()
-                    .Select(s => s.InnerText)
-                    .ToList() ?? [];
-
-                foreach (var sheetPart in workbookPart.WorksheetParts)
+                foreach (var row in sheet.Elements<Row>())
                 {
-                    var sheet = sheetPart.Worksheet.GetFirstChild<SheetData>();
-                    if (sheet == null) continue;
+                    var cells = row.Elements<Cell>().ToList();
+                    if (!cells.Any()) continue;
 
-                    foreach (var row in sheet.Elements<Row>())
+                    var values = cells.Select(c =>
                     {
-                        var cells = row.Elements<Cell>().ToList();
-                        if (!cells.Any()) continue;
+                        var raw = c.CellValue?.Text ?? "";
+                        if (c.DataType?.Value == CellValues.SharedString
+                            && int.TryParse(raw, out var idx)
+                            && idx < sharedStrings.Count)
+                            return sharedStrings[idx];
+                        return raw;
+                    });
 
-                        var values = cells.Select(c =>
-                        {
-                            var raw = c.CellValue?.Text ?? "";
-                            if (c.DataType?.Value == CellValues.SharedString
-                                && int.TryParse(raw, out var idx)
-                                && idx < sharedStrings.Count)
-                                return sharedStrings[idx];
-                            return raw;
-                        });
-
-                        var line = string.Join("\t", values);
-                        if (!string.IsNullOrWhiteSpace(line))
-                            sb.AppendLine(line);
-                    }
+                    var line = string.Join("\t", values);
+                    if (!string.IsNullOrWhiteSpace(line))
+                        sb.AppendLine(line);
                 }
             }
-            else if (ext == ".docx")
-            {
-                using var wordDoc = WordprocessingDocument.Open(ms, false);
-                var body = wordDoc.MainDocumentPart?.Document?.Body;
-                if (body == null) return null;
-
-                foreach (var para in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
-                {
-                    var text = para.InnerText;
-                    if (!string.IsNullOrWhiteSpace(text))
-                        sb.AppendLine(text);
-                }
-            }
-
-            return sb.Length > 0 ? sb.ToString() : null;
         }
-        catch
+        else if (ext == ".docx")
         {
-            return null;
+            using var wordDoc = WordprocessingDocument.Open(ms, false);
+            var body = wordDoc.MainDocumentPart?.Document?.Body;
+            if (body == null) return null;
+
+            foreach (var para in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+            {
+                var text = para.InnerText;
+                if (!string.IsNullOrWhiteSpace(text))
+                    sb.AppendLine(text);
+            }
         }
+
+        return sb.Length > 0 ? sb.ToString() : null;
     }
 }
