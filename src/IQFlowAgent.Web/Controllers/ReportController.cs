@@ -20,7 +20,7 @@ public class ReportController : Controller
     private readonly ITenantContextService _tenantContext;
 
     private const string TemplateName = "BARTOK_S8_SOP_Template_v2.docx";
-    private const int MaxArtifactCharsPerFile = 1500;
+    private const int MaxArtifactCharsPerFile = 4000;
 
     private static string GenerateTaskId() =>
         "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
@@ -489,14 +489,19 @@ public class ReportController : Controller
         {
             // ── Task comments from action logs ────────────────────────────────
             var comments = task.ActionLogs
-                .Where(l => l.ActionType == "Comment" && !string.IsNullOrWhiteSpace(l.Comment))
+                .Where(l => !string.IsNullOrWhiteSpace(l.Comment))
                 .OrderBy(l => l.CreatedAt)
                 .ToList();
             if (comments.Count > 0)
             {
-                sb.AppendLine($"--- Comments on Task {task.TaskId}: {task.Title} ---");
+                sb.AppendLine($"--- Notes on Task {task.TaskId}: {task.Title} ---");
                 foreach (var c in comments)
-                    sb.AppendLine(c.Comment);
+                {
+                    var prefix = c.ActionType == "StatusChange"
+                        ? $"[Status → {c.NewStatus}]"
+                        : "[Comment]";
+                    sb.AppendLine($"{prefix} {c.Comment}");
+                }
                 sb.AppendLine();
             }
 

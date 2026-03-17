@@ -9,7 +9,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     private const int MaxDocumentChars = 8000;
     private const int DefaultMaxOutputTokens = 2000;
     private const int MaxAnalysisJsonChars = 4000;  // max chars from AI analysis sent in field-analysis prompt
-    private const int MaxArtifactCharsPerReport = 8000;  // aggregate artifact chars for report field analysis
+    private const int MaxArtifactCharsPerReport = 20000;  // aggregate artifact chars for report field analysis
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
@@ -380,14 +380,19 @@ public class AzureOpenAiService : IAzureOpenAiService
             sb.AppendLine($"Status: {t.Status}");
 
             var comments = t.ActionLogs
-                .Where(l => l.ActionType == "Comment" && !string.IsNullOrWhiteSpace(l.Comment))
+                .Where(l => !string.IsNullOrWhiteSpace(l.Comment))
                 .OrderBy(l => l.CreatedAt)
                 .ToList();
             if (comments.Count > 0)
             {
-                sb.AppendLine("Comments:");
+                sb.AppendLine("Notes and comments:");
                 foreach (var c in comments)
-                    sb.AppendLine($"  - [{c.CreatedAt:yyyy-MM-dd HH:mm}] {c.Comment}");
+                {
+                    var prefix = c.ActionType == "StatusChange"
+                        ? $"[Status → {c.NewStatus}]"
+                        : "[Comment]";
+                    sb.AppendLine($"  - [{c.CreatedAt:yyyy-MM-dd HH:mm}] {prefix} {c.Comment}");
+                }
             }
             else
             {
@@ -504,12 +509,17 @@ public class AzureOpenAiService : IAzureOpenAiService
         var systemPrompt = """
             You are an expert BARTOK / Schedule 8 SOP documentation specialist at TechM.
             IMPORTANT: You MUST base ALL content exclusively on the information provided in this prompt —
-            the intake metadata, the uploaded document text, and any task artifact text. Do NOT use any
-            external knowledge from the internet, Wikipedia, regulations databases, or other outside sources.
-            Only rephrase, structure, and elaborate on information that is explicitly present in the
-            provided data. If specific information (e.g. regulations, SLA targets, system names) is not
-            present in the provided content, indicate "To be confirmed with process owner" rather than
-            inventing it from external sources.
+            the intake metadata, any uploaded document text, and the TASK NOTES, COMMENTS AND UPLOADED DOCUMENT
+            CONTENT section. Do NOT use any external knowledge from the internet, Wikipedia, regulations
+            databases, or other outside sources.
+
+            DATA PRIORITY ORDER (most authoritative first):
+            1. TASK NOTES, COMMENTS AND UPLOADED DOCUMENT CONTENT — this section contains information
+               directly provided by the process owner when completing tasks. It is the MOST IMPORTANT
+               source. Always extract and use values from here if they are present.
+            2. INTAKE INFORMATION — the original intake form data.
+            3. PRIOR AI ANALYSIS — use only as supporting reference.
+
             You will be given structured intake data about a business process and a list of fields
             from the new BARTOK S8 SOP template that must be filled in.
 
@@ -540,16 +550,21 @@ public class AzureOpenAiService : IAzureOpenAiService
             4. For SOP steps — derive step actions from the process description and document content.
                Include the role, system, and expected output only if mentioned in the provided data.
             5. For work instructions — write step-by-step instructions based on what is described in the document.
-            6. For SLA metrics — use only SLA/KPI data mentioned in the intake or document. If none are
-               present, write "To be confirmed with process owner — not specified in intake document."
-            7. For regulatory/compliance — use only regulatory references explicitly mentioned in the intake
-               or document. Do NOT infer regulations from the geography or industry. If none are stated,
-               write "To be confirmed with the compliance team — not specified in intake document."
-            8. NEVER use "Missing" status. For EVERY field, always return "Available" with real content.
-               If exact data is not available in the provided content, write professional placeholder text
-               that a reviewer can easily update (e.g. "To be confirmed with process owner — not in document").
-            9. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
-            10. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
+            6. For volumetrics / monthly volumes — if monthly volume data is present in TASK NOTES or
+               uploaded files (e.g. an Excel table), extract and use those exact numbers. Do NOT write
+               "To be confirmed" if volume data is present anywhere in the provided content.
+            7. For SLA metrics — use only SLA/KPI data mentioned in the intake, task notes, or document.
+               If none are present anywhere in the provided content, write "To be confirmed with process owner."
+            8. For regulatory/compliance — use only regulatory references explicitly mentioned in the intake,
+               task notes, or document. Do NOT infer regulations from the geography or industry. If none are
+               stated anywhere in the provided content, write "To be confirmed with the compliance team."
+            9. NEVER use "Missing" status. For EVERY field, always return "Available" with real content.
+               If exact data is truly not available anywhere in the provided content, write professional
+               placeholder text that a reviewer can easily update (e.g. "To be confirmed with process owner").
+            10. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
+            11. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
+            12. When the task notes or document contain tabular data (e.g. monthly volumes in rows), read
+                each row and include ALL the values in your response for the relevant field.
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -635,23 +650,25 @@ public class AzureOpenAiService : IAzureOpenAiService
         sb.AppendLine($"Lots / SDC: {(string.IsNullOrWhiteSpace(intake.SdcLots) ? "(none)" : intake.SdcLots)}");
         sb.AppendLine();
 
+        sb.AppendLine("=== TEMPLATE FIELDS TO ANALYZE ===");
+        sb.AppendLine(fieldDefinitionsJson);
+
         if (!string.IsNullOrWhiteSpace(analysisJson))
         {
-            sb.AppendLine("=== AI ANALYSIS RESULT ===");
+            sb.AppendLine();
+            sb.AppendLine("=== PRIOR AI ANALYSIS (for reference) ===");
             var truncated = analysisJson.Length > MaxAnalysisJsonChars
                 ? analysisJson[..MaxAnalysisJsonChars] + "\n[...truncated]"
                 : analysisJson;
             sb.AppendLine(truncated);
-            sb.AppendLine();
         }
-
-        sb.AppendLine("=== TEMPLATE FIELDS TO ANALYZE ===");
-        sb.AppendLine(fieldDefinitionsJson);
 
         if (!string.IsNullOrWhiteSpace(artifactText))
         {
             sb.AppendLine();
-            sb.AppendLine("=== TASK ARTIFACT TEXT EXCERPTS ===");
+            sb.AppendLine("=== TASK NOTES, COMMENTS AND UPLOADED DOCUMENT CONTENT ===");
+            sb.AppendLine("IMPORTANT: The following content was provided by the process owner when completing tasks.");
+            sb.AppendLine("It is the PRIMARY source for filling fields. Extract ALL relevant values directly from this text.");
             var truncated = artifactText.Length > MaxArtifactCharsPerReport
                 ? artifactText[..MaxArtifactCharsPerReport] + "\n[...truncated]"
                 : artifactText;
