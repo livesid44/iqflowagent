@@ -303,8 +303,8 @@
         <script>
             (function() {
                 var intakeDbId = @Model.Id;
-                var pollInterval = 4000;
-                var maxPolls = 75; // 5 min
+                var pollInterval = 3000;
+                var maxPolls = 100; // ~5 min
                 var polls = 0;
 
                 function poll() {
@@ -337,7 +337,8 @@
                         .catch(() => setTimeout(poll, pollInterval * 2));
                 }
 
-                setTimeout(poll, pollInterval);
+                // Start first poll quickly so the status banner updates immediately
+                setTimeout(poll, 1500);
             })();
         </script>
     }
@@ -376,9 +377,9 @@
             <div class="analyzing-state">
                 <div class="spinner"></div>
                 <p style="color:#888;font-size:0.9rem;">Azure OpenAI is analysing your process intake…</p>
-                <p style="color:#aaa;font-size:0.8rem;">This usually takes a few seconds. Refresh to check for results.</p>
+                <p style="color:#aaa;font-size:0.8rem;">This page will refresh automatically when the analysis is ready.</p>
                 <button onclick="location.reload()" class="btn-reanalyze mt-3">
-                    <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                    <i class="bi bi-arrow-clockwise me-1"></i> Refresh now
                 </button>
             </div>
         </div>
