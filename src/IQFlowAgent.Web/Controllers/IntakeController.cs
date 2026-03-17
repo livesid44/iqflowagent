@@ -863,10 +863,6 @@ public class IntakeController : Controller
                 ? (record.CreatedByUserId ?? "Unassigned")
                 : record.ProcessOwnerEmail;
 
-            // Track BARTOK sections already covered by action item tasks to avoid creating
-            // duplicate checkpoint tasks for the same missing information.
-            var coveredSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
             // ── Action Items ────────────────────────────────────────────────────
             if (root.TryGetProperty("actionItems", out var actionItems))
             {
@@ -889,9 +885,6 @@ public class IntakeController : Controller
 
                         if (!string.IsNullOrWhiteSpace(sectionName))
                         {
-                            // Mark this section as covered so the checkpoint task is not duplicated
-                            coveredSections.Add(sectionName);
-
                             description = description.TrimEnd();
                             description += $"""
 
@@ -921,15 +914,22 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
 
                     if (string.IsNullOrWhiteSpace(cpLabel)) continue;
 
-                    // Skip if an action item task already covers this BARTOK section
-                    if (coveredSections.Contains(cpLabel)) continue;
-
                     var title       = $"[Checkpoint] {cpLabel}";
                     var description = string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote;
                     var priority    = cpStatus == "Fail" ? "High" : "Medium";
 
                     if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
                         continue;
+
+                    // Map checkpoint task to the BARTOK output document section
+                    description = description.TrimEnd();
+                    description += $"""
+
+
+📄 BARTOK S8 SOP — Output Document Section
+Section : {cpLabel}
+Required: {(string.IsNullOrWhiteSpace(cpNote) ? "See checkpoint status above." : cpNote)}
+""";
 
                     AddTask(db, record, title, description, priority, owner, now,
                         $"Task automatically created from pending checkpoint '{cpLabel}' (status: {cpStatus}) for intake {record.IntakeId}.");

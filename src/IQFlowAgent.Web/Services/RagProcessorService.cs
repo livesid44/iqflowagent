@@ -370,21 +370,13 @@ public class RagProcessorService : BackgroundService
                 .ToListAsync(ct);
             var titleSet = existingTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // Build set of BARTOK sections already covered by action items to avoid
-            // creating duplicate checkpoint tasks for the same missing information.
-            var coveredSections = GetJsonArraySafe(doc.RootElement, "actionItems")
-                .Select(item => item.TryGetProperty("bartokSection", out var bs) ? bs.GetString() ?? "" : "")
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
+            // Combine all action items with all Fail/Warning checkpoint items so that
+            // the maximum number of tasks is created — checkpoints are not deduplicated
+            // against action items; both are created and each checkpoint is mapped to
+            // its corresponding BARTOK output-document section.
             var items = GetJsonArraySafe(doc.RootElement, "actionItems")
                 .Concat(GetJsonArraySafe(doc.RootElement, "checkPoints")
-                    .Where(cp =>
-                    {
-                        if (!IsFailOrWarn(cp)) return false;
-                        var label = cp.TryGetProperty("label", out var lbl) ? lbl.GetString() ?? "" : "";
-                        return !coveredSections.Contains(label);
-                    }))
+                    .Where(IsFailOrWarn))
                 .ToList();
 
             foreach (var item in items)
@@ -397,6 +389,30 @@ public class RagProcessorService : BackgroundService
 
                 if (titleSet.Contains(fullTitle)) continue;
                 titleSet.Add(fullTitle);
+
+                // Map each task to its BARTOK output-document section for traceability.
+                // Checkpoint items use their "label" as the section name.
+                // Action items use "bartokSection" when present.
+                if (IsCheckPoint(item))
+                {
+                    var sectionName  = GetStringProp(item, "label") ?? "";
+                    var requiredInfo = GetStringProp(item, "note") ?? "";
+                    if (!string.IsNullOrWhiteSpace(sectionName))
+                    {
+                        desc = desc.TrimEnd();
+                        desc += $"\n\n📄 BARTOK S8 SOP — Output Document Section\nSection : {sectionName}\nRequired: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See checkpoint status above." : requiredInfo)}";
+                    }
+                }
+                else if (item.TryGetProperty("bartokSection", out var bsSec))
+                {
+                    var sectionName  = bsSec.GetString() ?? "";
+                    var requiredInfo = item.TryGetProperty("requiredInfo", out var riEl) ? riEl.GetString() ?? "" : "";
+                    if (!string.IsNullOrWhiteSpace(sectionName))
+                    {
+                        desc = desc.TrimEnd();
+                        desc += $"\n\n📄 BARTOK S8 SOP — Output Document Section\nSection : {sectionName}\nRequired: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description above." : requiredInfo)}";
+                    }
+                }
 
                 var task = new IntakeTask
                 {
