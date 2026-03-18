@@ -285,6 +285,24 @@ public class ReportController : Controller
             }
         }
 
+        // ── Safety net: Status must always match the actual FillValue ─────────
+        // Guards against any edge-case in the update branches above (or stale data
+        // left by older code versions) where a non-empty FillValue ends up with a
+        // "Missing" status badge, confusing users.
+        foreach (var entry in _db.ChangeTracker.Entries<ReportFieldStatus>()
+            .Where(e => e.State is Microsoft.EntityFrameworkCore.EntityState.Added
+                                 or Microsoft.EntityFrameworkCore.EntityState.Modified))
+        {
+            var e = entry.Entity;
+            if (e.Status != "NA")
+            {
+                if (!string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Missing")
+                    e.Status = "Available";
+                else if (string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Available")
+                    e.Status = "Missing";
+            }
+        }
+
         await _db.SaveChangesAsync();
 
         var totalFilled = aiFilledCount + offlineFilledCount;

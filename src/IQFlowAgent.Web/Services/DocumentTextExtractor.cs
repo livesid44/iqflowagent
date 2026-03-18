@@ -112,10 +112,14 @@ internal static class DocumentTextExtractor
                 {
                     foreach (var row in table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>())
                     {
-                        // Join each cell's full inner text with a tab so the columns
-                        // are distinguishable downstream (e.g. OCC Reference\tObligation\t…)
+                        // For each cell, join its paragraphs with " | " so bullet-list cells
+                        // preserve all individual bullets rather than merging them into one
+                        // unreadable blob (c.InnerText concatenates without any separator).
                         var cells = row.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>()
-                            .Select(c => c.InnerText.Trim())
+                            .Select(c => string.Join(" | ",
+                                c.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                                 .Select(p => p.InnerText.Trim())
+                                 .Where(t => !string.IsNullOrWhiteSpace(t))))
                             .ToList();
                         var line = string.Join("\t", cells);
                         if (!string.IsNullOrWhiteSpace(line))

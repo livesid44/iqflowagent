@@ -115,8 +115,13 @@ internal static class OfflineFieldExtractor
     [
         (["process description", "process overview", "about this process"],
             ["po_description"]),
-        (["monthly volumes", "transaction volumes", "volume data", "volumes by month"],
-            ["po_volumes", "vol_transaction"]),
+        // Volume fields are intentionally excluded from the SectionMap.
+        // They are populated exclusively by ExtractVolumeData (Pass 4b) which uses
+        // strict Mon-YY + large-number validation to avoid false captures from
+        // document revision histories and other prose that mention month names.
+        // Previously having "transaction volumes", "volumetrics" etc. here caused the
+        // entire revision-history section of a process document to be stored as volume
+        // data whenever those words appeared as section headings.
         (["peak volume", "peak period", "peak transaction"],
             ["po_peak_volume", "vol_note"]),
         (["weekday hours", "operating hours", "business hours", "hours of operation", "working hours"],
@@ -128,7 +133,8 @@ internal static class OfflineFieldExtractor
         (["systems used", "applications used", "tools used", "systems and tools", "platforms"],
             ["po_systems"]),
         (["raci", "raci matrix", "roles and responsibilities"],
-            ["raci_task1", "raci_role1"]),
+            ["raci_task1", "raci_task2", "raci_task3", "raci_task4",
+             "raci_role1", "raci_role2", "raci_role3", "raci_role4"]),
         (["standard operating procedure", "sop steps", "process steps", "procedure"],
             ["sop_action", "sop_role"]),
         (["work instructions", "detailed instructions", "step-by-step"],
@@ -139,8 +145,9 @@ internal static class OfflineFieldExtractor
             ["exc_type", "exc_handling"]),
         (["service level", "sla", "kpis", "performance targets", "sla metrics"],
             ["sla_metric", "sla_measurement", "sla_actual_perf"]),
-        (["volumetrics", "transaction volume detail", "volume analysis"],
-            ["vol_transaction", "vol_note", "vol_forecast"]),
+        // "volumetrics", "transaction volume detail", "volume analysis" are intentionally
+        // absent — see comment near SectionMap definition.  Volume fields are owned by
+        // ExtractVolumeData exclusively.
         (["regulatory", "compliance", "regulations", "compliance obligations", "regulatory requirements"],
             ["reg_regulation", "reg_obligation", "reg_control"]),
         (["training", "training materials", "training plan", "training requirements"],
@@ -273,6 +280,18 @@ internal static class OfflineFieldExtractor
         new(@"\b(Sat|Sun|Saturday|Sunday|weekend|week\s+end)\b",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Keywords that identify RACI role column headers in a table.
+    // At least two of these must appear in a tab-separated row for it to be treated
+    // as the RACI header row.
+    private static readonly string[] KnownRaciRoleKeywords =
+    [
+        "change requester", "change originator", "change approver",
+        "change qualifier", "change scheduler", "change implementer",
+        "change manager", "change coordinator", "change owner",
+        "cab", "implementer", "requester", "originator", "approver",
+        "scheduler", "qualifier"
+    ];
+
     private static readonly string[] KnownSystems =
     [
         "SAP", "Oracle", "Salesforce", "ServiceNow", "Dynamics", "Workday",
@@ -343,6 +362,7 @@ internal static class OfflineFieldExtractor
         // ── Pass 4: structural / pattern extraction ───────────────────────────
         ExtractOccTable(allLines, result);
         ExtractVolumeData(allLines, result, intake);
+        ExtractRaciTable(allLines, result);
         ExtractSystemNames(allLines, result);
         ExtractRegulations(allLines, result);
         ExtractSlaValues(allLines, result);
@@ -580,14 +600,17 @@ internal static class OfflineFieldExtractor
         {
             var formatted = volLines.Select(l => l.Replace('\t', ' ')).ToList();
             var combined  = string.Join("; ", formatted);
-            result.TryAdd("po_volumes",      combined);
-            result.TryAdd("vol_transaction", combined);
-            result.TryAdd("vol_forecast",
-                $"Based on historical data: avg {EstimateAverage(volLines)} transactions/month.");
+            // Use direct assignment (not TryAdd) so we override any garbage that
+            // section-header extraction may have written to these keys earlier.
+            result["po_volumes"]      = combined;
+            result["vol_transaction"] = combined;
+            result["vol_forecast"]    =
+                $"Based on historical data: avg {EstimateAverage(volLines)} transactions/month.";
         }
         else if (intake.EstimatedVolumePerDay > 0)
         {
-            // Fall back to daily estimate × 22 working days
+            // Fall back to daily estimate × 22 working days; only write if nothing
+            // better has been found (use TryAdd so AI-extracted or section data wins).
             var monthly = intake.EstimatedVolumePerDay * 22;
             result.TryAdd("po_volumes",
                 $"Approx. {monthly:N0} transactions/month (based on intake estimate of " +
@@ -599,6 +622,85 @@ internal static class OfflineFieldExtractor
         {
             result.TryAdd("po_peak_volume", string.Join("; ", peakLines.Take(2)));
             result.TryAdd("vol_note",       string.Join("; ", peakLines.Take(2)));
+        }
+    }
+
+    // ── Pass 4b2: RACI table extraction ─────────────────────────────────────────
+    // Reads tab-separated rows produced by DocumentTextExtractor from a Word RACI
+    // table.  The header row identifies role names by column position; subsequent
+    // rows contain the responsibilities for each role (bullets joined with " | ").
+    // Maps the first four role columns to raci_role1..raci_role4 and their tasks
+    // to raci_task1..raci_task4.
+
+    private static void ExtractRaciTable(string[] lines, Dictionary<string, string> result)
+    {
+        // Find the header row: a tab-separated line where ≥ 2 columns match known
+        // RACI role keywords.
+        for (int headerIdx = 0; headerIdx < lines.Length; headerIdx++)
+        {
+            var headerLine = lines[headerIdx];
+            if (!headerLine.Contains('\t')) continue;
+
+            var cols = headerLine.Split('\t');
+            // Identify which column indices are RACI role headers
+            var roleColIndices = cols
+                .Select((c, i) =>
+                    (ColIdx: i,
+                     Match: KnownRaciRoleKeywords.Any(k =>
+                         c.Trim().ToLowerInvariant().Contains(k))))
+                .Where(x => x.Match)
+                .Select(x => x.ColIdx)
+                .ToList();
+
+            if (roleColIndices.Count < 2) continue; // Not a RACI header row
+
+            // Collect content from all subsequent rows (until separator or end)
+            // per column index.
+            var roleContent = roleColIndices.ToDictionary(i => i, _ => new System.Text.StringBuilder());
+
+            for (int bodyIdx = headerIdx + 1; bodyIdx < lines.Length; bodyIdx++)
+            {
+                var bodyLine = lines[bodyIdx];
+                if (bodyLine.StartsWith("---") || bodyLine.StartsWith("===")) break;
+
+                var bodyCols = bodyLine.Split('\t');
+                foreach (var colIdx in roleColIndices)
+                {
+                    var cellText = GetCell(bodyCols, colIdx).Trim();
+                    if (!string.IsNullOrWhiteSpace(cellText))
+                    {
+                        if (roleContent[colIdx].Length > 0)
+                            roleContent[colIdx].Append("; ");
+                        roleContent[colIdx].Append(cellText);
+                    }
+                }
+            }
+
+            // Map the first 4 matched columns to raci_role/raci_task fields
+            var fieldSlots = new[]
+            {
+                ("raci_role1", "raci_task1"),
+                ("raci_role2", "raci_task2"),
+                ("raci_role3", "raci_task3"),
+                ("raci_role4", "raci_task4"),
+            };
+
+            int slot = 0;
+            foreach (var colIdx in roleColIndices.Take(4))
+            {
+                var (roleKey, taskKey) = fieldSlots[slot++];
+                var roleName  = cols[colIdx].Trim();
+                var taskBody  = roleContent[colIdx].ToString().Trim();
+
+                // Override any section-extraction result with the structured table data
+                if (!string.IsNullOrWhiteSpace(roleName))
+                    result[roleKey] = roleName;
+
+                if (!string.IsNullOrWhiteSpace(taskBody))
+                    result[taskKey] = taskBody;
+            }
+
+            break; // Processed the first RACI table found; stop searching
         }
     }
 
