@@ -2744,8 +2744,10 @@ public class AzureOpenAiService : IAzureOpenAiService
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
             "SOP document at TechM.  You will be given:\n" +
             "  1. TASK ARTIFACTS — uploaded files (Excel, Word, PDF) and task comments collected\n" +
-            "     specifically for this section.  This is the PRIMARY and most authoritative source.\n" +
+            "     for this section and related tasks.  This is the PRIMARY and most authoritative source.\n" +
             "     Treat every uploaded file as ground truth — do NOT paraphrase or transform the data.\n" +
+            "     The artifacts section may include supplementary content from other checkpoint tasks;\n" +
+            "     use all of it — prioritise section-specific content but also read the supplementary data.\n" +
             "  2. GLOBAL INTAKE DOCUMENTS — the original process document.  Background context only.\n\n" +
             "CRITICAL EXTRACTION RULES — follow each one exactly:\n" +
             "1. PRIMARY SOURCE IS ALWAYS THE UPLOADED FILE.  Read the COMPLETE content of every\n" +
@@ -2828,7 +2830,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         if (!string.IsNullOrWhiteSpace(taskArtifactText))
         {
             sb.AppendLine();
-            sb.AppendLine("=== TASK ARTIFACTS FOR THIS SECTION (PRIMARY SOURCE) ===");
+            sb.AppendLine("=== TASK ARTIFACTS (PRIMARY SOURCE — section-specific + supplementary) ===");
             sb.AppendLine("Read the COMPLETE content below. Extract EVERY row, bullet, and value exactly as written.");
             const int taskCap = 16_000;
             sb.AppendLine(taskArtifactText.Length > taskCap

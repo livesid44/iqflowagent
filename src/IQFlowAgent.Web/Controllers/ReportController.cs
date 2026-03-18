@@ -253,29 +253,30 @@ public class ReportController : Controller
                 ? await AggregateArtifactTextAsync(sectionTasks)
                 : allTaskArtifactText;
 
-            // ── Special case: po_volumes cross-section artifact supplement ───────
-            // po_volumes lives in "2. Process Overview" but users typically upload their
-            // monthly-volume Excel against the Volumetrics (section 8) task.  When the
-            // Process Overview section is being analyzed, its task list does not include
-            // the Volumetrics task, so the LLM has no access to the Excel and correctly
-            // falls back to the placeholder message.
-            // Fix: if this section contains po_volumes, append any task artifacts that
-            // are mapped to vol_content (the Volumetrics field) but are not already
-            // included in the current section's artifact text.
-            if (sectionFields.Any(f => f.Key == "po_volumes"))
+            // ── Cross-section artifact supplement (all sections) ─────────────────
+            // A user may upload an Excel/Word/PDF to a task in section X that is also
+            // relevant to section Y (e.g. a volume Excel uploaded against the Volumetrics
+            // task is also needed for po_volumes in "2. Process Overview"; an SLA document
+            // uploaded against the SLA task is also needed for other process-overview
+            // fields).  When a section has its own dedicated tasks, it was previously
+            // isolated — it could only see those tasks' artifacts and missed data from
+            // all other sections' tasks.
+            // Fix: for every section that has its own dedicated tasks, also append
+            // artifacts from all tasks that are NOT already in this section's task list,
+            // labelled as supplementary context.  The LLM sees primary artifacts first
+            // and supplementary artifacts second, so extraction fidelity is preserved.
+            if (sectionTasks.Count > 0)
             {
-                var volTasks = fieldTaskMap.TryGetValue("vol_content", out var vts)
-                    ? vts.Where(t => !sectionTasks.Contains(t)).ToList()
-                    : [];
-                if (volTasks.Count > 0)
+                var crossSectionTasks = tasks.Where(t => !sectionTasks.Contains(t)).ToList();
+                if (crossSectionTasks.Count > 0)
                 {
-                    var volText = await AggregateArtifactTextAsync(volTasks);
-                    if (!string.IsNullOrWhiteSpace(volText))
+                    var crossText = await AggregateArtifactTextAsync(crossSectionTasks);
+                    if (!string.IsNullOrWhiteSpace(crossText))
                         sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
-                            ? volText
+                            ? crossText
                             : sectionArtifactText
-                              + "\n\n=== SUPPLEMENTARY VOLUMETRICS ARTIFACTS ===\n"
-                              + volText;
+                              + "\n\n=== SUPPLEMENTARY ARTIFACTS FROM OTHER SECTIONS ===\n"
+                              + crossText;
                 }
             }
 

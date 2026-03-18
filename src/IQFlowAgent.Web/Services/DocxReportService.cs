@@ -240,6 +240,11 @@ public class DocxReportService : IDocxReportService
         new(@"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2,4}\b",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // Matches any ASCII digit — used to detect whether real numeric volume data
+    // remains after stripping month-year tokens from a volume field value.
+    private static readonly Regex AnyDigitRegex =
+        new(@"\d", RegexOptions.Compiled);
+
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();
 
     public Task<byte[]> GenerateReportAsync(
@@ -388,7 +393,7 @@ public class DocxReportService : IDocxReportService
         if (MonthBulletRegex.IsMatch(value))
         {
             var withoutMonthTokens = MonthBulletRegex.Replace(value, "");
-            if (Regex.IsMatch(withoutMonthTokens, @"\d"))
+            if (AnyDigitRegex.IsMatch(withoutMonthTokens))
                 return value;  // real numeric volume data is present — pass through
 
             // Month tokens present but no actual numbers → LLM produced the format
