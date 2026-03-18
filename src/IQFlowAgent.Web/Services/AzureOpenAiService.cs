@@ -2738,6 +2738,8 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         // ── System prompt ─────────────────────────────────────────────────────
         var fieldKeys = string.Join(", ", sectionFields.Select(f => $"\"{f.Key}\""));
+        bool hasVolumeField = sectionFields.Any(f => f.Key == "po_volumes");
+
         var systemPrompt =
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
             "SOP document at TechM.  You will be given:\n" +
@@ -2767,7 +2769,29 @@ public class AzureOpenAiService : IAzureOpenAiService
             "7. You MUST respond ONLY with valid JSON (no markdown fences, no extra commentary):\n" +
             "   {\"fields\": [{\"key\": \"field_key\", \"fillValue\": \"the value\"}]}\n" +
             $"   Include ONLY keys from this set: {fieldKeys}\n" +
-            "   Omit any field you genuinely cannot fill from the provided data.";
+            "   Omit any field you genuinely cannot fill from the provided data." +
+            // ── Per-field override for monthly volume data ─────────────────────
+            (hasVolumeField ? "\n\n" +
+            "SPECIAL RULE FOR KEY \"po_volumes\" (Monthly Volumes) — overrides rule 1 for this field only:\n" +
+            "  GOAL: produce a month-by-month volumetric trend with one bullet line per month.\n" +
+            "  Prompt style: \"month-by-month volumetric trend — give monthly pointers not table\".\n\n" +
+            "  Step 1 — Find tabular volume data in the Task Artifacts.\n" +
+            "           Look for tab-separated rows with columns like Month / Received / Handled.\n" +
+            "           The month column will contain values such as \"Jan-25\", \"Feb-25\", etc.\n\n" +
+            "  Step 2 — If tabular data is found, output EXACTLY ONE bullet per calendar month:\n" +
+            "             - MMM-YY: Received [X] | Handled [Y]\n" +
+            "           Use \"not available\" for months where the source shows an error or blank.\n" +
+            "           Include ALL months from the data — do NOT skip any.\n" +
+            "           Do NOT paste raw tab-separated rows verbatim.\n\n" +
+            "  Step 3 — IGNORE completely any text that is a form instruction or template placeholder.\n" +
+            "           Specifically, NEVER use the following as the field value:\n" +
+            "             \"Enter actual transaction volume\"\n" +
+            "             \"RACI Sharepoint\" / \"RACI Checkpoint\"\n" +
+            "             \"3. Roles and Responsibilities\"\n" +
+            "           If you see these strings in the documents, skip them — they are template text.\n\n" +
+            "  Step 4 — If NO actual numeric volume data exists anywhere in the Task Artifacts,\n" +
+            "           output exactly this one sentence (nothing else):\n" +
+            "           Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "");
 
         // ── User message ──────────────────────────────────────────────────────
         var sb = new System.Text.StringBuilder();
