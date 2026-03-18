@@ -558,8 +558,9 @@ public class AzureOpenAiService : IAzureOpenAiService
                Include the role, system, and expected output only if mentioned in the provided data.
             5. For work instructions — write step-by-step instructions based on what is described in the document.
             6. For volumetrics / monthly volumes — if monthly volume data is present in TASK NOTES or
-               uploaded files (e.g. an Excel table), extract and use those exact numbers. Do NOT write
-               "To be confirmed" if volume data is present anywhere in the provided content.
+               uploaded files (e.g. an Excel table with date-keyed rows), extract and summarise those
+               numbers as structured bullet points. Do NOT write "To be confirmed" if volume data is
+               present anywhere in the provided content.
             7. For SLA metrics — use only SLA/KPI data mentioned in the intake, task notes, or document.
                If none are present anywhere in the provided content, write "To be confirmed with process owner."
             8. For regulatory/compliance — use only regulatory references explicitly mentioned in the intake,
@@ -570,8 +571,14 @@ public class AzureOpenAiService : IAzureOpenAiService
                placeholder text that a reviewer can easily update (e.g. "To be confirmed with process owner").
             10. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
             11. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
-            12. When the task notes or document contain tabular data (e.g. monthly volumes in rows), read
-                each row and include ALL the values in your response for the relevant field.
+            12. When the task notes or document contain tabular data (e.g. monthly volumes in an Excel
+                spreadsheet), do NOT paste the raw table rows into the field. Instead, produce a clean
+                structured summary using one bullet point per calendar month in the format:
+                  - MMM-YYYY: Received X | Handled Y  (or "not available" for missing periods)
+                Place this summary in the monthlyVolumes / volumeTransaction field. For the volumeNote
+                field extract the stated peak period and any anomalies as 1-2 bullet points. For the
+                volumeForecast field extract the forecast average row (if present) as a single sentence.
+                Any "not available" entries in the source data should be preserved as "not available".
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -1090,9 +1097,9 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "monthlyVolumes" =>
                     ("Available",
-                     vol > 0 ? $"Estimated {vol} transactions per day (approx. {vol * 22} per month). Confirm exact monthly figures for the past 12 months with the process owner."
-                             : "Monthly volume data to be confirmed with the process owner. Provide actuals for the past 12 months.",
-                     "Inferred from intake daily volume estimate."),
+                     vol > 0 ? $"Upload an Excel volume file against this task and use AI Generate to produce a month-by-month bullet summary. Estimated baseline: ~{vol * 22} transactions/month ({vol}/day)."
+                             : "Upload an Excel volume file against this task and use AI Generate to produce a month-by-month bullet summary (one line per month: Received / Handled counts).",
+                     "Prompt — upload volume Excel and regenerate to get structured monthly bullets."),
 
                 "hoursWeekday" =>
                     tz?.Contains("IST", StringComparison.OrdinalIgnoreCase) == true
@@ -1235,18 +1242,17 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "volumeTransaction" =>
                     ("Available",
-                     vol > 0 ? $"{vol} {procName} transactions (daily average)"
-                             : $"{procName} transaction type and volume to be confirmed with process owner",
-                     "Inferred from intake volume data."),
+                     "Upload an Excel volume file against this task and use AI Generate to produce a structured monthly bullet summary (one line per month: Received / Handled counts).",
+                     "Prompt — upload volume Excel and regenerate to get structured monthly bullets."),
 
                 "volumeNote" =>
-                    ("Available", "Confirm any peak periods (e.g. month-end, quarter-end) with process owner. Identify seasonal demand fluctuations.", "Standard volume note."),
+                    ("Available", "Peak period and seasonal notes will be extracted automatically when a volume Excel file is uploaded and AI Generate is used.", "Prompt — upload volume Excel and regenerate."),
 
                 "volumeForecast" =>
                     ("Available",
-                     vol > 0 ? $"Expected average: {vol} transactions/day ({vol * 22} per month). Review trend with process owner."
-                             : "Forecast volume to be agreed with process owner based on historical trend.",
-                     "Inferred from intake daily volume."),
+                     vol > 0 ? $"Forecast average: approx. {vol * 22} transactions/month ({vol}/day) based on intake estimate. Upload volume Excel and regenerate to use the actual Forecast Avg row."
+                             : "Upload an Excel volume file containing a Forecast Avg row and use AI Generate to extract the forecast automatically.",
+                     "Prompt — upload volume Excel and regenerate to extract forecast."),
 
                 "regulation" =>
                     ("Available", "GDPR / Data Protection Act 2018 — applicable to any personal data processed in this workflow", "Standard regulatory framework."),
@@ -1852,6 +1858,13 @@ public class AzureOpenAiService : IAzureOpenAiService
             Your task is to generate professional, document-ready content for a single SOP field.
             Return ONLY the field value as plain text — no JSON, no markdown headers, no extra commentary.
             The content should be concise (1-4 sentences) and suitable for direct insertion into a document.
+
+            For volumetric / monthly-volume fields (monthlyVolumes, volumeTransaction):
+            If the task artifact text contains tabular volume data (e.g. from an Excel spreadsheet),
+            do NOT paste the raw table. Produce a clean bullet-point summary — one line per calendar
+            month in the format "- MMM-YYYY: Received X | Handled Y". Mark missing periods as "not available".
+            For volumeNote: extract the stated peak period and any anomalies as 1-2 bullet points.
+            For volumeForecast: use the forecast average row (if present) as a single sentence.
             """;
 
         var sb = new System.Text.StringBuilder();
