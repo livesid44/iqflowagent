@@ -564,7 +564,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                placeholder text that a reviewer can easily update (e.g. "To be confirmed with process owner").
             7. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
             8. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
-               Exception: raciContent, sopContent, and volContent are multi-line blocks — see rules 9-11.
+               Exception: raciContent, sopContent, volContent and monthlyVolumes are multi-line blocks — see rules 9-12.
 
             9. raciContent field — produce a complete RACI block. Use newline (\n) to separate each entry.
                Format (repeat for every task identified from intake/document):
@@ -593,6 +593,20 @@ public class AzureOpenAiService : IAzureOpenAiService
                   ...
                   Forecast Avg      | [forecast volume]                   |
                 If no volume data is available, use one line: "Volume data to be confirmed with process owner."
+
+            12. monthlyVolumes field (placed next to "Volumes (Monthly)" in the document) —
+                This is the PRIMARY volume field shown in the Process Overview section.
+                If tabular volume data (e.g. a spreadsheet with columns like Month, Received, Handled)
+                is present in the TASK NOTES or uploaded documents, produce month-by-month bullet pointers.
+                Use this prompt style: "month-by-month volumetric trend — give monthly pointers not table".
+                Format — one bullet per month using a dash (-):
+                  - [MMM-YY]: Received [X] | Handled [Y]  (or "not available" for missing months)
+                  - ...
+                  - Forecast average: [forecast figure] per month (if a forecast row is present)
+                If no volume data is available, write:
+                  "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate."
+                NEVER paste raw table rows. NEVER repeat the same figure across all months.
+                ALWAYS produce one bullet per actual month in the data.
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -1111,9 +1125,11 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "monthlyVolumes" =>
                     ("Available",
-                     vol > 0 ? $"Upload an Excel volume file against this task and use AI Generate to produce a month-by-month bullet summary. Estimated baseline: ~{vol * 22} transactions/month ({vol}/day)."
-                             : "Upload an Excel volume file against this task and use AI Generate to produce a month-by-month bullet summary (one line per month: Received / Handled counts).",
-                     "Prompt — upload volume Excel and regenerate to get structured monthly bullets."),
+                     vol > 0
+                         ? $"Volume data to be confirmed with process owner — upload Excel/volume file and regenerate.\n" +
+                           $"(Estimated baseline from intake: ~{vol * 22} transactions/month at {vol}/day.)"
+                         : "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate.",
+                     "Prompt — upload volume Excel against this task and use AI Generate to extract month-by-month bullet pointers."),
 
                 "hoursWeekday" =>
                     tz?.Contains("IST", StringComparison.OrdinalIgnoreCase) == true
@@ -1877,8 +1893,20 @@ public class AzureOpenAiService : IAzureOpenAiService
               Forecast Avg      | [forecast]                          |
             If volume data is in the artifact text, extract it. Otherwise: "Volume data to be confirmed with process owner."
 
-            monthlyVolumes — bullet-point summary from uploaded Excel/data, one line per month:
-              - MMM-YYYY: Received X | Handled Y  (or "not available" for missing periods)
+            monthlyVolumes (placed in "Volumes (Monthly)" row of the Process Overview table) —
+            IMPORTANT: This is the primary field users read for volume trend. Use the following approach:
+            "month-by-month volumetric trend — give monthly pointers not table"
+            If the artifact text contains tabular volume data (e.g. spreadsheet columns: Month, Received, Handled),
+            produce exactly ONE bullet point per calendar month in the data:
+              - [MMM-YY]: Received [X] | Handled [Y]  (or "not available" for missing months)
+              - ...
+              - Forecast average: [forecast figure] per month (if forecast row present)
+            Rules for monthlyVolumes:
+            • ONE bullet per month — never aggregate or omit months
+            • Never paste raw table rows or repeat identical figures across months
+            • "not available" entries in source data → preserve as "not available"
+            • If NO volume data exists anywhere in the artifact: write exactly:
+              "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate."
             """;
 
         var sb = new System.Text.StringBuilder();
