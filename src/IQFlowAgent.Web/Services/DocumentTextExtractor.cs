@@ -104,6 +104,12 @@ internal static class DocumentTextExtractor
                             {
                                 value = sharedStrings[idx];
                             }
+                            else if (c.DataType?.Value == CellValues.InlineString)
+                            {
+                                // Inline-string cells store their text in <is><t>…</t></is>,
+                                // not in <v>; reading CellValue.Text returns empty for these.
+                                value = c.InlineString?.InnerText ?? raw;
+                            }
                             else if (c.DataType == null || c.DataType.Value == CellValues.Number)
                             {
                                 // Numeric cell — check whether it carries a date format style.

@@ -2778,11 +2778,17 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  Step 1 — Find tabular volume data in the Task Artifacts.\n" +
             "           Look for tab-separated rows with columns like Month / Received / Handled.\n" +
             "           The month column will contain values such as \"Jan-25\", \"Feb-25\", etc.\n\n" +
-            "  Step 2 — If tabular data is found, output EXACTLY ONE bullet per calendar month:\n" +
+            "  Step 2 — If tabular data is found WITH ACTUAL NUMBERS in the volume columns,\n" +
+            "           output EXACTLY ONE bullet per calendar month:\n" +
             "             - MMM-YY: Received [X] | Handled [Y]\n" +
-            "           Use \"not available\" for months where the source shows an error or blank.\n" +
+            "           Replace [X] and [Y] with the ACTUAL numeric figures from the spreadsheet.\n" +
+            "           Use \"not available\" ONLY for months where the source shows an error or blank.\n" +
             "           Include ALL months from the data — do NOT skip any.\n" +
-            "           Do NOT paste raw tab-separated rows verbatim.\n\n" +
+            "           Do NOT paste raw tab-separated rows verbatim.\n" +
+            "           CRITICAL: Do NOT produce bullets where [X] and [Y] are both empty/missing.\n" +
+            "           If you can see month labels but the corresponding cells are blank or missing,\n" +
+            "           that means the spreadsheet has no data — go to Step 4 instead.\n" +
+            "           FORBIDDEN: '- Jan-2025: Received  | Handled '  ← empty values, NOT allowed.\n\n" +
             "  Step 3 — IGNORE completely any text that is a form instruction or template placeholder.\n" +
             "           Specifically, NEVER use the following as the field value:\n" +
             "             \"Enter actual transaction volume\"\n" +
@@ -2793,7 +2799,8 @@ public class AzureOpenAiService : IAzureOpenAiService
             "           FORBIDDEN EXAMPLE — if the artifact text you see looks like this:\n" +
             "             \"Enter actual transaction volume for each of the past 12 months: | 3. Roles and Responsibilities (RACI)\"\n" +
             "           that is template instruction text, NOT volume data. Output the Step 4 fallback instead.\n\n" +
-            "  Step 4 — If NO actual numeric volume data exists anywhere in the Task Artifacts,\n" +
+            "  Step 4 — If NO actual numeric volume data exists anywhere in the Task Artifacts\n" +
+            "           (including when month labels are present but all value cells are blank),\n" +
             "           output exactly this one sentence (nothing else):\n" +
             "           Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "");
 

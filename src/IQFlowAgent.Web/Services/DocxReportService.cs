@@ -379,12 +379,22 @@ public class DocxReportService : IDocxReportService
         if (string.IsNullOrWhiteSpace(value)) return value;
 
         // Genuine output: any value that contains month abbreviations (e.g. "Jan-25", "Feb-25")
-        // is treated as real volume data and passed through as-is regardless of formatting.
-        // The LLM may produce bullets ("- Jan-25: ...") or plain lines ("Jan-25: ...") —
-        // both are valid.  None of the known-bad instruction strings contain month tokens,
-        // so this check is safe.
+        // AND at least one actual numeric volume figure passes through.
+        // Strip all month tokens first so that year digits ("2025", "25") in those tokens
+        // don't count as volume figures — then check whether any digit remains.
+        // This catches the common failure mode where the LLM outputs the bullet format with
+        // empty values ("- Jan-2025: Received  | Handled") because the Excel cell values
+        // were blank during extraction.
         if (MonthBulletRegex.IsMatch(value))
-            return value;
+        {
+            var withoutMonthTokens = MonthBulletRegex.Replace(value, "");
+            if (Regex.IsMatch(withoutMonthTokens, @"\d"))
+                return value;  // real numeric volume data is present — pass through
+
+            // Month tokens present but no actual numbers → LLM produced the format
+            // template with empty Received/Handled slots.  Use the fallback.
+            return VolumeFallback;
+        }
 
         // If the value matches any known instruction/template pattern, discard it.
         foreach (var pattern in VolumeInstructionPatterns)
