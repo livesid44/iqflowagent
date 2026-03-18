@@ -11,10 +11,11 @@ public class AzureOpenAiService : IAzureOpenAiService
     private const int MaxAnalysisJsonChars = 4000;  // max chars from AI analysis sent in field-analysis prompt
     // 20 000 chars covers multiple multi-sheet Excel files + Word docs + task comments while
     // staying comfortably within the 128 k-token context window of gpt-4o / gpt-4-turbo.
-    private const int MaxArtifactCharsPerReport = 20000;
+    private const int MaxArtifactCharsPerReport = 20_000;
     // Lower token limit for per-section calls: each call is focused on a narrow field set,
     // so responses are short but must be long enough to list all volume/SLA rows verbatim.
-    private const int MaxSectionAnalysisTokens = 1_500;
+    // 3000 is sufficient for a full RACI table or 12-month volume series.
+    private const int MaxSectionAnalysisTokens = 3_000;
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
@@ -2657,7 +2658,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
 
-        // When AI is not configured return empty — caller will fall back to OfflineFieldExtractor.
+        // When AI is not configured return empty — fields will remain as Missing until configured.
         if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
             || string.IsNullOrWhiteSpace(deployment)
             || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
@@ -2685,25 +2686,30 @@ public class AzureOpenAiService : IAzureOpenAiService
         var systemPrompt =
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
             "SOP document at TechM.  You will be given:\n" +
-            "  1. TASK ARTIFACTS — files (Excel, Word, PDF, comments) collected specifically for\n" +
-            "     this section.  This is the PRIMARY and most authoritative source.\n" +
-            "  2. GLOBAL INTAKE DOCUMENTS — the original process document uploaded with the intake.\n" +
-            "     Use this as background context only.\n\n" +
+            "  1. TASK ARTIFACTS — uploaded files (Excel, Word, PDF) and task comments collected\n" +
+            "     specifically for this section.  This is the PRIMARY and most authoritative source.\n" +
+            "     Treat every uploaded file as ground truth — do NOT paraphrase or transform the data.\n" +
+            "  2. GLOBAL INTAKE DOCUMENTS — the original process document.  Background context only.\n\n" +
             "CRITICAL EXTRACTION RULES — follow each one exactly:\n" +
-            "1. Task Artifacts are the PRIMARY source.  Extract data EXACTLY as it appears — preserve\n" +
-            "   all numbers, dates, names, and units without rounding or paraphrasing.\n" +
-            "2. TABULAR DATA (e.g. an Excel spreadsheet, a volume table, an SLA table):\n" +
+            "1. PRIMARY SOURCE IS ALWAYS THE UPLOADED FILE.  Read the COMPLETE content of every\n" +
+            "   uploaded document and extract ALL field values EXACTLY as they appear.\n" +
+            "   Do NOT paraphrase, summarise, re-order, or reformat the data in any way.\n" +
+            "2. EXCEL / WORD TABLES:\n" +
             "   - Read EVERY row from top to bottom — do NOT skip any row.\n" +
-            "   - For volume / transaction data: include EACH month label plus its corresponding\n" +
-            "     received and/or handled count in the format \"Mon-YY: N received / N handled\".\n" +
-            "   - For SLA data: include each metric name, its target value, and its actual value.\n" +
-            "   - Include rows that say \"not available\" or show errors — flag them explicitly.\n" +
-            "3. Do NOT write \"To be confirmed\" or \"not available\" if the data IS present anywhere\n" +
-            "   in the Task Artifacts.\n" +
-            "4. Do NOT invent data that is not present in the provided content.\n" +
-            "5. Keep fillValues concise but complete: 1-3 sentences for narrative fields; full data\n" +
-            "   lists for volume / SLA fields.\n" +
-            "6. You MUST respond ONLY with valid JSON (no markdown fences, no extra commentary):\n" +
+            "   - Columns in the extracted text are separated by tab characters; use these\n" +
+            "     boundaries to identify which value belongs to which column.\n" +
+            "   - Reproduce cell values verbatim: if a cell says \"12,346 Received\" copy exactly that.\n" +
+            "   - If a cell is blank or shows an error (e.g. #VALUE!) write \"not available\".\n" +
+            "3. BULLET-POINT LISTS IN WORD DOCUMENTS:\n" +
+            "   - Bullets within a cell are separated by \" | \" — include ALL of them.\n" +
+            "   - Do NOT stop at the first bullet; include every bullet point in the field value.\n" +
+            "4. ROLE TABLES (RACI):\n" +
+            "   - The first tab-separated row is the header row (role names).\n" +
+            "   - Subsequent rows contain responsibilities per role — include all of them.\n" +
+            "5. Do NOT write placeholder text (\"To be confirmed\", \"TBC\", \"N/A\") if the data IS\n" +
+            "   present anywhere in the Task Artifacts.\n" +
+            "6. Do NOT invent data that is not present in the provided content.\n" +
+            "7. You MUST respond ONLY with valid JSON (no markdown fences, no extra commentary):\n" +
             "   {\"fields\": [{\"key\": \"field_key\", \"fillValue\": \"the value\"}]}\n" +
             $"   Include ONLY keys from this set: {fieldKeys}\n" +
             "   Omit any field you genuinely cannot fill from the provided data.";
@@ -2727,13 +2733,14 @@ public class AzureOpenAiService : IAzureOpenAiService
         sb.AppendLine($"Process Type: {intake.ProcessType}  Time Zone: {intake.TimeZone}");
         sb.AppendLine($"Volume/Day: {intake.EstimatedVolumePerDay}");
 
-        // Task-specific artifacts are the PRIMARY source — give them the most token budget
+        // Task-specific artifacts are the PRIMARY source — give them the most token budget.
+        // The LLM extracts verbatim from the raw document text; no regex post-processing.
         if (!string.IsNullOrWhiteSpace(taskArtifactText))
         {
             sb.AppendLine();
             sb.AppendLine("=== TASK ARTIFACTS FOR THIS SECTION (PRIMARY SOURCE) ===");
-            sb.AppendLine("IMPORTANT: Extract ALL tabular data rows exactly as they appear.");
-            const int taskCap = 12_000;
+            sb.AppendLine("Read the COMPLETE content below. Extract EVERY row, bullet, and value exactly as written.");
+            const int taskCap = 16_000;
             sb.AppendLine(taskArtifactText.Length > taskCap
                 ? taskArtifactText[..taskCap] + "\n[...artifact truncated — extract from above]"
                 : taskArtifactText);

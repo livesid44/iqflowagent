@@ -17,7 +17,7 @@ namespace IQFlowAgent.Web.Services;
 ///   Feb-25\t12346\t12222.54
 /// </code>
 /// This matches the format produced by <see cref="DocumentTextExtractor"/> so that
-/// <see cref="OfflineFieldExtractor"/> patterns continue to work as a fallback.
+/// the extracted text can be sent verbatim to the LLM for field extraction.
 /// </summary>
 public class DocumentIntelligenceService : IDocumentIntelligenceService
 {

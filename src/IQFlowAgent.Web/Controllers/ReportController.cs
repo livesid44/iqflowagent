@@ -163,10 +163,76 @@ public class ReportController : Controller
                 .ToList();
         }
 
+        // ── Section-keyword task mapping (second pass) ────────────────────────
+        // Any task whose title or description mentions a keyword derived from a
+        // BARTOK section name is mapped to ALL fields in that section.
+        // This ensures that user-created checkpoint tasks (e.g. a task titled
+        // "RACI Review" or "Volumetrics Data") automatically feed the right
+        // section without requiring the exact "[Report] Gather: {label}" prefix.
+        // Keywords are derived dynamically from section names — no hardcoding.
+
+        // Pre-compute per-section keyword arrays (section names are static — avoid
+        // repeating the split+filter inside every loop iteration).
+        var sectionKeywordMap = fieldDefs
+            .GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Key
+                    .Split([' ', '.', ':', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => w.Trim().ToLowerInvariant())
+                    .Where(w => w.Length >= 3 && !int.TryParse(w, out _))
+                    .ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+
+        // Pre-compute per-task word arrays so the inner predicate doesn't re-split strings.
+        var taskWordMap = tasks.ToDictionary(
+            t => t.Id,
+            t => (t.Title + " " + (t.Description ?? ""))
+                    .Split([' ', '-', '_', '.', ','], StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => w.ToLowerInvariant())
+                    .Where(w => w.Length >= 3)  // covers SLA, OCC, SOP and longer words
+                    .ToArray());
+
+        foreach (var sectionGroup in fieldDefs.GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase))
+        {
+            var sectionKeywords = sectionKeywordMap[sectionGroup.Key];
+            if (sectionKeywords.Length == 0) continue;
+
+            var keywordMatchedTasks = tasks.Where(t =>
+            {
+                var taskWords = taskWordMap[t.Id];
+                return sectionKeywords.Any(kw =>
+                    // Direct contains (section keyword appears verbatim in task text)
+                    t.Title.Contains(kw, StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrWhiteSpace(t.Description)
+                        && t.Description.Contains(kw, StringComparison.OrdinalIgnoreCase))
+                    // Bidirectional prefix: "volume" is a prefix of "volumetrics";
+                    // "sla" is a prefix of "slas" — either direction counts.
+                    || taskWords.Any(tw =>
+                        kw.StartsWith(tw, StringComparison.OrdinalIgnoreCase)
+                        || tw.StartsWith(kw, StringComparison.OrdinalIgnoreCase)));
+            }).ToList();
+
+            if (keywordMatchedTasks.Count == 0) continue;
+
+            // Add matched tasks to each field in the section (deduplicated)
+            foreach (var fd in sectionGroup)
+                foreach (var t in keywordMatchedTasks.Where(t => !fieldTaskMap[fd.Key].Contains(t)))
+                    fieldTaskMap[fd.Key].Add(t);
+        }
+
+        // Pre-compute ALL task artifacts as a global fallback — used for BARTOK sections
+        // that have no dedicated checkpoint task yet ("remaining from intake tasks").
+        var allTaskArtifactText = tasks.Count > 0
+            ? await AggregateArtifactTextAsync(tasks)
+            : null;
+
         // ── Per-section AI analysis ──────────────────────────────────────────
-        // One focused Azure OpenAI call per BARTOK section.  Each call receives only
-        // the artifacts from the task(s) that were created to gather that section's data.
-        // This prevents volume Excel data from being drowned out by unrelated documents.
+        // One focused Azure OpenAI call per BARTOK section.
+        // • Sections with specific tasks: LLM receives only those tasks' artifacts
+        //   (keeps each call focused and prevents unrelated docs from drowning the signal).
+        // • Sections WITHOUT specific tasks: LLM receives ALL task artifacts as a
+        //   fallback ("remaining one should come from intake tasks").
         var aiValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         int sectionsAnalyzed = 0;
 
@@ -181,10 +247,11 @@ public class ReportController : Controller
                 .Distinct()
                 .ToList();
 
-            // Extract artifacts from section-specific tasks only
+            // Section-specific tasks → focused artifact text.
+            // No specific tasks → fall back to ALL task artifacts (user's uploaded documents).
             var sectionArtifactText = sectionTasks.Count > 0
                 ? await AggregateArtifactTextAsync(sectionTasks)
-                : null;
+                : allTaskArtifactText;
 
             var sectionValues = await _aiService.AnalyzeSectionFieldsAsync(
                 intake, section.Key, sectionFields,
@@ -196,24 +263,19 @@ public class ReportController : Controller
             sectionsAnalyzed++;
         }
 
-        // ── Offline extraction — fallback for fields still empty after AI ────
-        // Runs deterministic patterns across ALL combined artifacts so structural
-        // data (OCC codes, operating hours, known system names) is never missed.
-        var allArtifactText = await AggregateArtifactTextAsync(tasks);
-        var combinedText    = string.Join("\n",
-            new[] { globalDocText, allArtifactText }.Where(s => !string.IsNullOrWhiteSpace(s)));
-        var offlineValues = !string.IsNullOrWhiteSpace(combinedText)
-            ? OfflineFieldExtractor.Extract(combinedText, intake)
-            : new Dictionary<string, string>();
+        // NOTE: OfflineFieldExtractor (hardcoded regex/pattern extraction) has been removed.
+        // All field extraction is now done exclusively by the LLM (AnalyzeSectionFieldsAsync),
+        // which receives the raw document text from uploaded files and extracts values verbatim.
+        // This avoids the fragility of hardcoded patterns that break when document formats change.
 
         _logger.LogInformation(
             "Section-by-section analysis for intake {IntakeId}: {Sections} sections, " +
-            "{AiCount} AI values, {OfflineCount} offline values.",
-            intake.IntakeId, sectionsAnalyzed, aiValues.Count, offlineValues.Count);
+            "{AiCount} AI field values extracted by LLM.",
+            intake.IntakeId, sectionsAnalyzed, aiValues.Count);
 
         // ── Upsert field statuses ────────────────────────────────────────────
         var now = DateTime.UtcNow;
-        int aiFilledCount = 0, offlineFilledCount = 0;
+        int aiFilledCount = 0;
 
         foreach (var fd in fieldDefs)
         {
@@ -224,21 +286,13 @@ public class ReportController : Controller
             if (!string.IsNullOrWhiteSpace(aiVal) && IsPlaceholderText(aiVal))
                 aiVal = null;
 
-            offlineValues.TryGetValue(fd.Key, out var offlineVal);
-
-            // Priority: AI (focused, accurate) → offline (deterministic patterns) → empty
-            var fillValue = !string.IsNullOrWhiteSpace(aiVal)      ? aiVal
-                          : !string.IsNullOrWhiteSpace(offlineVal) ? offlineVal
-                          : null;
-
-            var notes  = !string.IsNullOrWhiteSpace(aiVal)
-                ? "Extracted by AI from task artifacts (section-by-section analysis)."
-                : !string.IsNullOrWhiteSpace(offlineVal)
-                ? "Extracted directly from task documents."
+            // All extraction is now LLM-based; no offline fallback
+            var fillValue = !string.IsNullOrWhiteSpace(aiVal) ? aiVal : null;
+            var notes     = !string.IsNullOrWhiteSpace(aiVal)
+                ? "Extracted by AI analysis of task artifacts and documents."
                 : null;
 
-            if (!string.IsNullOrWhiteSpace(aiVal))      aiFilledCount++;
-            else if (!string.IsNullOrWhiteSpace(offlineVal)) offlineFilledCount++;
+            if (!string.IsNullOrWhiteSpace(aiVal)) aiFilledCount++;
 
             if (existing == null)
             {
@@ -305,13 +359,11 @@ public class ReportController : Controller
 
         await _db.SaveChangesAsync();
 
-        var totalFilled = aiFilledCount + offlineFilledCount;
-        TempData["Success"] = totalFilled > 0
-            ? $"Section-by-section analysis complete ({sectionsAnalyzed} sections). " +
-              $"{aiFilledCount} field(s) filled by AI from task artifacts; " +
-              $"{offlineFilledCount} field(s) filled by document pattern extraction."
-            : "Analysis complete. No data found in task artifacts — please ensure completed " +
-              "task documents are uploaded and try again.";
+        TempData["Success"] = aiFilledCount > 0
+            ? $"Analysis complete ({sectionsAnalyzed} sections processed). " +
+              $"{aiFilledCount} field(s) extracted by AI from task documents."
+            : "Analysis complete. No data found in task artifacts — please ensure task " +
+              "documents are uploaded and try again.";
 
         return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
     }
