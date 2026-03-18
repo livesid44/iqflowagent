@@ -253,6 +253,32 @@ public class ReportController : Controller
                 ? await AggregateArtifactTextAsync(sectionTasks)
                 : allTaskArtifactText;
 
+            // ── Special case: po_volumes cross-section artifact supplement ───────
+            // po_volumes lives in "2. Process Overview" but users typically upload their
+            // monthly-volume Excel against the Volumetrics (section 8) task.  When the
+            // Process Overview section is being analyzed, its task list does not include
+            // the Volumetrics task, so the LLM has no access to the Excel and correctly
+            // falls back to the placeholder message.
+            // Fix: if this section contains po_volumes, append any task artifacts that
+            // are mapped to vol_content (the Volumetrics field) but are not already
+            // included in the current section's artifact text.
+            if (sectionFields.Any(f => f.Key == "po_volumes"))
+            {
+                var volTasks = fieldTaskMap.TryGetValue("vol_content", out var vts)
+                    ? vts.Where(t => !sectionTasks.Contains(t)).ToList()
+                    : [];
+                if (volTasks.Count > 0)
+                {
+                    var volText = await AggregateArtifactTextAsync(volTasks);
+                    if (!string.IsNullOrWhiteSpace(volText))
+                        sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
+                            ? volText
+                            : sectionArtifactText
+                              + "\n\n=== SUPPLEMENTARY VOLUMETRICS ARTIFACTS ===\n"
+                              + volText;
+                }
+            }
+
             var sectionValues = await _aiService.AnalyzeSectionFieldsAsync(
                 intake, section.Key, sectionFields,
                 sectionArtifactText, globalDocText, intake.AnalysisResult);

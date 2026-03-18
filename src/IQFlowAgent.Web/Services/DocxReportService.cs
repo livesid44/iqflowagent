@@ -378,10 +378,12 @@ public class DocxReportService : IDocxReportService
     {
         if (string.IsNullOrWhiteSpace(value)) return value;
 
-        // Genuine output starts with a bullet dash or contains month abbreviations
-        // followed by a colon (e.g. "- Jan-25:").  Let it through.
-        if (value.TrimStart().StartsWith("- ", StringComparison.Ordinal) &&
-            MonthBulletRegex.IsMatch(value))
+        // Genuine output: any value that contains month abbreviations (e.g. "Jan-25", "Feb-25")
+        // is treated as real volume data and passed through as-is regardless of formatting.
+        // The LLM may produce bullets ("- Jan-25: ...") or plain lines ("Jan-25: ...") —
+        // both are valid.  None of the known-bad instruction strings contain month tokens,
+        // so this check is safe.
+        if (MonthBulletRegex.IsMatch(value))
             return value;
 
         // If the value matches any known instruction/template pattern, discard it.
