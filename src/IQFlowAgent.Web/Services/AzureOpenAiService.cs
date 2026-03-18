@@ -533,13 +533,13 @@ public class AzureOpenAiService : IAzureOpenAiService
             The template covers these sections:
             - Document Control (process name, lot, date, author, approver)
             - 1. Purpose and Scope (countries in scope, input artefacts)
-            - 2. Process Overview (description, owner, volumes, hours of operation, systems used)
-            - 3. RACI (4 tasks × 4 roles — generate specific task names and role titles)
-            - 4. Standard Operating Procedure (step actions, roles, systems, outputs, decision point, automation assessment)
+            - 2. Process Overview (description, owner, monthly volumes, hours of operation, systems used)
+            - 3. RACI — raciContent field: complete RACI assignment block
+            - 4. Standard Operating Procedure — sopContent field: complete SOP steps block
             - 5. Work Instructions (step-by-step instructions for each SOP step)
             - 6. Escalation and Exception Handling (triggers, paths, timeframes, exception types)
             - 7. Service Levels and Performance (SLA metrics, measurement methods, historical actuals)
-            - 8. Volumetrics (transaction volumes, peak notes, forecast)
+            - 8. Volumetrics — volContent field: month-by-month volume data block
             - 9. Regulatory and Compliance (applicable regulations, controls, evidence)
             - 10. Training Materials (modules, delivery methods, competency verification)
             - 11. Orange Customer Contract Obligations (OCC references, obligations, controls)
@@ -553,32 +553,46 @@ public class AzureOpenAiService : IAzureOpenAiService
             2. For process description, SOP steps, work instructions, and SLA metrics — generate content
                that is grounded in and consistent with the provided intake data and document text only.
                Be concrete and specific to this process, not generic.
-            3. For RACI tasks and roles — derive task names and role titles from the intake data and document.
-            4. For SOP steps — derive step actions from the process description and document content.
-               Include the role, system, and expected output only if mentioned in the provided data.
-            5. For work instructions — write step-by-step instructions based on what is described in the document.
-            6. For volumetrics / monthly volumes — if monthly volume data is present in TASK NOTES or
-               uploaded files (e.g. an Excel table with date-keyed rows), extract and summarise those
-               numbers as structured bullet points. Do NOT write "To be confirmed" if volume data is
-               present anywhere in the provided content.
-            7. For SLA metrics — use only SLA/KPI data mentioned in the intake, task notes, or document.
+            3. For work instructions — write step-by-step instructions based on what is described in the document.
+            4. For SLA metrics — use only SLA/KPI data mentioned in the intake, task notes, or document.
                If none are present anywhere in the provided content, write "To be confirmed with process owner."
-            8. For regulatory/compliance — use only regulatory references explicitly mentioned in the intake,
+            5. For regulatory/compliance — use only regulatory references explicitly mentioned in the intake,
                task notes, or document. Do NOT infer regulations from the geography or industry. If none are
                stated anywhere in the provided content, write "To be confirmed with the compliance team."
-            9. NEVER use "Missing" status. For EVERY field, always return "Available" with real content.
+            6. NEVER use "Missing" status. For EVERY field, always return "Available" with real content.
                If exact data is truly not available anywhere in the provided content, write professional
                placeholder text that a reviewer can easily update (e.g. "To be confirmed with process owner").
-            10. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
-            11. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
-            12. When the task notes or document contain tabular data (e.g. monthly volumes in an Excel
-                spreadsheet), do NOT paste the raw table rows into the field. Instead, produce a clean
-                structured summary using one bullet point per calendar month in the format:
-                  - MMM-YYYY: Received X | Handled Y  (or "not available" for missing periods)
-                Place this summary in the monthlyVolumes / volumeTransaction field. For the volumeNote
-                field extract the stated peak period and any anomalies as 1-2 bullet points. For the
-                volumeForecast field extract the forecast average row (if present) as a single sentence.
-                Any "not available" entries in the source data should be preserved as "not available".
+            7. You MUST return a JSON entry for EVERY field key provided — do not omit any field.
+            8. Keep fill values concise: 1-2 sentences for simple fields, 3-4 sentences for narrative fields.
+               Exception: raciContent, sopContent, and volContent are multi-line blocks — see rules 9-11.
+
+            9. raciContent field — produce a complete RACI block. Use newline (\n) to separate each entry.
+               Format (repeat for every task identified from intake/document):
+                 Task: [Task Name]
+                   Responsible (R): [Role(s)]
+                   Accountable (A): [Role]
+                   Consulted (C): [Role(s)]
+                   Informed (I): [Role(s)]
+               Derive real task names and role titles from the intake data and document content.
+               If no RACI data is available, write a reasonable generic RACI for this type of process.
+
+            10. sopContent field — produce a complete SOP steps block. Use newline (\n) to separate.
+                Format (repeat for every distinct step):
+                  Step N: [Action description]
+                    Role: [Role] | System: [System] | Output: [Expected output]
+                    Automation: [Manual/Partially Automated/Fully Automated] | Rating: [Low/Medium/High/Prime] | Type: [RPA/AI/Workflow/Integration/N/A]
+                Extract distinct, real steps from the intake and document content. Do NOT repeat the same
+                action across multiple steps. Each step must describe a meaningfully different activity.
+
+            11. volContent field — produce a month-by-month volume block. Use newline (\n) to separate.
+                If volume data is present in TASK NOTES or uploaded files (e.g. an Excel spreadsheet),
+                extract the actuals. Format:
+                  Month             | Volume / Transaction Type           | Notes
+                  Mar-25            | [volume]                            | [peak/notes or "None"]
+                  Apr-25            | [volume]                            | [peak/notes or "None"]
+                  ...
+                  Forecast Avg      | [forecast volume]                   |
+                If no volume data is available, use one line: "Volume data to be confirmed with process owner."
 
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
@@ -1114,69 +1128,55 @@ public class AzureOpenAiService : IAzureOpenAiService
                 "hoursHoliday" =>
                     ("Available", "On-call cover only — escalate to manager", "Standard holiday cover assumption — confirm with process owner."),
 
-                "raciTask1" =>
-                    ("Available", $"Receive and log incoming {procName} request", "Synthesised from process name."),
-
-                "raciTask2" =>
-                    ("Available", $"Process and validate {procName} transaction", "Synthesised from process type."),
-
-                "raciTask3" =>
-                    ("Available", $"Approve or escalate {procName} outcome", "Synthesised from process type."),
-
-                "raciTask4" =>
-                    ("Available", $"Close and report {procName} completion", "Synthesised from process name."),
-
-                "raciRole1" =>
-                    ("Available", $"{bu} Analyst", "Inferred from business unit."),
-
-                "raciRole2" =>
-                    string.IsNullOrWhiteSpace(owner)
-                        ? ("Available", "Process Manager", "Standard role name.")
-                        : ("Available", owner, "Sourced from intake process owner."),
-
-                "raciRole3" =>
-                    ("Available", $"{bu} Team Lead", "Inferred from business unit."),
-
-                "raciRole4" =>
-                    ("Available", $"Service Delivery Manager", "Standard governance role."),
-
-                "sopAction" =>
+                "raciContent" =>
                     ("Available",
-                     $"Receive, validate, and process the {procName} transaction according to the standard procedure. Log all actions in the ticketing system.",
-                     "Synthesised from process name and type."),
+                     $"Task: Receive and log incoming {procName} request\n" +
+                     $"  Responsible (R): {bu} Analyst\n" +
+                     $"  Accountable (A): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}\n" +
+                     $"  Consulted (C): {bu} Team Lead\n" +
+                     $"  Informed (I): Service Delivery Manager\n" +
+                     $"\n" +
+                     $"Task: Process and validate {procName} transaction\n" +
+                     $"  Responsible (R): {bu} Analyst\n" +
+                     $"  Accountable (A): {bu} Team Lead\n" +
+                     $"  Consulted (C): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}\n" +
+                     $"  Informed (I): Service Delivery Manager\n" +
+                     $"\n" +
+                     $"Task: Approve or escalate {procName} outcome\n" +
+                     $"  Responsible (R): {bu} Team Lead\n" +
+                     $"  Accountable (A): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}\n" +
+                     $"  Consulted (C): Service Delivery Manager\n" +
+                     $"  Informed (I): {bu} Analyst\n" +
+                     $"\n" +
+                     $"Task: Close and report {procName} completion\n" +
+                     $"  Responsible (R): {bu} Analyst\n" +
+                     $"  Accountable (A): {bu} Team Lead\n" +
+                     $"  Consulted (C): Service Delivery Manager\n" +
+                     $"  Informed (I): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}",
+                     "Synthesised from intake metadata — regenerate with AI after uploading intake documents."),
 
-                "sopRole" =>
-                    ("Available", $"{bu} Analyst", "Inferred from business unit."),
-
-                "sopSystem" =>
-                    ("Available", "Ticketing system / ERP — confirm with process owner", "Standard system placeholder."),
-
-                "sopOutput" =>
-                    ("Available", $"Processed and validated {procName} transaction record", "Synthesised from process name."),
-
-                "sopDecision" =>
+                "sopContent" =>
                     ("Available",
-                     $"Is the {procName} request complete and within SLA? If Yes → proceed to completion. If No → escalate to Team Lead.",
-                     "Synthesised from process name."),
-
-                "sopDecisionOutput" =>
-                    ("Available", "Proceed / Escalate to Team Lead", "Standard decision outcome."),
-
-                "sopAutoStatus" =>
-                    ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true
-                        ? ("Available", "Partially Automated", "Inferred from process type.")
-                        : ("Available", "Manual", "Inferred from process type."),
-
-                "sopOppRating" =>
-                    ("Available", "Medium", "Standard automation opportunity assessment."),
-
-                "sopAutoType" =>
-                    ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true
-                        ? ("Available", "Workflow / Integration", "Inferred from process type.")
-                        : ("Available", "RPA", "Highest-value automation type for manual processes."),
-
-                "sopExtraStep" =>
-                    ("Available", $"Complete documentation and notify stakeholders of {procName} closure", "Standard closing step."),
+                     $"Step 1: Receive and log the incoming {procName} request\n" +
+                     $"  Role: {bu} Analyst | System: Ticketing system | Output: Logged request ticket\n" +
+                     $"  Automation: Manual | Rating: Low | Type: N/A\n" +
+                     $"\n" +
+                     $"Step 2: Validate and review request details for completeness\n" +
+                     $"  Role: {bu} Analyst | System: Ticketing system / ERP | Output: Validation checklist completed\n" +
+                     $"  Automation: Manual | Rating: Medium | Type: RPA\n" +
+                     $"\n" +
+                     $"Step 3: Process {procName} transaction per standard procedure\n" +
+                     $"  Role: {bu} Analyst | System: ERP / {(string.IsNullOrWhiteSpace(intake.SiteLocation) ? "Core system" : intake.SiteLocation)} | Output: Processed transaction record\n" +
+                     $"  Automation: {(ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ? "Partially Automated" : "Manual")} | Rating: Medium | Type: {(ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ? "Workflow" : "RPA")}\n" +
+                     $"\n" +
+                     $"Step 4: Quality check — verify output against SLA criteria\n" +
+                     $"  Role: {bu} Team Lead | System: Ticketing system | Output: QC sign-off or escalation raised\n" +
+                     $"  Automation: Manual | Rating: Low | Type: N/A\n" +
+                     $"\n" +
+                     $"Step 5: Close request and notify stakeholders of completion\n" +
+                     $"  Role: {bu} Analyst | System: Ticketing system | Output: Closed ticket with completion notification\n" +
+                     $"  Automation: Manual | Rating: Low | Type: N/A",
+                     "Synthesised from intake metadata — regenerate with AI after uploading intake documents."),
 
                 "wiStepName" =>
                     ("Available", $"{procName} Processing", "Synthesised from process name."),
@@ -1240,19 +1240,14 @@ public class AzureOpenAiService : IAzureOpenAiService
                 "perfActual" =>
                     ("Available", "Actual performance data to be confirmed with process owner — provide figures for the past 6 months", "Placeholder — confirm actuals."),
 
-                "volumeTransaction" =>
+                "volContent" =>
                     ("Available",
-                     "Upload an Excel volume file against this task and use AI Generate to produce a structured monthly bullet summary (one line per month: Received / Handled counts).",
-                     "Prompt — upload volume Excel and regenerate to get structured monthly bullets."),
-
-                "volumeNote" =>
-                    ("Available", "Peak period and seasonal notes will be extracted automatically when a volume Excel file is uploaded and AI Generate is used.", "Prompt — upload volume Excel and regenerate."),
-
-                "volumeForecast" =>
-                    ("Available",
-                     vol > 0 ? $"Forecast average: approx. {vol * 22} transactions/month ({vol}/day) based on intake estimate. Upload volume Excel and regenerate to use the actual Forecast Avg row."
-                             : "Upload an Excel volume file containing a Forecast Avg row and use AI Generate to extract the forecast automatically.",
-                     "Prompt — upload volume Excel and regenerate to extract forecast."),
+                     vol > 0
+                         ? $"Month             | Volume / Transaction Type                          | Notes\n" +
+                           $"Estimated baseline| ~{vol * 22} transactions/month ({vol}/day estimated) | Upload volume Excel and use AI Generate to replace with actual monthly data.\n" +
+                           $"Forecast Avg      | ~{vol * 22} transactions/month                      |"
+                         : "Volume data to be confirmed with process owner. Upload an Excel volume file and use AI Generate to extract month-by-month actuals.",
+                     "Prompt — upload volume Excel against this task and use AI Generate to get actual monthly data."),
 
                 "regulation" =>
                     ("Available", "GDPR / Data Protection Act 2018 — applicable to any personal data processed in this workflow", "Standard regulatory framework."),
@@ -1859,12 +1854,31 @@ public class AzureOpenAiService : IAzureOpenAiService
             Return ONLY the field value as plain text — no JSON, no markdown headers, no extra commentary.
             The content should be concise (1-4 sentences) and suitable for direct insertion into a document.
 
-            For volumetric / monthly-volume fields (monthlyVolumes, volumeTransaction):
-            If the task artifact text contains tabular volume data (e.g. from an Excel spreadsheet),
-            do NOT paste the raw table. Produce a clean bullet-point summary — one line per calendar
-            month in the format "- MMM-YYYY: Received X | Handled Y". Mark missing periods as "not available".
-            For volumeNote: extract the stated peak period and any anomalies as 1-2 bullet points.
-            For volumeForecast: use the forecast average row (if present) as a single sentence.
+            Special rules for multi-line block fields (use actual newlines \n in your response):
+
+            raciContent — produce a complete RACI block, one task per group:
+              Task: [Task Name]
+                Responsible (R): [Role(s)]
+                Accountable (A): [Role]
+                Consulted (C): [Role(s)]
+                Informed (I): [Role(s)]
+            Derive real task names and role titles from the intake data and artifact text.
+
+            sopContent — produce all SOP steps, one step per block:
+              Step N: [Action description]
+                Role: [Role] | System: [System] | Output: [Expected output]
+                Automation: [Manual/Partially Automated/Fully Automated] | Rating: [Low/Medium/High/Prime] | Type: [RPA/AI/Workflow/N/A]
+            Extract distinct real steps from the document. Do NOT repeat the same action across steps.
+
+            volContent — produce month-by-month volume data:
+              Month             | Volume / Transaction Type           | Notes
+              Mar-25            | [volume]                            | [notes or "None"]
+              ...
+              Forecast Avg      | [forecast]                          |
+            If volume data is in the artifact text, extract it. Otherwise: "Volume data to be confirmed with process owner."
+
+            monthlyVolumes — bullet-point summary from uploaded Excel/data, one line per month:
+              - MMM-YYYY: Received X | Handled Y  (or "not available" for missing periods)
             """;
 
         var sb = new System.Text.StringBuilder();

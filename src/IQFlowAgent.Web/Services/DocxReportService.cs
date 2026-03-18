@@ -83,78 +83,20 @@ public class DocxReportService : IDocxReportService
             "AI:systemsUsed"),
 
         // ── 3. RACI ───────────────────────────────────────────────────────────
-        new("raci_task1",         "3. RACI",                     "RACI Task 1",
-            "[Task 1]",
-            "AI:raciTask1"),
-
-        new("raci_task2",         "3. RACI",                     "RACI Task 2",
-            "[Task 2]",
-            "AI:raciTask2"),
-
-        new("raci_task3",         "3. RACI",                     "RACI Task 3",
-            "[Task 3]",
-            "AI:raciTask3"),
-
-        new("raci_task4",         "3. RACI",                     "RACI Task 4",
-            "[Task 4]",
-            "AI:raciTask4"),
-
-        new("raci_role1",         "3. RACI",                     "RACI Role 1",
-            "[Role 1]",
-            "AI:raciRole1"),
-
-        new("raci_role2",         "3. RACI",                     "RACI Role 2",
-            "[Role 2]",
-            "AI:raciRole2"),
-
-        new("raci_role3",         "3. RACI",                     "RACI Role 3",
-            "[Role 3]",
-            "AI:raciRole3"),
-
-        new("raci_role4",         "3. RACI",                     "RACI Role 4",
-            "[Role 4]",
-            "AI:raciRole4"),
+        // Single consolidated field — the LLM returns the complete RACI table as
+        // structured text; GenerateReportAsync inserts it into the RACI table via
+        // table-manipulation (data rows cleared, merged-cell LLM block inserted).
+        new("raci_content",       "3. RACI",                     "RACI Assignments (LLM Response)",
+            "",                    // no find-and-replace placeholder; handled via table manipulation
+            "AI:raciContent"),
 
         // ── 4. Standard Operating Procedure ───────────────────────────────────
-        new("sop_action",         "4. SOP",                      "Step Action",
-            "[Describe action]",
-            "AI:sopAction"),
-
-        new("sop_role",           "4. SOP",                      "Step Role",
-            "[Role]",
-            "AI:sopRole"),
-
-        new("sop_system",         "4. SOP",                      "Step System",
-            "[System / Manual]",
-            "AI:sopSystem"),
-
-        new("sop_output",         "4. SOP",                      "Step Output",
-            "[Expected output]",
-            "AI:sopOutput"),
-
-        new("sop_decision",       "4. SOP",                      "Decision Point",
-            "[Decision point \u2014 describe condition and Yes/No paths]",
-            "AI:sopDecision"),
-
-        new("sop_decision_out",   "4. SOP",                      "Decision Outcome",
-            "[Go / No-Go / Escalate]",
-            "AI:sopDecisionOutput"),
-
-        new("sop_auto_status",    "4. SOP",                      "Automation Status",
-            "Manual / Partially Automated / Fully Automated",
-            "AI:sopAutoStatus"),
-
-        new("sop_opp_rating",     "4. SOP",                      "Opportunity Rating",
-            "Low / Medium / High / Prime",
-            "AI:sopOppRating"),
-
-        new("sop_auto_type",      "4. SOP",                      "Automation Type",
-            "RPA / AI / Workflow / Integration / N/A",
-            "AI:sopAutoType"),
-
-        new("sop_extra_step",     "4. SOP",                      "Additional Step",
-            "[Add rows as required]",
-            "AI:sopExtraStep"),
+        // Single consolidated field — the LLM returns all SOP steps as structured
+        // text; GenerateReportAsync inserts it into the SOP table after clearing
+        // all template data rows (keeping the header + instruction rows).
+        new("sop_content",        "4. SOP",                      "SOP Steps (LLM Response)",
+            "",                    // no find-and-replace placeholder; handled via table manipulation
+            "AI:sopContent"),
 
         // ── 5. Work Instructions ──────────────────────────────────────────────
         new("wi_step_name",       "5. Work Instructions",         "Step Name",
@@ -234,17 +176,12 @@ public class DocxReportService : IDocxReportService
             "AI:perfActual"),
 
         // ── 8. Volumetrics ────────────────────────────────────────────────────
-        new("vol_transaction",    "8. Volumetrics",               "Transaction Volumes",
-            "[Transaction type(s) and volume \u2014 add rows if multiple types]",
-            "AI:volumeTransaction"),
-
-        new("vol_note",           "8. Volumetrics",               "Volume Notes",
-            "[Note any peak, anomaly or seasonal factor]",
-            "AI:volumeNote"),
-
-        new("vol_forecast",       "8. Volumetrics",               "Volume Forecast",
-            "[Expected average monthly volume going forward]",
-            "AI:volumeForecast"),
+        // Single consolidated field — the LLM returns month-by-month volume data as
+        // structured text; GenerateReportAsync inserts it into the Volumetrics table
+        // after clearing all template data rows (keeping only the header row).
+        new("vol_content",        "8. Volumetrics",               "Monthly Volume Data (LLM Response)",
+            "",                    // no find-and-replace placeholder; handled via table manipulation
+            "AI:volContent"),
 
         // ── 9. Regulatory and Compliance ──────────────────────────────────────
         new("reg_regulation",     "9. Regulatory",                "Regulation / Standard",
@@ -354,52 +291,221 @@ public class DocxReportService : IDocxReportService
         foreach (var footerPart in wordDoc.MainDocumentPart.FooterParts)
             ClearRemainingPlaceholders(footerPart.Footer);
 
+        // ── Structured section insertion ───────────────────────────────────────
+        // For RACI, SOP, and Volumetrics the template has multiple rows with
+        // identical placeholder text, causing duplicate content when using simple
+        // find-and-replace. Instead we clear all data rows and paste the LLM's
+        // checkpoint response as a single merged-cell block per section.
+        var body = wordDoc.MainDocumentPart!.Document.Body!;
+
+        var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
+        if (!string.IsNullOrWhiteSpace(raciValue))
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Role", "Task"],  // RACI header row keywords
+                keepHeaderRows : 1,
+                content        : raciValue);
+
+        var sopValue = GetFieldFillValue(fieldStatuses, "sop_content");
+        if (!string.IsNullOrWhiteSpace(sopValue))
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Step", "Action", "Auto Status"],  // SOP header keywords
+                keepHeaderRows : 2,  // column-header row + instruction row
+                content        : sopValue);
+
+        var volValue = GetFieldFillValue(fieldStatuses, "vol_content");
+        if (!string.IsNullOrWhiteSpace(volValue))
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Month", "Transaction"],  // Volumetrics header keywords
+                keepHeaderRows : 1,
+                content        : volValue);
+
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
 
         return Task.FromResult(ms.ToArray());
     }
 
+    /// <summary>
+    /// Returns the fill value for a given field key, respecting the N/A flag.
+    /// Returns null if the field has no status record.
+    /// </summary>
+    private static string? GetFieldFillValue(IList<ReportFieldStatus> fieldStatuses, string key)
+    {
+        var fs = fieldStatuses.FirstOrDefault(f => f.FieldKey == key);
+        if (fs == null) return null;
+        return fs.IsNA ? "N/A" : fs.FillValue;
+    }
+
+    /// <summary>
+    /// Finds the first table in <paramref name="body"/> whose first row contains ALL
+    /// of the <paramref name="headerKeywords"/>, removes every data row beyond the
+    /// first <paramref name="keepHeaderRows"/> rows, then appends a new merged-cell row
+    /// containing <paramref name="content"/> (newlines become OOXML line-breaks).
+    /// </summary>
+    private static void ReplaceTableDataWithLlmContent(
+        Body body,
+        string[] headerKeywords,
+        int keepHeaderRows,
+        string content)
+    {
+        // Locate the target table by matching keywords against its first row.
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+            if (firstRow == null) return false;
+            var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
+            return headerKeywords.All(k =>
+                headerText.Contains(k, StringComparison.OrdinalIgnoreCase));
+        });
+
+        if (table == null) return;
+
+        // Remove all rows beyond the header section.
+        var allRows = table.Elements<TableRow>().ToList();
+        if (allRows.Count == 0) return;
+
+        foreach (var row in allRows.Skip(keepHeaderRows))
+            row.Remove();
+
+        // Determine column count from the first header row for correct grid-span.
+        int colCount = Math.Max(1, allRows.First().Elements<TableCell>().Count());
+
+        // Build the new merged-cell content row.
+        var newRow  = new TableRow();
+        var newCell = new TableCell();
+
+        var cellProps = new TableCellProperties();
+        if (colCount > 1)
+            cellProps.AppendChild(new GridSpan { Val = colCount });
+        // Give the cell a full-width setting so Word's layout engine is happy.
+        cellProps.AppendChild(new TableCellWidth
+        {
+            Type  = TableWidthUnitValues.Auto,
+            Width = "0"
+        });
+        newCell.AppendChild(cellProps);
+
+        // Build paragraph with line-break aware text.
+        var para  = new Paragraph();
+        var lines = content.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (i > 0)
+                para.AppendChild(new Run(new Break()));
+
+            var line = lines[i];
+            if (!string.IsNullOrEmpty(line))
+            {
+                var textElem = new Text(line);
+                if (line.StartsWith(' ') || line.EndsWith(' '))
+                    textElem.Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve;
+                para.AppendChild(new Run(textElem));
+            }
+        }
+
+        newCell.AppendChild(para);
+        newRow.AppendChild(newCell);
+        table.AppendChild(newRow);
+    }
+
     private static void ApplyReplacements(
         DocumentFormat.OpenXml.OpenXmlElement root,
         Dictionary<string, string> replacements)
     {
-        // First pass: replace within individual runs (fast path for unbroken placeholders)
+        // Partition into single-line and multi-line replacements so the fast path
+        // handles most fields while multi-line values get proper <w:br/> treatment.
+        var singleLine = replacements
+            .Where(kvp => !kvp.Value.Contains('\n'))
+            .ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+        var multiLine = replacements
+            .Where(kvp => kvp.Value.Contains('\n'))
+            .ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
+
+        // ── Pass 1: single-line replacement within individual text runs ────────
         foreach (var text in root.Descendants<Text>())
         {
-            foreach (var kvp in replacements)
+            foreach (var kvp in singleLine)
             {
                 if (text.Text.Contains(kvp.Key, StringComparison.Ordinal))
                     text.Text = text.Text.Replace(kvp.Key, kvp.Value, StringComparison.Ordinal);
             }
         }
 
-        // Second pass: handle placeholders that Word has split across multiple runs.
-        // For each paragraph, merge all run texts, apply replacements, then redistribute
-        // the result by writing everything into the first run and clearing the rest.
+        // ── Pass 2: single-line replacement across split runs in a paragraph ──
+        // For each paragraph, merge all run texts, apply replacements, then write
+        // the result into the first run and blank the rest.
         foreach (var para in root.Descendants<Paragraph>())
         {
             var allTexts = para.Descendants<Run>()
                                .SelectMany(r => r.Descendants<Text>())
                                .ToList();
-            // Skip paragraphs with 0 or 1 text nodes — first pass already handled those
+            // Skip paragraphs with 0 or 1 text nodes — pass 1 already handled those.
             if (allTexts.Count <= 1) continue;
 
             var merged = string.Concat(allTexts.Select(t => t.Text));
             var replaced = merged;
-            foreach (var kvp in replacements)
+            foreach (var kvp in singleLine)
                 replaced = replaced.Replace(kvp.Key, kvp.Value, StringComparison.Ordinal);
 
             if (replaced == merged) continue;
 
-            // Write the replaced value into the first Text element and blank the others.
-            // Preserve xml:space="preserve" when the value has leading/trailing whitespace.
             allTexts[0].Text = replaced;
             if (replaced.Length > 0 && (replaced[0] == ' ' || replaced[^1] == ' '))
                 allTexts[0].Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve;
 
             for (int i = 1; i < allTexts.Count; i++)
                 allTexts[i].Text = string.Empty;
+        }
+
+        // ── Pass 3: multi-line replacement (inserts <w:br/> for each \n) ──────
+        if (multiLine.Count == 0) return;
+
+        foreach (var para in root.Descendants<Paragraph>().ToList())
+        {
+            var allRuns = para.Elements<Run>().ToList();
+            if (allRuns.Count == 0) continue;
+
+            var merged = string.Concat(
+                allRuns.SelectMany(r => r.Descendants<Text>()).Select(t => t.Text));
+
+            foreach (var kvp in multiLine)
+            {
+                if (!merged.Contains(kvp.Key, StringComparison.Ordinal)) continue;
+
+                var newContent = merged.Replace(kvp.Key, kvp.Value, StringComparison.Ordinal);
+                var lines = newContent.Split('\n');
+
+                // Capture run properties for styling (font, size, bold, etc.).
+                var rPr = allRuns.FirstOrDefault()?.GetFirstChild<RunProperties>();
+
+                // Remove all existing runs; rebuild with line-break aware runs.
+                foreach (var run in allRuns) run.Remove();
+
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    if (i > 0)
+                    {
+                        var brRun = new Run(new Break());
+                        if (rPr != null) brRun.PrependChild((RunProperties)rPr.CloneNode(true));
+                        para.AppendChild(brRun);
+                    }
+
+                    var line = lines[i];
+                    if (!string.IsNullOrEmpty(line))
+                    {
+                        var textElem = new Text(line);
+                        if (line.StartsWith(' ') || line.EndsWith(' '))
+                            textElem.Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve;
+                        var textRun = new Run(textElem);
+                        if (rPr != null) textRun.PrependChild((RunProperties)rPr.CloneNode(true));
+                        para.AppendChild(textRun);
+                    }
+                }
+                break; // Only one multi-line match per paragraph.
+            }
         }
     }
 
