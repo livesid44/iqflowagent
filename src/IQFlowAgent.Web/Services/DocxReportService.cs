@@ -319,11 +319,7 @@ public class DocxReportService : IDocxReportService
 
         var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
         if (!string.IsNullOrWhiteSpace(raciValue))
-            ReplaceTableDataWithLlmContent(
-                body,
-                headerKeywords : ["Role", "Task"],  // RACI header row keywords
-                keepHeaderRows : 1,
-                content        : raciValue);
+            ReplaceRaciTable(body, raciValue);
 
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content");
         if (!string.IsNullOrWhiteSpace(sopValue))
@@ -409,6 +405,159 @@ public class DocxReportService : IDocxReportService
         }
 
         return value;
+    }
+
+    /// <summary>
+    /// Parses a compact pipe-delimited RACI matrix (produced by the LLM) and inserts it
+    /// into the RACI table in the DOCX body as proper individual-cell table rows.
+    /// Expected format:
+    ///   Line 1: TASKS: [Task 1] | [Task 2] | [Task 3] | [Task 4]
+    ///   Line N: [Role name]: R | - | A | -
+    /// Falls back to <see cref="ReplaceTableDataWithLlmContent"/> when parsing fails.
+    /// </summary>
+    private static void ReplaceRaciTable(Body body, string raciContent)
+    {
+        // ── Parse structured format ────────────────────────────────────────────
+        var lines = raciContent
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        string[]? taskNames = null;
+        var roleRows = new List<(string RoleName, string[] Assignments)>();
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("TASKS:", StringComparison.OrdinalIgnoreCase))
+            {
+                taskNames = line["TASKS:".Length..]
+                    .Split('|', StringSplitOptions.TrimEntries)
+                    .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .ToArray();
+            }
+            else
+            {
+                var colonIdx = line.IndexOf(':');
+                if (colonIdx > 0 && colonIdx < line.Length - 1)
+                {
+                    var roleName    = line[..colonIdx].Trim();
+                    var assignments = line[(colonIdx + 1)..]
+                        .Split('|', StringSplitOptions.TrimEntries)
+                        .ToArray();
+                    if (roleName.Length > 0 && assignments.Length > 0)
+                        roleRows.Add((roleName, assignments));
+                }
+            }
+        }
+
+        // Fall back to merged-cell approach if the LLM did not use the structured format.
+        if (taskNames == null || roleRows.Count == 0)
+        {
+            ReplaceTableDataWithLlmContent(body, ["Role", "Task"], 1, raciContent);
+            return;
+        }
+
+        // ── Locate RACI table ──────────────────────────────────────────────────
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+            if (firstRow == null) return false;
+            var text = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
+            return text.Contains("Role", StringComparison.OrdinalIgnoreCase)
+                && text.Contains("Task", StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (table == null) return;
+
+        var allRows = table.Elements<TableRow>().ToList();
+        if (allRows.Count == 0) return;
+
+        // ── Update header row with actual task names ───────────────────────────
+        var headerCells = allRows[0].Elements<TableCell>().ToList();
+        for (int i = 0; i < taskNames.Length && i + 1 < headerCells.Count; i++)
+            SetCellText(headerCells[i + 1], taskNames[i]);
+
+        // ── Remove all data rows ───────────────────────────────────────────────
+        foreach (var row in allRows.Skip(1))
+            row.Remove();
+
+        // ── Add one data row per role ──────────────────────────────────────────
+        foreach (var (roleName, assignments) in roleRows)
+        {
+            var dataRow = new TableRow();
+
+            // Role name (first column)
+            dataRow.AppendChild(BuildRaciCell(roleName,
+                headerCells.Count > 0 ? headerCells[0] : null));
+
+            // Assignment cells for each task column
+            for (int col = 0; col < headerCells.Count - 1; col++)
+            {
+                var assignment = col < assignments.Length ? assignments[col] : "-";
+                var templateCell = col + 1 < headerCells.Count ? headerCells[col + 1] : null;
+                dataRow.AppendChild(BuildRaciCell(assignment, templateCell));
+            }
+
+            table.AppendChild(dataRow);
+        }
+    }
+
+    /// <summary>Overwrites all text content in a table cell with <paramref name="text"/>.</summary>
+    private static void SetCellText(TableCell cell, string text)
+    {
+        bool isFirst = true;
+        foreach (var t in cell.Descendants<Text>())
+        {
+            t.Text = isFirst ? text : string.Empty;
+            isFirst = false;
+        }
+
+        // No existing Text nodes — append a paragraph with the value.
+        if (isFirst)
+            cell.AppendChild(new Paragraph(new Run(new Text(text))));
+    }
+
+    /// <summary>
+    /// Creates a <see cref="TableCell"/> with <paramref name="text"/>, optionally
+    /// inheriting cell/run/paragraph properties from <paramref name="templateCell"/>.
+    /// </summary>
+    private static TableCell BuildRaciCell(string text, TableCell? templateCell)
+    {
+        var cell = new TableCell();
+
+        // Copy cell-level properties (borders, shading, width) from the template cell.
+        if (templateCell?.TableCellProperties is { } srcCellProps)
+        {
+            var cloned = (TableCellProperties)srcCellProps.CloneNode(deep: true);
+            cloned.RemoveAllChildren<GridSpan>();   // each cell must span exactly 1 column
+            cell.AppendChild(cloned);
+        }
+        else
+        {
+            cell.AppendChild(new TableCellProperties(
+                new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" }));
+        }
+
+        var para = new Paragraph();
+
+        // Copy paragraph properties (alignment, spacing) from the template.
+        if (templateCell?.Descendants<ParagraphProperties>().FirstOrDefault() is { } srcParaProps)
+            para.AppendChild((ParagraphProperties)srcParaProps.CloneNode(deep: true));
+
+        var run = new Run();
+
+        // Copy run properties (bold, font, size) from the template.
+        if (templateCell?.Descendants<RunProperties>().FirstOrDefault() is { } srcRunProps)
+            run.AppendChild((RunProperties)srcRunProps.CloneNode(deep: true));
+
+        run.AppendChild(new Text(text)
+        {
+            Space = text.StartsWith(' ') || text.EndsWith(' ')
+                ? DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve
+                : DocumentFormat.OpenXml.SpaceProcessingModeValues.Default
+        });
+
+        para.AppendChild(run);
+        cell.AppendChild(para);
+        return cell;
     }
 
     /// <summary>

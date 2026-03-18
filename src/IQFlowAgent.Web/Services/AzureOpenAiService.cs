@@ -1872,12 +1872,13 @@ public class AzureOpenAiService : IAzureOpenAiService
 
             Special rules for multi-line block fields (use actual newlines \n in your response):
 
-            raciContent — produce a complete RACI block, one task per group:
-              Task: [Task Name]
-                Responsible (R): [Role(s)]
-                Accountable (A): [Role]
-                Consulted (C): [Role(s)]
-                Informed (I): [Role(s)]
+            raciContent — produce a compact, pipe-delimited RACI matrix using EXACTLY this structure:
+              Line 1:  TASKS: [short task 1] | [short task 2] | [short task 3] | [short task 4]
+              Line 2+: [Role name]: [a] | [b] | [c] | [d]
+            Where each assignment is R, A, C, I, or a hyphen (-) for no assignment.
+            TASKS line: use concise 2–5 word task names derived from the source — NOT the full pipe-separated descriptions.
+            Example: "Submit Change Request", not "Compiles & describes change request | Outlines schedule requirements | ..."
+            Role names: copy the short role title from the source exactly.
             Derive real task names and role titles from the intake data and artifact text.
 
             sopContent — produce all SOP steps, one step per block:
@@ -2739,6 +2740,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         // ── System prompt ─────────────────────────────────────────────────────
         var fieldKeys = string.Join(", ", sectionFields.Select(f => $"\"{f.Key}\""));
         bool hasVolumeField = sectionFields.Any(f => f.Key == "po_volumes");
+        bool hasRaciField   = sectionFields.Any(f => f.Key == "raci_content");
 
         var systemPrompt =
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
@@ -2804,7 +2806,27 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  Step 4 — If NO actual numeric volume data exists anywhere in the Task Artifacts\n" +
             "           (including when month labels are present but all value cells are blank),\n" +
             "           output exactly this one sentence (nothing else):\n" +
-            "           Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "");
+            "           Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "") +
+            // ── Per-field override for RACI data ──────────────────────────────
+            (hasRaciField ? "\n\n" +
+            "SPECIAL RULE FOR KEY \"raci_content\" (RACI Assignment Matrix) — overrides rule 4 for this field only:\n" +
+            "  Produce a compact, pipe-delimited RACI matrix using EXACTLY this line structure:\n" +
+            "    Line 1:  TASKS: [short task 1] | [short task 2] | [short task 3] | [short task 4]\n" +
+            "    Line 2+: [Role name]: [a] | [b] | [c] | [d]\n" +
+            "  Where each assignment [a]–[d] is exactly ONE of: R, A, C, I, or a hyphen (-).\n\n" +
+            "  Rules:\n" +
+            "  - TASKS line: derive a concise 2–5 word task name from each task column in the source.\n" +
+            "    FORBIDDEN: copying the full pipe-separated responsibility list as the task name.\n" +
+            "    WRONG EXAMPLE:  \"Compiles & describes change request | Outlines schedule requirements | ...\"\n" +
+            "    CORRECT EXAMPLE: \"Submit Change Request\"\n" +
+            "  - Role names: copy the short role title from the source (e.g. \"Change Requester\").\n" +
+            "  - Each assignment cell: one letter (R / A / C / I) or a hyphen (-). No other text.\n" +
+            "  - Include up to 4 tasks and up to 4 roles. If the source has more, select the most significant 4.\n" +
+            "  - Do NOT include task descriptions, responsibilities, or any explanatory text in the matrix.\n" +
+            "  EXAMPLE OUTPUT (2 tasks, 2 roles):\n" +
+            "  TASKS: Submit Change Request | Assess & Approve Change\n" +
+            "  Change Requester: R | -\n" +
+            "  Change Approver: - | A" : "");
 
         // ── User message ──────────────────────────────────────────────────────
         var sb = new System.Text.StringBuilder();
