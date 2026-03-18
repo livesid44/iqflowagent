@@ -12,6 +12,9 @@ public class AzureOpenAiService : IAzureOpenAiService
     // 20 000 chars covers multiple multi-sheet Excel files + Word docs + task comments while
     // staying comfortably within the 128 k-token context window of gpt-4o / gpt-4-turbo.
     private const int MaxArtifactCharsPerReport = 20000;
+    // Lower token limit for per-section calls: each call is focused on a narrow field set,
+    // so responses are short but must be long enough to list all volume/SLA rows verbatim.
+    private const int MaxSectionAnalysisTokens = 1_500;
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
@@ -2768,7 +2771,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                     new { role = "system", content = systemPrompt },
                     new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "AnalyzeSectionFields") }
                 },
-                max_tokens  = Math.Min(maxTokens, 1_500),
+                max_tokens  = Math.Min(maxTokens, MaxSectionAnalysisTokens),
                 temperature = 0.1,  // very low — maximise extraction fidelity
                 top_p       = 1.0,
                 model       = modelVersion

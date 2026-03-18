@@ -225,9 +225,22 @@ internal static class OfflineFieldExtractor
         "July", "August", "September", "October", "November", "December",
         "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     ];
+    // Generic month presence — used for context/section detection only
     private static readonly Regex MonthPattern = new(
         $@"\b({string.Join("|", MonthNames)})\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Strict volume-row pattern: requires "Mon-YY" or "Mon-YYYY" format
+    // (e.g. "Jan-25", "Feb-2026"). This deliberately excludes prose dates like
+    // "26 May, 14" or "22 August 2022" that appear in document revision histories.
+    private static readonly Regex VolumeRowMonthPattern = new(
+        @"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(?:\d{4}|\d{2})\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // A volume row must also contain a "large" number (≥ 100) — transaction counts
+    // are never single- or double-digit, unlike version-history year-numbers (14, 16 …).
+    private static readonly Regex LargeNumberPattern =
+        new(@"\b\d{3,}[\d,\.]*", RegexOptions.Compiled);
 
     private static readonly Regex NumberPattern =
         new(@"\d[\d,\.]*", RegexOptions.Compiled);
@@ -556,7 +569,12 @@ internal static class OfflineFieldExtractor
 
     private static void ExtractVolumeData(string[] lines, Dictionary<string, string> result, IntakeRecord intake)
     {
-        var volLines = lines.Where(l => MonthPattern.IsMatch(l) && NumberPattern.IsMatch(l)).ToList();
+        // Use the strict VolumeRowMonthPattern (requires "Mon-YY" format) AND a large number
+        // (≥ 100) so that document revision-history lines like "26 May, 14 original version"
+        // are never mis-identified as volume data.
+        var volLines = lines
+            .Where(l => VolumeRowMonthPattern.IsMatch(l) && LargeNumberPattern.IsMatch(l))
+            .ToList();
 
         if (volLines.Count >= 2)
         {

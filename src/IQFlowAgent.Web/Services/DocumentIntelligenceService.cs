@@ -100,10 +100,10 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
             var operationUrl = opLoc.First();
 
             // ── Poll until succeeded / failed / timeout ────────────────────────
+            // Check immediately on the first iteration (fast files may already be
+            // done); delay at the end so subsequent polls wait before retrying.
             for (int attempt = 0; attempt < MaxPollAttempts; attempt++)
             {
-                await Task.Delay(PollingMs);
-
                 var pollResp = await http.GetAsync(operationUrl);
                 var pollBody = await pollResp.Content.ReadAsStringAsync();
 
@@ -125,6 +125,9 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
                             "Document Intelligence analysis failed for {File}.", fileName);
                         return null;
                 }
+
+                // Not finished yet — wait before the next poll
+                await Task.Delay(PollingMs);
             }
 
             _logger.LogWarning(

@@ -231,7 +231,6 @@ public class ReportController : Controller
                           : !string.IsNullOrWhiteSpace(offlineVal) ? offlineVal
                           : null;
 
-            var status = !string.IsNullOrWhiteSpace(fillValue) ? "Available" : "Missing";
             var notes  = !string.IsNullOrWhiteSpace(aiVal)
                 ? "Extracted by AI from task artifacts (section-by-section analysis)."
                 : !string.IsNullOrWhiteSpace(offlineVal)
@@ -243,6 +242,7 @@ public class ReportController : Controller
 
             if (existing == null)
             {
+                var newStatus = !string.IsNullOrWhiteSpace(fillValue) ? "Available" : "Missing";
                 _db.ReportFieldStatuses.Add(new ReportFieldStatus
                 {
                     IntakeRecordId      = intakeId,
@@ -250,7 +250,7 @@ public class ReportController : Controller
                     FieldLabel          = fd.Label,
                     Section             = fd.Section,
                     TemplatePlaceholder = fd.TemplatePlaceholder,
-                    Status              = status,
+                    Status              = newStatus,
                     FillValue           = fillValue,
                     Notes               = notes,
                     AnalyzedAt          = now,
@@ -263,13 +263,24 @@ public class ReportController : Controller
                 existing.FieldLabel          = fd.Label;
                 existing.Section             = fd.Section;
                 existing.UpdatedAt           = now;
+                existing.AnalyzedAt          = now;
 
                 if (existing.Status != "NA")
                 {
-                    existing.Status     = status;
-                    existing.FillValue  = fillValue ?? existing.FillValue;
-                    existing.Notes      = notes ?? existing.Notes;
-                    existing.AnalyzedAt = now;
+                    if (!string.IsNullOrWhiteSpace(fillValue))
+                    {
+                        // New value found — update everything
+                        existing.Status    = "Available";
+                        existing.FillValue = fillValue;
+                        existing.Notes     = notes;
+                    }
+                    else if (string.IsNullOrWhiteSpace(existing.FillValue))
+                    {
+                        // No new value and nothing previously saved — mark Missing
+                        existing.Status = "Missing";
+                    }
+                    // else: re-run found nothing new, but field already has a good value
+                    // → preserve existing Status and FillValue unchanged
                 }
             }
         }
@@ -691,11 +702,15 @@ public class ReportController : Controller
     /// carries no real information (e.g. "To be confirmed with process owner").
     /// Offline-extracted values should replace these.
     /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex TbcWordPattern =
+        new(@"\bTBC\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                        System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static bool IsPlaceholderText(string value) =>
         value.Contains("to be confirmed", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("not in document",  StringComparison.OrdinalIgnoreCase) ||
         value.Contains("not provided",     StringComparison.OrdinalIgnoreCase) ||
         value.Contains("not specified",    StringComparison.OrdinalIgnoreCase) ||
-        value.Contains("tbc",              StringComparison.OrdinalIgnoreCase) ||
+        TbcWordPattern.IsMatch(value)                                          ||
         value.Contains("n/a — not",        StringComparison.OrdinalIgnoreCase);
 }
