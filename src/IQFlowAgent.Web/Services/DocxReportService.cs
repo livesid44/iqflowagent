@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using IQFlowAgent.Web.Models;
@@ -293,6 +294,10 @@ public class DocxReportService : IDocxReportService
             "AI:occControl"),
     ];
 
+    // Matches any remaining [placeholder] style text left over in the template.
+    private static readonly Regex RemainingPlaceholderRegex =
+        new(@"\[.*?\]", RegexOptions.Compiled | RegexOptions.Singleline);
+
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();
 
     public Task<byte[]> GenerateReportAsync(
@@ -321,6 +326,15 @@ public class DocxReportService : IDocxReportService
                 replacements[placeholder] = value;
         }
 
+        // Ensure every FieldDef placeholder is in the dictionary — fields with no
+        // ReportFieldStatus record yet would otherwise be left as raw placeholder text.
+        foreach (var fd in FieldDefs)
+        {
+            if (!string.IsNullOrEmpty(fd.TemplatePlaceholder) &&
+                !replacements.ContainsKey(fd.TemplatePlaceholder))
+                replacements[fd.TemplatePlaceholder] = string.Empty;
+        }
+
         using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);
 
         // Process main body
@@ -331,6 +345,14 @@ public class DocxReportService : IDocxReportService
             ApplyReplacements(headerPart.Header, replacements);
         foreach (var footerPart in wordDoc.MainDocumentPart.FooterParts)
             ApplyReplacements(footerPart.Footer, replacements);
+
+        // Final cleanup: erase any remaining [placeholder] text that was not covered
+        // by a known field definition (e.g. template sections not yet mapped).
+        ClearRemainingPlaceholders(wordDoc.MainDocumentPart!.Document.Body!);
+        foreach (var headerPart in wordDoc.MainDocumentPart.HeaderParts)
+            ClearRemainingPlaceholders(headerPart.Header);
+        foreach (var footerPart in wordDoc.MainDocumentPart.FooterParts)
+            ClearRemainingPlaceholders(footerPart.Footer);
 
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
@@ -376,6 +398,38 @@ public class DocxReportService : IDocxReportService
             if (replaced.Length > 0 && (replaced[0] == ' ' || replaced[^1] == ' '))
                 allTexts[0].Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve;
 
+            for (int i = 1; i < allTexts.Count; i++)
+                allTexts[i].Text = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Removes any remaining [placeholder] style text from the document that was not
+    /// matched by a known field definition. This handles template sections that have no
+    /// corresponding field mapping — they are cleared rather than left as raw placeholder text.
+    /// </summary>
+    private static void ClearRemainingPlaceholders(DocumentFormat.OpenXml.OpenXmlElement root)
+    {
+        // First pass: clear within individual runs
+        foreach (var text in root.Descendants<Text>())
+        {
+            if (RemainingPlaceholderRegex.IsMatch(text.Text))
+                text.Text = RemainingPlaceholderRegex.Replace(text.Text, string.Empty);
+        }
+
+        // Second pass: handle placeholders split across multiple runs in a paragraph
+        foreach (var para in root.Descendants<Paragraph>())
+        {
+            var allTexts = para.Descendants<Run>()
+                               .SelectMany(r => r.Descendants<Text>())
+                               .ToList();
+            if (allTexts.Count <= 1) continue;
+
+            var merged = string.Concat(allTexts.Select(t => t.Text));
+            if (!RemainingPlaceholderRegex.IsMatch(merged)) continue;
+
+            var cleared = RemainingPlaceholderRegex.Replace(merged, string.Empty);
+            allTexts[0].Text = cleared;
             for (int i = 1; i < allTexts.Count; i++)
                 allTexts[i].Text = string.Empty;
         }
