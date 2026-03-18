@@ -235,6 +235,11 @@ public class DocxReportService : IDocxReportService
     private static readonly Regex RemainingPlaceholderRegex =
         new(@"\[.*?\]", RegexOptions.Compiled | RegexOptions.Singleline);
 
+    // Matches genuine month-pointer output (e.g. "- Jan-25:" or "- Feb-2025:").
+    private static readonly Regex MonthBulletRegex =
+        new(@"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2,4}\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();
 
     public Task<byte[]> GenerateReportAsync(
@@ -255,6 +260,15 @@ public class DocxReportService : IDocxReportService
         foreach (var fs in fieldStatuses)
         {
             var value = fs.IsNA ? "N/A" : (fs.FillValue ?? string.Empty);
+
+            // ── Guard: strip known template-instruction text from po_volumes ──────
+            // The LLM can mistakenly extract Word-template guidance text (e.g.
+            // "Enter actual transaction volume for each of the past 12 months:
+            //  | 3. Roles and Responsibilities (RACI)") verbatim from uploaded docs.
+            // Catch that here so the Word report always gets clean output.
+            if (fs.FieldKey == "po_volumes" && !fs.IsNA)
+                value = SanitizeMonthlyVolumes(value);
+
             // Prefer the current FieldDefs placeholder; fall back to the DB-stored one for
             // any field whose key is no longer in FieldDefs (orphaned legacy record).
             var placeholder = fieldDefLookup.TryGetValue(fs.FieldKey, out var fp)
@@ -337,6 +351,47 @@ public class DocxReportService : IDocxReportService
         var fs = fieldStatuses.FirstOrDefault(f => f.FieldKey == key);
         if (fs == null) return null;
         return fs.IsNA ? "N/A" : fs.FillValue;
+    }
+
+    // Known instruction/placeholder strings that the LLM sometimes copies verbatim
+    // from uploaded Word documents that contain old BARTOK template content.
+    private static readonly string[] VolumeInstructionPatterns =
+    [
+        "Enter actual transaction volume",
+        "RACI Sharepoint",
+        "RACI Checkpoint",
+        "3. Roles and Responsibilities",
+        "Record actual transaction volumes",
+        "[Transaction type(s) and volume",
+    ];
+
+    private const string VolumeFallback =
+        "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate.";
+
+    /// <summary>
+    /// Detects when the AI-extracted value for <c>po_volumes</c> is actually
+    /// template instruction text (e.g. from an old BARTOK Word template uploaded
+    /// as a task artifact) and replaces it with the proper fallback message.
+    /// Genuine bullet-pointer output (lines starting with "- ") is passed through unchanged.
+    /// </summary>
+    private static string SanitizeMonthlyVolumes(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+
+        // Genuine output starts with a bullet dash or contains month abbreviations
+        // followed by a colon (e.g. "- Jan-25:").  Let it through.
+        if (value.TrimStart().StartsWith("- ", StringComparison.Ordinal) &&
+            MonthBulletRegex.IsMatch(value))
+            return value;
+
+        // If the value matches any known instruction/template pattern, discard it.
+        foreach (var pattern in VolumeInstructionPatterns)
+        {
+            if (value.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return VolumeFallback;
+        }
+
+        return value;
     }
 
     /// <summary>

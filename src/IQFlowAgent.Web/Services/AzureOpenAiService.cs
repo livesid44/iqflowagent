@@ -2788,7 +2788,11 @@ public class AzureOpenAiService : IAzureOpenAiService
             "             \"Enter actual transaction volume\"\n" +
             "             \"RACI Sharepoint\" / \"RACI Checkpoint\"\n" +
             "             \"3. Roles and Responsibilities\"\n" +
-            "           If you see these strings in the documents, skip them — they are template text.\n\n" +
+            "             \"Record actual transaction volumes\"\n" +
+            "           If you see these strings in the documents, skip them — they are template text.\n" +
+            "           FORBIDDEN EXAMPLE — if the artifact text you see looks like this:\n" +
+            "             \"Enter actual transaction volume for each of the past 12 months: | 3. Roles and Responsibilities (RACI)\"\n" +
+            "           that is template instruction text, NOT volume data. Output the Step 4 fallback instead.\n\n" +
             "  Step 4 — If NO actual numeric volume data exists anywhere in the Task Artifacts,\n" +
             "           output exactly this one sentence (nothing else):\n" +
             "           Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "");
