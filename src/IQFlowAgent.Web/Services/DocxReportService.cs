@@ -341,6 +341,15 @@ public class DocxReportService : IDocxReportService
                 keepHeaderRows : 1,
                 content        : volValue);
 
+        // ── Deduplication pass ─────────────────────────────────────────────────
+        // Several template tables (Escalation Matrix, Exception Handling, SLA 7.1,
+        // Performance 7.2) have multiple data rows with identical placeholder text.
+        // After find-and-replace every such row carries the same value, producing
+        // visually doubled rows. Remove any consecutive duplicate data rows across
+        // all tables — the structured sections above (RACI, SOP, Vol) have already
+        // been rebuilt with clean, unique rows so they are unaffected.
+        RemoveDuplicateDataRows(body);
+
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
 
@@ -861,6 +870,44 @@ public class DocxReportService : IDocxReportService
         newCell.AppendChild(para);
         newRow.AppendChild(newCell);
         table.AppendChild(newRow);
+    }
+
+    /// <summary>
+    /// Scans every table in <paramref name="body"/> and removes any data row whose
+    /// text fingerprint is identical to the immediately preceding row in the same table.
+    /// <para>
+    /// This eliminates the doubled-row artefact that occurs when the DOCX template has
+    /// multiple rows with the same placeholder text and find-and-replace fills them all
+    /// with identical values (e.g. Escalation Matrix, Exception Handling, SLA 7.1, and
+    /// Actual vs Target Performance 7.2).
+    /// </para>
+    /// A row whose cells are all blank or whitespace-only is never treated as a duplicate
+    /// anchor — it resets the comparison so that a blank separator row followed by a real
+    /// data row is never incorrectly removed.
+    /// </summary>
+    private static void RemoveDuplicateDataRows(Body body)
+    {
+        foreach (var table in body.Descendants<Table>())
+        {
+            var rows = table.Elements<TableRow>().ToList();
+            string? lastFingerprint = null;
+            foreach (var row in rows)
+            {
+                var fingerprint = string.Concat(row.Descendants<Text>().Select(t => t.Text));
+                if (string.IsNullOrWhiteSpace(fingerprint))
+                {
+                    // Blank rows reset the tracking anchor so they never cause
+                    // a following non-blank row to be treated as a duplicate.
+                    lastFingerprint = null;
+                    continue;
+                }
+
+                if (fingerprint == lastFingerprint)
+                    row.Remove();   // identical to the preceding non-empty row → drop it
+                else
+                    lastFingerprint = fingerprint;
+            }
+        }
     }
 
     private static void ApplyReplacements(
