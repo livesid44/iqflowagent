@@ -341,6 +341,46 @@ public class DocxReportService : IDocxReportService
                 keepHeaderRows : 1,
                 content        : volValue);
 
+        // ── SLA 7.1 merged-cell insertion ──────────────────────────────────────
+        // The individual sla_* fields store all metric values as a single
+        // pipe-separated string (e.g. "Metric 1 | Metric 2 | ..."). Simple
+        // find-and-replace packs every metric into one cell, making the table
+        // unreadable.  Clear all data rows and insert the combined content as a
+        // single merged-cell block — identical to the Volumetrics approach.
+        var slaMetric = GetFieldFillValue(fieldStatuses, "sla_metric") ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(slaMetric))
+        {
+            var slaMeasurement = GetFieldFillValue(fieldStatuses, "sla_measurement") ?? string.Empty;
+            var slaFrequency   = GetFieldFillValue(fieldStatuses, "sla_frequency")   ?? string.Empty;
+            var slaTool        = GetFieldFillValue(fieldStatuses, "sla_tool")        ?? string.Empty;
+            var slaContent = $"Metric: {slaMetric}"
+                + (string.IsNullOrWhiteSpace(slaMeasurement) ? "" : $"\nMeasurement Method: {slaMeasurement}")
+                + (string.IsNullOrWhiteSpace(slaFrequency)   ? "" : $"\nReporting Frequency: {slaFrequency}")
+                + (string.IsNullOrWhiteSpace(slaTool)        ? "" : $"\nMeasurement Tool: {slaTool}");
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Metric", "Measurement"],  // SLA 7.1 header keywords
+                keepHeaderRows : 1,
+                content        : slaContent);
+        }
+
+        // ── Actual vs Target Performance 7.2 merged-cell insertion ─────────────
+        // Same issue as SLA 7.1: perf fields pack all metric data into one cell.
+        // Use month-name keywords (Sep, Oct) to identify this table uniquely since
+        // both the SLA and Performance tables contain "Metric" and "Target".
+        var perfMetric = GetFieldFillValue(fieldStatuses, "sla_metric_perf") ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(perfMetric))
+        {
+            var perfActual = GetFieldFillValue(fieldStatuses, "sla_actual_perf") ?? string.Empty;
+            var perfContent = $"Metric: {perfMetric}"
+                + (string.IsNullOrWhiteSpace(perfActual) ? "" : $"\nActual Performance: {perfActual}");
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Sep", "Oct"],  // month-name headers unique to Performance 7.2
+                keepHeaderRows : 1,
+                content        : perfContent);
+        }
+
         // ── Deduplication pass ─────────────────────────────────────────────────
         // Several template tables (Escalation Matrix, Exception Handling, SLA 7.1,
         // Performance 7.2) have multiple data rows with identical placeholder text.
