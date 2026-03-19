@@ -280,6 +280,37 @@ public class ReportController : Controller
                 }
             }
 
+            // ── RACI supplement: existing RACI field values as structured context ──
+            // When the RACI section is being re-analyzed, any previously extracted
+            // individual RACI field values (e.g. raci_task1…4, raci_role1…4 from a
+            // prior analysis run) are concatenated and prepended to the artifact text.
+            // This implements the "concat all RACI fields and send to LLM" approach —
+            // the LLM can derive concise task names and role assignments from the already-
+            // extracted role-responsibility text rather than having to re-parse the raw doc.
+            if (section.Key.Contains("RACI", StringComparison.OrdinalIgnoreCase))
+            {
+                var raciSiblings = existingStatuses
+                    .Where(s => s.FieldKey != "raci_content"
+                             && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
+                             && !string.IsNullOrWhiteSpace(s.FillValue))
+                    .OrderBy(s => s.FieldKey)
+                    .ToList();
+
+                if (raciSiblings.Count > 0)
+                {
+                    var sbRaci = new System.Text.StringBuilder();
+                    sbRaci.AppendLine("=== Previously Extracted RACI Data (use as primary source for the matrix) ===");
+                    sbRaci.AppendLine("Derive concise 2–5 word task names and role titles from these values:");
+                    foreach (var sf in raciSiblings)
+                        sbRaci.AppendLine($"{sf.FieldLabel}: {sf.FillValue}");
+                    var raciContext = sbRaci.ToString();
+                    sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
+                        ? raciContext
+                        : raciContext + "\n\n" + sectionArtifactText;
+                }
+            }
+
+
             var sectionValues = await _aiService.AnalyzeSectionFieldsAsync(
                 intake, section.Key, sectionFields,
                 sectionArtifactText, globalDocText, intake.AnalysisResult);
@@ -522,6 +553,37 @@ public class ReportController : Controller
         var combinedDocText = string.Join("\n", new[] { intakeDocText, taskArtifactText }
             .Where(s => !string.IsNullOrWhiteSpace(s)));
         var artifactText = string.IsNullOrWhiteSpace(combinedDocText) ? null : combinedDocText;
+
+        // ── RACI supplement: concat existing RACI sibling field values ──────────
+        // When generating raci_content, any previously extracted individual RACI
+        // field values (e.g. raci_task1…4, raci_role1…4) are loaded from the DB
+        // and prepended to the artifact text as structured context. The LLM can then
+        // derive concise task names and role assignments directly from these values
+        // ("concat all RACI fields and send to LLM" approach).
+        if (field.FieldKey.Equals("raci_content", StringComparison.OrdinalIgnoreCase))
+        {
+            var raciSiblings = await _db.ReportFieldStatuses
+                .Where(f => f.IntakeRecordId == intake.Id
+                         && f.FieldKey != "raci_content"
+                         && f.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(f.FillValue))
+                .OrderBy(f => f.FieldKey)
+                .ToListAsync();
+
+            if (raciSiblings.Count > 0)
+            {
+                var sbRaci = new System.Text.StringBuilder();
+                sbRaci.AppendLine("=== Previously Extracted RACI Data (use as primary source for the matrix) ===");
+                sbRaci.AppendLine("Derive concise 2–5 word task names and role titles from these values:");
+                foreach (var sf in raciSiblings)
+                    sbRaci.AppendLine($"{sf.FieldLabel}: {sf.FillValue}");
+                var raciContext = sbRaci.ToString();
+                artifactText = string.IsNullOrWhiteSpace(artifactText)
+                    ? raciContext
+                    : raciContext + "\n\n" + artifactText;
+            }
+        }
+
 
         var generated = await _aiService.GenerateSingleFieldAsync(
             intake, field.FieldKey, field.FieldLabel, userContext, analysisJson, artifactText);
