@@ -191,87 +191,33 @@
             <div class="report-ready-box">
                 @if (existingReport != null)
                 {
-                    <h3>✅ All fields are ready! You can re-generate the report with updated values.</h3>
-                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). A new document will be generated reflecting the latest field values — the previous version will remain available via the Download button.</p>
-                    <p style="font-size:0.82rem;color:#047857;">Click <strong>"Re-generate Report (Word)"</strong> below to create an updated copy.</p>
+                    <h3>✅ All fields are ready! Click below to generate an updated report.</h3>
+                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). Running the analysis again will produce a refreshed Word document automatically.</p>
                 }
                 else
                 {
-                    <h3>🎉 All fields are ready! You can now generate the final report.</h3>
-                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated, uploaded to storage, and the intake will be marked as <strong>Closed</strong>.</p>
-                    <p style="font-size:0.82rem;color:#047857;">Click the <strong>"Generate Final Report &amp; Close Intake"</strong> button below.</p>
+                    <h3>🎉 All fields are ready! Click below to generate the final report.</h3>
+                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated and the intake will be marked as <strong>Closed</strong>.</p>
                 }
             </div>
         }
     }
 
-    <!-- Toolbar: contextual — show ONE primary action based on state -->
+    <!-- Toolbar: single unified action — always "Run AI Field Analysis".
+         If all fields resolve, the server auto-generates the report and redirects
+         to the download page. If open points remain, this page is shown with the
+         outstanding fields highlighted. -->
     <div class="toolbar">
-        @if (!hasFields)
-        {
-            @* No analysis run yet — only show the analysis button *@
-            <form method="post" action="/Report/AnalyzeFields" onsubmit="startAnalysis()">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-analyze">🤖 Run AI Field Analysis</button>
-            </form>
-        }
-        else if (existingReport != null)
-        {
-            @* Document already generated — show Download, Re-generate (if ready), and Re-run Analysis *@
-            @if (existingReport.FilePath.StartsWith("http"))
-            {
-                <a href="@existingReport.FilePath" target="_blank" class="btn-generate">⬇️ Download Report (Word)</a>
-            }
-            else
-            {
-                <a href="/Report/Download?intakeId=@intakeId" class="btn-generate">⬇️ Download Report (Word)</a>
-            }
-            @if (allReady)
-            {
-                <form method="post" action="/Report/Generate"
-                      onsubmit="startGenerate()">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="intakeId" value="@intakeId" />
-                    <button type="submit" class="btn-generate" style="background:linear-gradient(135deg,#0891b2,#0e7490);">
-                        🔄 Re-generate Report (Word)
-                    </button>
-                </form>
-            }
-            else
-            {
-                <form method="post" action="/Report/Generate"
-                      onsubmit="startGenerate()">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="intakeId" value="@intakeId" />
-                    <button type="submit" class="btn-generate" style="background:linear-gradient(135deg,#0891b2,#0e7490);">
-                        🔄 Re-generate Report (Word)
-                    </button>
-                </form>
-            }
-            <form method="post" action="/Report/AnalyzeFields" onsubmit="startAnalysis()">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
-            </form>
-        }
-        else
-        {
-            @* Analysis done but no document yet — primary is Generate (always enabled), secondary is Re-run *@
-            <form method="post" action="/Report/Generate" onsubmit="startGenerate()">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-generate">📄 Generate Final Report &amp; Close Intake</button>
-            </form>
-            <form method="post" action="/Report/AnalyzeFields" onsubmit="startAnalysis()">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
-            </form>
-        }
+        <form method="post" action="/Report/AnalyzeFields" onsubmit="return startAnalysis()">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="intakeId" value="@intakeId" />
+            <button type="submit" class="btn-analyze">
+                @(hasFields ? "🔄 Re-run AI Field Analysis" : "🤖 Run AI Field Analysis")
+            </button>
+        </form>
     </div>
 
-    <!-- Analysis loading overlay — shown while section-by-section AI analysis runs -->
+    <!-- Analysis loading overlay — shown while AI analysis (and optional auto-generation) runs -->
     <div id="analysisOverlay"
          style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;
                 align-items:center;justify-content:center;">
@@ -279,13 +225,12 @@
                     max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
             <div style="font-size:2.5rem;margin-bottom:16px;">🔬</div>
             <div style="font-weight:700;font-size:1.15rem;color:#1e293b;margin-bottom:10px;">
-                Running Section-by-Section AI Analysis
+                Running AI Field Analysis
             </div>
             <div style="color:#64748b;font-size:0.88rem;line-height:1.6;margin-bottom:20px;">
-                Each BARTOK section is being analyzed with a focused AI call using only
-                the artifacts from that section's task (e.g. the Volume Excel goes directly
-                to the Volumetrics AI call). This takes <strong>1–2 minutes</strong> but
-                produces much more accurate results.
+                Each BARTOK section is analyzed with a focused AI call. If all fields resolve,
+                the final Word document is generated automatically — no extra click needed.
+                This takes <strong>1–3 minutes</strong>; please do not close this page.
             </div>
             <div style="display:flex;align-items:center;justify-content:center;gap:10px;
                         color:#2563eb;font-size:0.9rem;font-weight:600;">
@@ -300,7 +245,8 @@
         </div>
     </div>
 
-    <!-- Generate loading overlay — shown during the full AI analysis + DOCX generation pipeline -->
+    <!-- Generate loading overlay — no longer used from the toolbar; kept for the
+         legacy /Report/Generate endpoint if accessed directly. -->
     <div id="generateOverlay"
          style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;
                 align-items:center;justify-content:center;">
@@ -336,12 +282,6 @@
             var overlay = document.getElementById('analysisOverlay');
             if (overlay) overlay.style.display = 'flex';
             document.querySelectorAll('.btn-analyze').forEach(function(b) { b.disabled = true; });
-            return true;
-        }
-        function startGenerate() {
-            var overlay = document.getElementById('generateOverlay');
-            if (overlay) overlay.style.display = 'flex';
-            document.querySelectorAll('.btn-generate, .btn-analyze').forEach(function(b) { b.disabled = true; });
             return true;
         }
     </script>

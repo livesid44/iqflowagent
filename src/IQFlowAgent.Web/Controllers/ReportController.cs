@@ -118,6 +118,14 @@ public class ReportController : Controller
     }
 
     // ── POST /Report/AnalyzeFields ───────────────────────────────────────────
+    /// <summary>
+    /// Unified single-button action. Runs the full AI field analysis pipeline, then:
+    ///  • If all fields are resolved (no Missing / Pending / TaskCreated) →
+    ///    automatically runs the DOCX generation pipeline and redirects to the
+    ///    Generated / download page so the user lands straight on their report.
+    ///  • If fields are still outstanding → redirects back to the Prepare page
+    ///    showing exactly which fields still need attention.
+    /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> AnalyzeFields(int intakeId)
@@ -127,11 +135,27 @@ public class ReportController : Controller
 
         var (sectionsAnalyzed, aiFilledCount) = await RunAiAnalysisAsync(intake);
 
+        // Reload the updated field statuses to decide the next step.
+        var fieldStatuses = await _db.ReportFieldStatuses
+            .Where(f => f.IntakeRecordId == intakeId)
+            .ToListAsync();
+
+        bool allReady = fieldStatuses.Count > 0
+            && !fieldStatuses.Any(f => f.Status is "Missing" or "Pending" or "TaskCreated");
+
+        if (allReady)
+        {
+            // All fields resolved — automatically generate the report and go to download.
+            return await ExecuteDocxPipelineAsync(intake, intakeId, fieldStatuses);
+        }
+
+        // Open points remain — tell the user what was found and let them review.
+        var openCount = fieldStatuses.Count(f => f.Status is "Missing" or "Pending" or "TaskCreated");
         TempData["Success"] = aiFilledCount > 0
-            ? $"Analysis complete ({sectionsAnalyzed} sections processed). " +
-              $"{aiFilledCount} field(s) extracted by AI from task documents."
-            : "Analysis complete. No data found in task artifacts — please ensure task " +
-              "documents are uploaded and try again.";
+            ? $"Analysis complete ({sectionsAnalyzed} sections processed, {aiFilledCount} field(s) extracted). " +
+              $"{openCount} field(s) still need attention — please resolve them below."
+            : $"Analysis complete. {openCount} field(s) could not be resolved automatically — " +
+              "please fill them in manually or mark them N/A, then run the analysis again.";
 
         return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
     }
@@ -300,13 +324,8 @@ public class ReportController : Controller
 
     // ── POST /Report/Generate ────────────────────────────────────────────────
     /// <summary>
-    /// Complete pipeline:
-    ///   1. Runs AI analysis for all sections (RACI, SOP, Volume, OSS etc.)
-    ///   2. Reloads the filled field statuses
-    ///   3. Runs a final LLM "polish" pass — sends the complete document snapshot to the
-    ///      LLM so it can review and improve every section's content quality as a coherent
-    ///      whole, without adding information or changing structure.
-    ///   4. Generates the DOCX from the polished field values.
+    /// Legacy endpoint kept for backward-compat (direct form posts, deep links).
+    /// Runs the full AI analysis pipeline then delegates to ExecuteDocxPipelineAsync.
     /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
@@ -315,30 +334,29 @@ public class ReportController : Controller
         var intake = await _db.IntakeRecords.FindAsync(intakeId);
         if (intake == null) return NotFound();
 
-        // ── Step 1: run the full AI analysis pipeline for all sections ──────────
-        // This ensures RACI, SOP, Volume, OSS etc. are all freshly generated
-        // before the DOCX is produced. Any fields that remain missing after AI
-        // analysis will be left as-is (using whatever values were previously saved).
+        // Run fresh AI analysis so RACI, SOP, Volume, OSS etc. are all current.
         await RunAiAnalysisAsync(intake);
 
-        // ── Step 2: reload field statuses after AI analysis ──────────────────────
         var fieldStatuses = await _db.ReportFieldStatuses
             .Where(r => r.IntakeRecordId == intakeId)
             .ToListAsync();
 
-        // ── Step 3: final LLM polish pass ────────────────────────────────────────
-        // Build a document snapshot of all filled text fields (excluding structured
-        // blocks that have their own parsers: raci_content, sop_content, vol_content).
-        // Send the snapshot to the LLM for a single quality-review pass that improves
-        // professional tone, precision, and consistency across the whole document.
-        // The polished values are applied in-memory only — no DB write — so the
-        // database always reflects what the AI analysis extracted, while the generated
-        // DOCX gets the highest-quality version of every field.
+        return await ExecuteDocxPipelineAsync(intake, intakeId, fieldStatuses);
+    }
+
+    // ── Private: polish + DOCX + upload + save + redirect ───────────────────
+    /// <summary>
+    /// Runs the final LLM polish pass on <paramref name="fieldStatuses"/>, generates
+    /// the DOCX, uploads it (blob or local), persists a <see cref="FinalReport"/> record,
+    /// closes the intake, and redirects to the Generated page.
+    /// On any error, sets TempData["Error"] and redirects to the Prepare page.
+    /// </summary>
+    private async Task<IActionResult> ExecuteDocxPipelineAsync(
+        IntakeRecord intake, int intakeId, List<ReportFieldStatus> fieldStatuses)
+    {
+        // ── Polish pass ──────────────────────────────────────────────────────
         try
         {
-            // Fields excluded from polishing: they have dedicated structured parsers
-            // and their internal format (semicolons/pipes) would be damaged by a
-            // generic quality-improvement rewrite.
             var structuredKeys = new HashSet<string>(
                 ["raci_content", "sop_content", "vol_content"],
                 StringComparer.OrdinalIgnoreCase);
@@ -353,7 +371,6 @@ public class ReportController : Controller
 
             if (snapshot.Count > 0)
             {
-                // Collect all available artifact text for context
                 var allTasks = await _db.IntakeTasks
                     .Where(t => t.IntakeRecordId == intakeId)
                     .Include(t => t.Documents)
@@ -366,7 +383,6 @@ public class ReportController : Controller
                 var polishedValues = await _aiService.PolishDocumentFieldsAsync(
                     intake, snapshot, artifactText);
 
-                // Apply polished values to fieldStatuses in-memory
                 int polishedCount = 0;
                 foreach (var kv in polishedValues)
                 {
@@ -386,13 +402,13 @@ public class ReportController : Controller
         }
         catch (Exception ex)
         {
-            // Polish pass is best-effort — a failure must not block DOCX generation
+            // Polish pass is best-effort — a failure must not block DOCX generation.
             _logger.LogWarning(ex,
                 "Document polish pass failed for intake {IntakeId} — proceeding with unpolished values.",
                 intake.IntakeId);
         }
 
-        // Locate the template
+        // ── DOCX generation ──────────────────────────────────────────────────
         var templatePath = Path.Combine(_env.WebRootPath, "templates", TemplateName);
         if (!System.IO.File.Exists(templatePath))
         {
@@ -402,10 +418,9 @@ public class ReportController : Controller
 
         try
         {
-            // Generate the filled docx from the polished field values
             var docxBytes = await _docxService.GenerateReportAsync(intake, fieldStatuses, templatePath);
 
-            var now = DateTime.UtcNow;
+            var now            = DateTime.UtcNow;
             var reportFileName = $"BARTOK_DD_{intake.IntakeId}_{now:yyyyMMddHHmmss}.docx";
             string filePath;
 
@@ -425,7 +440,6 @@ public class ReportController : Controller
                 filePath = $"/reports/{reportFileName}";
             }
 
-            // Save FinalReport record
             _db.FinalReports.Add(new FinalReport
             {
                 IntakeRecordId    = intakeId,
@@ -437,12 +451,12 @@ public class ReportController : Controller
                 GeneratedByName   = User.Identity?.Name
             });
 
-            // Close the intake
             intake.Status = "Closed";
             await _db.SaveChangesAsync();
 
             _logger.LogInformation(
-                "Final report generated for intake {IntakeId} — file: {FileName}", intake.IntakeId, reportFileName);
+                "Final report generated for intake {IntakeId} — file: {FileName}",
+                intake.IntakeId, reportFileName);
 
             TempData["ReportPath"]     = filePath;
             TempData["ReportFileName"] = reportFileName;
@@ -451,7 +465,7 @@ public class ReportController : Controller
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate report for intake {IntakeId}", intake.IntakeId);
+            _logger.LogError(ex, "Failed to generate report for intake {IntakeId}", intakeId);
             TempData["Error"] = "Report generation failed. Please check the server logs and try again.";
             return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
         }
