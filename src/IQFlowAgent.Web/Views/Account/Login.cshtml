@@ -102,6 +102,13 @@
             </div>
         }
 
+        @if (Context.Request.Query.ContainsKey("expired"))
+        {
+            <div class="alert alert-warning py-2 small" style="background:#fff3cd;color:#856404;border:1px solid #ffe69c;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:0.85rem;">
+                ⚠️ Your session has expired. Please sign in again.
+            </div>
+        }
+
         <form asp-action="Login" asp-controller="Account" method="post">
             @Html.AntiForgeryToken()
             <input type="hidden" name="returnUrl" value="@ViewData["ReturnUrl"]" />
