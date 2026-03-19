@@ -2741,6 +2741,7 @@ public class AzureOpenAiService : IAzureOpenAiService
         var fieldKeys = string.Join(", ", sectionFields.Select(f => $"\"{f.Key}\""));
         bool hasVolumeField = sectionFields.Any(f => f.Key == "po_volumes");
         bool hasRaciField   = sectionFields.Any(f => f.Key == "raci_content");
+        bool hasSopField    = sectionFields.Any(f => f.Key == "sop_content");
 
         var systemPrompt =
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
@@ -2826,7 +2827,27 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  EXAMPLE OUTPUT (2 tasks, 2 roles):\n" +
             "  TASKS: Submit Change Request | Assess & Approve Change\n" +
             "  Change Requester: R | -\n" +
-            "  Change Approver: - | A" : "");
+            "  Change Approver: - | A" : "") +
+            // ── Per-field override for SOP steps ──────────────────────────────
+            (hasSopField ? "\n\n" +
+            "SPECIAL RULE FOR KEY \"sop_content\" (SOP Steps) — overrides rule 1 for this field only:\n" +
+            "  Produce all SOP steps in EXACTLY this format — one block per step, no extra text:\n" +
+            "    Step N: [Action description — what happens in this step]\n" +
+            "    Role: [Responsible role] | System: [System/tool used] | Output: [Expected output]\n" +
+            "    Automation: [Manual/Partially Automated/Fully Automated] | Rating: [Low/Medium/High/Prime] | Type: [RPA/AI/Workflow/Integration/N/A]\n\n" +
+            "  Rules:\n" +
+            "  - Extract DISTINCT real steps from the process description and uploaded documents.\n" +
+            "  - Do NOT repeat the same action across multiple steps.\n" +
+            "  - Typically 3–8 steps per process — do not invent steps not described in the source.\n" +
+            "  - If a field (Role/System/Output/Automation) is not specified in the source, use a\n" +
+            "    reasonable default: Role=Process Team | System=N/A | Output=Completed step | Automation=Manual | Rating=Low | Type=N/A\n" +
+            "  EXAMPLE OUTPUT (2 steps):\n" +
+            "  Step 1: Receive and log incoming change request\n" +
+            "  Role: Change Requester | System: ITSM Portal | Output: Logged RFC ticket\n" +
+            "  Automation: Manual | Rating: Low | Type: N/A\n\n" +
+            "  Step 2: Assess risk and complexity of the requested change\n" +
+            "  Role: Change Approver | System: CAB Review Board | Output: Risk assessment record\n" +
+            "  Automation: Manual | Rating: Medium | Type: N/A" : "");
 
         // ── User message ──────────────────────────────────────────────────────
         var sb = new System.Text.StringBuilder();

@@ -245,6 +245,14 @@ public class DocxReportService : IDocxReportService
     private static readonly Regex AnyDigitRegex =
         new(@"\d", RegexOptions.Compiled);
 
+    // Matches the opening line of a SOP step block: "Step N: text" or "Step N- text"
+    private static readonly Regex SopStepLineRegex =
+        new(@"^Step\s+(\d+)\s*[:\-]\s*(.*)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // Maximum number of words allowed in a RACI task header cell.
+    // Longer names are trimmed to this word count to prevent cells overflowing.
+    private const int MaxRaciTaskNameWords = 4;
+
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();
 
     public Task<byte[]> GenerateReportAsync(
@@ -323,11 +331,7 @@ public class DocxReportService : IDocxReportService
 
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content");
         if (!string.IsNullOrWhiteSpace(sopValue))
-            ReplaceTableDataWithLlmContent(
-                body,
-                headerKeywords : ["Step", "Action", "Auto Status"],  // SOP header keywords
-                keepHeaderRows : 2,  // column-header row + instruction row
-                content        : sopValue);
+            ReplaceSopTableRows(body, sopValue);
 
         var volValue = GetFieldFillValue(fieldStatuses, "vol_content");
         if (!string.IsNullOrWhiteSpace(volValue))
@@ -431,6 +435,7 @@ public class DocxReportService : IDocxReportService
                 taskNames = line["TASKS:".Length..]
                     .Split('|', StringSplitOptions.TrimEntries)
                     .Where(t => !string.IsNullOrWhiteSpace(t))
+                    .Select(ShortenTaskName)  // enforce concise task names
                     .ToArray();
             }
             else
@@ -558,6 +563,221 @@ public class DocxReportService : IDocxReportService
         para.AppendChild(run);
         cell.AppendChild(para);
         return cell;
+    }
+
+    /// <summary>
+    /// Reduces a RACI task name to at most <see cref="MaxRaciTaskNameWords"/> words.
+    /// When the LLM outputs full activity descriptions as the task name, this trims it to
+    /// a concise label that fits in a table header cell.
+    /// </summary>
+    private static string ShortenTaskName(string name)
+    {
+        var trimmed = name.Trim();
+        var words   = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length <= MaxRaciTaskNameWords
+            ? trimmed
+            : string.Join(" ", words.Take(MaxRaciTaskNameWords));
+    }
+
+    // ── SOP table row-by-row insertion ────────────────────────────────────────
+
+    /// <summary>
+    /// One parsed SOP step from the LLM's structured sopContent block.
+    /// </summary>
+    private sealed record SopStep(
+        string StepNumber,
+        string Action,
+        string Role,
+        string System,
+        string Output,
+        string AutoStatus,
+        string OppRating,
+        string AutoType);
+
+    /// <summary>
+    /// Extracts the value for <paramref name="key"/> from a pipe-separated
+    /// "Key1: value1 | Key2: value2" line. Returns empty string when not found.
+    /// </summary>
+    private static string ExtractSopPart(string line, string key)
+    {
+        var parts = line.Split('|');
+        foreach (var part in parts)
+        {
+            var colonIdx = part.IndexOf(':', StringComparison.Ordinal);
+            if (colonIdx < 0) continue;
+            var partKey = part[..colonIdx].Trim();
+            if (partKey.Equals(key, StringComparison.OrdinalIgnoreCase))
+                return part[(colonIdx + 1)..].Trim();
+        }
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Parses the LLM's structured sopContent block into individual <see cref="SopStep"/> records.
+    /// Expected format per step:
+    ///   Step N: [Action]
+    ///     Role: [Role] | System: [System] | Output: [Output]
+    ///     Automation: [status] | Rating: [rating] | Type: [type]
+    /// Returns an empty list when the format is not recognised.
+    /// </summary>
+    private static List<SopStep> ParseSopSteps(string sopContent)
+    {
+        var steps  = new List<SopStep>();
+        var lines  = sopContent.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        string stepNum = "", action = "", role = "", system = "", output = "";
+        string autoStatus = "Manual", rating = "Low", autoType = "N/A";
+        bool inStep = false;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            // "Step N: Action text"
+            var m = SopStepLineRegex.Match(line);
+            if (m.Success)
+            {
+                if (inStep)
+                    steps.Add(new SopStep(stepNum, action, role, system, output, autoStatus, rating, autoType));
+
+                stepNum    = "Step " + m.Groups[1].Value;
+                action     = m.Groups[2].Value.Trim();
+                role       = system = output = string.Empty;
+                autoStatus = "Manual"; rating = "Low"; autoType = "N/A";
+                inStep     = true;
+                continue;
+            }
+
+            if (!inStep) continue;
+
+            // "Role: X | System: Y | Output: Z"
+            if (line.Contains("Role:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("System:", StringComparison.OrdinalIgnoreCase))
+            {
+                var r = ExtractSopPart(line, "Role");
+                var s = ExtractSopPart(line, "System");
+                var o = ExtractSopPart(line, "Output");
+                if (!string.IsNullOrEmpty(r)) role   = r;
+                if (!string.IsNullOrEmpty(s)) system = s;
+                if (!string.IsNullOrEmpty(o)) output = o;
+                continue;
+            }
+
+            // "Automation: X | Rating: Y | Type: Z"
+            if (line.Contains("Automation:", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Rating:", StringComparison.OrdinalIgnoreCase))
+            {
+                var a = ExtractSopPart(line, "Automation");
+                var rt = ExtractSopPart(line, "Rating");
+                var t = ExtractSopPart(line, "Type");
+                if (!string.IsNullOrEmpty(a))  autoStatus = a;
+                if (!string.IsNullOrEmpty(rt)) rating     = rt;
+                if (!string.IsNullOrEmpty(t))  autoType   = t;
+                continue;
+            }
+        }
+
+        if (inStep)
+            steps.Add(new SopStep(stepNum, action, role, system, output, autoStatus, rating, autoType));
+
+        return steps;
+    }
+
+    /// <summary>
+    /// Finds the SOP table in <paramref name="body"/> (identified by "Step" and "Action"
+    /// in the first row), clears all data rows beyond the two header rows, then inserts
+    /// one properly-structured table row per parsed SOP step — mapping step number, action,
+    /// role, system, output, and automation fields to the correct column by header text.
+    /// Falls back to the merged-cell approach when the sopContent cannot be parsed.
+    /// </summary>
+    private static void ReplaceSopTableRows(Body body, string sopContent)
+    {
+        var steps = ParseSopSteps(sopContent);
+        if (steps.Count == 0)
+        {
+            // Fallback: merged-cell dump (preserves previous behaviour)
+            ReplaceTableDataWithLlmContent(
+                body, ["Step", "Action", "Auto Status"], 2, sopContent);
+            return;
+        }
+
+        // Locate SOP table by header keywords
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+            if (firstRow == null) return false;
+            var txt = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
+            return txt.Contains("Step",   StringComparison.OrdinalIgnoreCase)
+                && txt.Contains("Action", StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (table == null) return;
+
+        var allRows = table.Elements<TableRow>().ToList();
+        if (allRows.Count == 0) return;
+
+        // Determine column positions from the first header row
+        var headerCells = allRows[0].Elements<TableCell>().ToList();
+        var colMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < headerCells.Count; i++)
+        {
+            var txt = string.Concat(headerCells[i].Descendants<Text>().Select(x => x.Text));
+            if (txt.Contains("Step",   StringComparison.OrdinalIgnoreCase) && !colMap.ContainsKey("step"))
+                colMap["step"]   = i;
+            else if (txt.Contains("Action", StringComparison.OrdinalIgnoreCase) && !colMap.ContainsKey("action"))
+                colMap["action"] = i;
+            else if (txt.Contains("Role",   StringComparison.OrdinalIgnoreCase) && !colMap.ContainsKey("role"))
+                colMap["role"]   = i;
+            else if (txt.Contains("System", StringComparison.OrdinalIgnoreCase) && !colMap.ContainsKey("system"))
+                colMap["system"] = i;
+            else if (txt.Contains("Output", StringComparison.OrdinalIgnoreCase) && !colMap.ContainsKey("output"))
+                colMap["output"] = i;
+            else if ((txt.Contains("Auto Status", StringComparison.OrdinalIgnoreCase)
+                   || txt.Contains("Automation",  StringComparison.OrdinalIgnoreCase))
+                && !colMap.ContainsKey("auto"))
+                colMap["auto"]   = i;
+            else if ((txt.Contains("Rating", StringComparison.OrdinalIgnoreCase)
+                   || txt.Contains("Opp",    StringComparison.OrdinalIgnoreCase))
+                && !colMap.ContainsKey("rating"))
+                colMap["rating"] = i;
+            else if (txt.Contains("Type",   StringComparison.OrdinalIgnoreCase) && !colMap.ContainsKey("type"))
+                colMap["type"]   = i;
+        }
+
+        int colCount = headerCells.Count;
+
+        // Use the instruction row (index 1) as the formatting template for data rows
+        var templateRow   = allRows.Count > 1 ? allRows[1] : allRows[0];
+        var templateCells = templateRow.Elements<TableCell>().ToList();
+
+        // Remove all data rows beyond the 2 header rows
+        foreach (var row in allRows.Skip(2))
+            row.Remove();
+
+        // Insert one row per step
+        foreach (var step in steps)
+        {
+            var cellValues = new string[colCount];
+            for (int i = 0; i < colCount; i++) cellValues[i] = string.Empty;
+
+            if (colMap.TryGetValue("step",   out int si)) cellValues[si] = step.StepNumber;
+            if (colMap.TryGetValue("action", out int ai)) cellValues[ai] = step.Action;
+            if (colMap.TryGetValue("role",   out int ri)) cellValues[ri] = step.Role;
+            if (colMap.TryGetValue("system", out int sy)) cellValues[sy] = step.System;
+            if (colMap.TryGetValue("output", out int oi)) cellValues[oi] = step.Output;
+            if (colMap.TryGetValue("auto",   out int aui)) cellValues[aui] = step.AutoStatus;
+            if (colMap.TryGetValue("rating", out int rati)) cellValues[rati] = step.OppRating;
+            if (colMap.TryGetValue("type",   out int ti)) cellValues[ti]  = step.AutoType;
+
+            var newRow = new TableRow();
+            for (int c = 0; c < colCount; c++)
+            {
+                var tmplCell = c < templateCells.Count ? templateCells[c] : null;
+                newRow.AppendChild(BuildRaciCell(cellValues[c], tmplCell));
+            }
+            table.AppendChild(newRow);
+        }
     }
 
     /// <summary>

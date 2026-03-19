@@ -623,6 +623,40 @@ public class ReportController : Controller
             }
         }
 
+        // ── Dedicated SOP generation (post-section-loop) ─────────────────────────
+        // GenerateSingleFieldAsync has an explicit "Step N: … Role: … Automation: …"
+        // format prompt that the general AnalyzeSectionFieldsAsync lacks. Run a
+        // targeted pass so the SOP content is always in the parseable structured format.
+        {
+            var combinedArtifact = string.Join("\n\n", new[] { allTaskArtifactText, globalDocText }
+                .Where(t => !string.IsNullOrWhiteSpace(t)));
+            var sopGenerated = await _aiService.GenerateSingleFieldAsync(
+                intake, "sop_content", "SOP Steps (LLM Response)",
+                null, intake.AnalysisResult,
+                string.IsNullOrWhiteSpace(combinedArtifact) ? null : combinedArtifact);
+            if (!string.IsNullOrWhiteSpace(sopGenerated))
+            {
+                aiValues["sop_content"] = sopGenerated;
+                _logger.LogInformation(
+                    "Dedicated SOP generation completed for intake {IntakeId}.", intake.IntakeId);
+            }
+        }
+
+        // ── Dedicated Volumetrics generation (post-section-loop) ─────────────────
+        // GenerateSingleFieldAsync has an explicit month-by-month tabular format prompt.
+        // Run a targeted pass so vol_content is always structured for the Volumetrics table.
+        {
+            var volGenerated = await _aiService.GenerateSingleFieldAsync(
+                intake, "vol_content", "Monthly Volume Data (LLM Response)",
+                null, intake.AnalysisResult, allTaskArtifactText);
+            if (!string.IsNullOrWhiteSpace(volGenerated))
+            {
+                aiValues["vol_content"] = volGenerated;
+                _logger.LogInformation(
+                    "Dedicated Volumetrics generation completed for intake {IntakeId}.", intake.IntakeId);
+            }
+        }
+
         _logger.LogInformation(
             "RunAiAnalysisAsync for intake {IntakeId}: {Sections} sections, {AiCount} fields extracted.",
             intake.IntakeId, sectionsAnalyzed, aiValues.Count);
