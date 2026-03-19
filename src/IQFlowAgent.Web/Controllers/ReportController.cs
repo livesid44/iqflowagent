@@ -125,318 +125,7 @@ public class ReportController : Controller
         var intake = await _db.IntakeRecords.FindAsync(intakeId);
         if (intake == null) return NotFound();
 
-        var fieldDefs = _docxService.GetFieldDefinitions();
-
-        // Load all tasks with their artifacts and action logs
-        var tasks = await _db.IntakeTasks
-            .Where(t => t.IntakeRecordId == intakeId)
-            .Include(t => t.Documents)
-            .Include(t => t.ActionLogs)
-            .ToListAsync();
-
-        // Existing field statuses — needed to resolve LinkedTaskId
-        var existingStatuses = await _db.ReportFieldStatuses
-            .Where(r => r.IntakeRecordId == intakeId)
-            .ToListAsync();
-
-        // Intake-level documents (original uploads) — used as global background context
-        var intakeDocs = await _db.IntakeDocuments
-            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null)
-            .ToListAsync();
-        var globalDocText = await AggregateIntakeDocumentsTextAsync(intakeDocs);
-
-        // ── Build field-key → related-tasks map ─────────────────────────────
-        // A task is related to a field when:
-        //   (a) its title matches "[Report] Gather: {field.Label}"  (auto-created by CreateTaskForField), OR
-        //   (b) a field status has LinkedTaskId pointing to this task.
-        const string reportGatherPrefix = "[Report] Gather: ";
-        var fieldTaskMap = new Dictionary<string, List<IntakeTask>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var fd in fieldDefs)
-        {
-            fieldTaskMap[fd.Key] = tasks
-                .Where(t =>
-                    t.Title.Equals(reportGatherPrefix + fd.Label, StringComparison.OrdinalIgnoreCase)
-                    || existingStatuses.Any(s =>
-                        s.FieldKey == fd.Key
-                        && !string.IsNullOrWhiteSpace(s.LinkedTaskId)
-                        && s.LinkedTaskId == t.TaskId))
-                .ToList();
-        }
-
-        // ── Section-keyword task mapping (second pass) ────────────────────────
-        // Any task whose title or description mentions a keyword derived from a
-        // BARTOK section name is mapped to ALL fields in that section.
-        // This ensures that user-created checkpoint tasks (e.g. a task titled
-        // "RACI Review" or "Volumetrics Data") automatically feed the right
-        // section without requiring the exact "[Report] Gather: {label}" prefix.
-        // Keywords are derived dynamically from section names — no hardcoding.
-
-        // Pre-compute per-section keyword arrays (section names are static — avoid
-        // repeating the split+filter inside every loop iteration).
-        var sectionKeywordMap = fieldDefs
-            .GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                g => g.Key,
-                g => g.Key
-                    .Split([' ', '.', ':', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
-                    .Select(w => w.Trim().ToLowerInvariant())
-                    .Where(w => w.Length >= 3 && !int.TryParse(w, out _))
-                    .ToArray(),
-                StringComparer.OrdinalIgnoreCase);
-
-        // Pre-compute per-task word arrays so the inner predicate doesn't re-split strings.
-        var taskWordMap = tasks.ToDictionary(
-            t => t.Id,
-            t => (t.Title + " " + (t.Description ?? ""))
-                    .Split([' ', '-', '_', '.', ','], StringSplitOptions.RemoveEmptyEntries)
-                    .Select(w => w.ToLowerInvariant())
-                    .Where(w => w.Length >= 3)  // covers SLA, OCC, SOP and longer words
-                    .ToArray());
-
-        foreach (var sectionGroup in fieldDefs.GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase))
-        {
-            var sectionKeywords = sectionKeywordMap[sectionGroup.Key];
-            if (sectionKeywords.Length == 0) continue;
-
-            var keywordMatchedTasks = tasks.Where(t =>
-            {
-                var taskWords = taskWordMap[t.Id];
-                return sectionKeywords.Any(kw =>
-                    // Direct contains (section keyword appears verbatim in task text)
-                    t.Title.Contains(kw, StringComparison.OrdinalIgnoreCase)
-                    || (!string.IsNullOrWhiteSpace(t.Description)
-                        && t.Description.Contains(kw, StringComparison.OrdinalIgnoreCase))
-                    // Bidirectional prefix: "volume" is a prefix of "volumetrics";
-                    // "sla" is a prefix of "slas" — either direction counts.
-                    || taskWords.Any(tw =>
-                        kw.StartsWith(tw, StringComparison.OrdinalIgnoreCase)
-                        || tw.StartsWith(kw, StringComparison.OrdinalIgnoreCase)));
-            }).ToList();
-
-            if (keywordMatchedTasks.Count == 0) continue;
-
-            // Add matched tasks to each field in the section (deduplicated)
-            foreach (var fd in sectionGroup)
-                foreach (var t in keywordMatchedTasks.Where(t => !fieldTaskMap[fd.Key].Contains(t)))
-                    fieldTaskMap[fd.Key].Add(t);
-        }
-
-        // Pre-compute ALL task artifacts as a global fallback — used for BARTOK sections
-        // that have no dedicated checkpoint task yet ("remaining from intake tasks").
-        var allTaskArtifactText = tasks.Count > 0
-            ? await AggregateArtifactTextAsync(tasks)
-            : null;
-
-        // ── Per-section AI analysis ──────────────────────────────────────────
-        // One focused Azure OpenAI call per BARTOK section.
-        // • Sections with specific tasks: LLM receives only those tasks' artifacts
-        //   (keeps each call focused and prevents unrelated docs from drowning the signal).
-        // • Sections WITHOUT specific tasks: LLM receives ALL task artifacts as a
-        //   fallback ("remaining one should come from intake tasks").
-        var aiValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        int sectionsAnalyzed = 0;
-
-        foreach (var section in fieldDefs.GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase))
-        {
-            var sectionFields = section.ToList();
-
-            // Collect tasks specific to any field in this section (deduplicated)
-            var sectionTasks = sectionFields
-                .SelectMany(f => fieldTaskMap.TryGetValue(f.Key, out var ts)
-                    ? ts : Enumerable.Empty<IntakeTask>())
-                .Distinct()
-                .ToList();
-
-            // Section-specific tasks → focused artifact text.
-            // No specific tasks → fall back to ALL task artifacts (user's uploaded documents).
-            var sectionArtifactText = sectionTasks.Count > 0
-                ? await AggregateArtifactTextAsync(sectionTasks)
-                : allTaskArtifactText;
-
-            // ── Cross-section artifact supplement (all sections) ─────────────────
-            // A user may upload an Excel/Word/PDF to a task in section X that is also
-            // relevant to section Y (e.g. a volume Excel uploaded against the Volumetrics
-            // task is also needed for po_volumes in "2. Process Overview"; an SLA document
-            // uploaded against the SLA task is also needed for other process-overview
-            // fields).  When a section has its own dedicated tasks, it was previously
-            // isolated — it could only see those tasks' artifacts and missed data from
-            // all other sections' tasks.
-            // Fix: for every section that has its own dedicated tasks, also append
-            // artifacts from all tasks that are NOT already in this section's task list,
-            // labelled as supplementary context.  The LLM sees primary artifacts first
-            // and supplementary artifacts second, so extraction fidelity is preserved.
-            if (sectionTasks.Count > 0)
-            {
-                var crossSectionTasks = tasks.Where(t => !sectionTasks.Contains(t)).ToList();
-                if (crossSectionTasks.Count > 0)
-                {
-                    var crossText = await AggregateArtifactTextAsync(crossSectionTasks);
-                    if (!string.IsNullOrWhiteSpace(crossText))
-                        sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
-                            ? crossText
-                            : sectionArtifactText
-                              + "\n\n=== SUPPLEMENTARY ARTIFACTS FROM OTHER SECTIONS ===\n"
-                              + crossText;
-                }
-            }
-
-            // ── RACI supplement: existing RACI field values as structured context ──
-            // Prepend role-activity pairs to the artifact text so the LLM can derive
-            // concise task names directly from already-extracted data.
-            if (section.Key.Contains("RACI", StringComparison.OrdinalIgnoreCase))
-            {
-                var raciSiblings = existingStatuses
-                    .Where(s => s.FieldKey != "raci_content"
-                             && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
-                             && !string.IsNullOrWhiteSpace(s.FillValue))
-                    .OrderBy(s => s.FieldKey)
-                    .ToList();
-
-                if (raciSiblings.Count > 0)
-                {
-                    var raciContext = BuildRaciContext(raciSiblings);
-                    sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
-                        ? raciContext
-                        : raciContext + "\n\n" + sectionArtifactText;
-                }
-            }
-
-
-            var sectionValues = await _aiService.AnalyzeSectionFieldsAsync(
-                intake, section.Key, sectionFields,
-                sectionArtifactText, globalDocText, intake.AnalysisResult);
-
-            foreach (var kv in sectionValues)
-                aiValues[kv.Key] = kv.Value;
-
-            sectionsAnalyzed++;
-        }
-
-        // NOTE: OfflineFieldExtractor (hardcoded regex/pattern extraction) has been removed.
-        // All field extraction is now done exclusively by the LLM (AnalyzeSectionFieldsAsync),
-        // which receives the raw document text from uploaded files and extracts values verbatim.
-        // This avoids the fragility of hardcoded patterns that break when document formats change.
-
-        // ── Dedicated RACI matrix generation (post-section-loop) ────────────────
-        // After all sections are analyzed, if individual RACI fields (raci_task*/raci_role*)
-        // exist in the DB (from any previous run), generate raci_content using a focused
-        // GenerateSingleFieldAsync call with paired role-activity context. This overrides
-        // the AnalyzeSectionFieldsAsync result because GenerateSingleFieldAsync has a more
-        // targeted RACI system prompt and the pre-extracted data is the clearest source.
-        {
-            var raciSiblings = existingStatuses
-                .Where(s => s.FieldKey != "raci_content"
-                         && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
-                         && !string.IsNullOrWhiteSpace(s.FillValue))
-                .OrderBy(s => s.FieldKey)
-                .ToList();
-
-            if (raciSiblings.Count > 0)
-            {
-                var raciCtx      = BuildRaciContext(raciSiblings);
-                var raciGenerated = await _aiService.GenerateSingleFieldAsync(
-                    intake, "raci_content", "RACI Assignments (LLM Response)",
-                    null, intake.AnalysisResult, raciCtx);
-                if (!string.IsNullOrWhiteSpace(raciGenerated))
-                {
-                    aiValues["raci_content"] = raciGenerated;
-                    _logger.LogInformation(
-                        "Dedicated RACI generation completed for intake {IntakeId} using {Count} sibling fields.",
-                        intake.IntakeId, raciSiblings.Count);
-                }
-            }
-        }
-
-        _logger.LogInformation(
-            "Section-by-section analysis for intake {IntakeId}: {Sections} sections, " +
-            "{AiCount} AI field values extracted by LLM.",
-            intake.IntakeId, sectionsAnalyzed, aiValues.Count);
-
-        // ── Upsert field statuses ────────────────────────────────────────────
-        var now = DateTime.UtcNow;
-        int aiFilledCount = 0;
-
-        foreach (var fd in fieldDefs)
-        {
-            var existing = existingStatuses.FirstOrDefault(s => s.FieldKey == fd.Key);
-
-            aiValues.TryGetValue(fd.Key, out var aiVal);
-            // Discard AI values that are just placeholder text
-            if (!string.IsNullOrWhiteSpace(aiVal) && IsPlaceholderText(aiVal))
-                aiVal = null;
-
-            // All extraction is now LLM-based; no offline fallback
-            var fillValue = !string.IsNullOrWhiteSpace(aiVal) ? aiVal : null;
-            var notes     = !string.IsNullOrWhiteSpace(aiVal)
-                ? "Extracted by AI analysis of task artifacts and documents."
-                : null;
-
-            if (!string.IsNullOrWhiteSpace(aiVal)) aiFilledCount++;
-
-            if (existing == null)
-            {
-                var newStatus = !string.IsNullOrWhiteSpace(fillValue) ? "Available" : "Missing";
-                _db.ReportFieldStatuses.Add(new ReportFieldStatus
-                {
-                    IntakeRecordId      = intakeId,
-                    FieldKey            = fd.Key,
-                    FieldLabel          = fd.Label,
-                    Section             = fd.Section,
-                    TemplatePlaceholder = fd.TemplatePlaceholder,
-                    Status              = newStatus,
-                    FillValue           = fillValue,
-                    Notes               = notes,
-                    AnalyzedAt          = now,
-                    UpdatedAt           = now
-                });
-            }
-            else
-            {
-                existing.TemplatePlaceholder = fd.TemplatePlaceholder;
-                existing.FieldLabel          = fd.Label;
-                existing.Section             = fd.Section;
-                existing.UpdatedAt           = now;
-                existing.AnalyzedAt          = now;
-
-                if (existing.Status != "NA")
-                {
-                    if (!string.IsNullOrWhiteSpace(fillValue))
-                    {
-                        // New value found — update everything
-                        existing.Status    = "Available";
-                        existing.FillValue = fillValue;
-                        existing.Notes     = notes;
-                    }
-                    else if (string.IsNullOrWhiteSpace(existing.FillValue))
-                    {
-                        // No new value and nothing previously saved — mark Missing
-                        existing.Status = "Missing";
-                    }
-                    // else: re-run found nothing new, but field already has a good value
-                    // → preserve existing Status and FillValue unchanged
-                }
-            }
-        }
-
-        // ── Safety net: Status must always match the actual FillValue ─────────
-        // Guards against any edge-case in the update branches above (or stale data
-        // left by older code versions) where a non-empty FillValue ends up with a
-        // "Missing" status badge, confusing users.
-        foreach (var entry in _db.ChangeTracker.Entries<ReportFieldStatus>()
-            .Where(e => e.State is Microsoft.EntityFrameworkCore.EntityState.Added
-                                 or Microsoft.EntityFrameworkCore.EntityState.Modified))
-        {
-            var e = entry.Entity;
-            if (e.Status != "NA")
-            {
-                if (!string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Missing")
-                    e.Status = "Available";
-                else if (string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Available")
-                    e.Status = "Missing";
-            }
-        }
-
-        await _db.SaveChangesAsync();
+        var (sectionsAnalyzed, aiFilledCount) = await RunAiAnalysisAsync(intake);
 
         TempData["Success"] = aiFilledCount > 0
             ? $"Analysis complete ({sectionsAnalyzed} sections processed). " +
@@ -610,6 +299,11 @@ public class ReportController : Controller
     }
 
     // ── POST /Report/Generate ────────────────────────────────────────────────
+    /// <summary>
+    /// Complete pipeline: runs AI analysis for all sections (RACI, SOP, Volume, OSS etc.)
+    /// using the same logic as AnalyzeFields, then generates the DOCX from the updated
+    /// field statuses. No separate "Generate RACI Matrix" step is required.
+    /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Generate(int intakeId)
@@ -617,17 +311,16 @@ public class ReportController : Controller
         var intake = await _db.IntakeRecords.FindAsync(intakeId);
         if (intake == null) return NotFound();
 
+        // ── Step 1: run the full AI analysis pipeline for all sections ──────────
+        // This ensures RACI, SOP, Volume, OSS etc. are all freshly generated
+        // before the DOCX is produced. Any fields that remain missing after AI
+        // analysis will be left as-is (using whatever values were previously saved).
+        await RunAiAnalysisAsync(intake);
+
+        // ── Step 2: reload field statuses after AI analysis ──────────────────────
         var fieldStatuses = await _db.ReportFieldStatuses
             .Where(r => r.IntakeRecordId == intakeId)
             .ToListAsync();
-
-        // Guard: all fields must be Available or NA
-        var blocking = fieldStatuses.Where(f => f.Status is "Missing" or "Pending" or "TaskCreated").ToList();
-        if (blocking.Count > 0)
-        {
-            TempData["Error"] = $"{blocking.Count} field(s) are not yet resolved. Please address them before generating the report.";
-            return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
-        }
 
         // Locate the template
         var templatePath = Path.Combine(_env.WebRootPath, "templates", TemplateName);
@@ -740,73 +433,276 @@ public class ReportController : Controller
             report.ReportFileName);
     }
 
-    // ── POST /Report/GenerateRaciContent ─────────────────────────────────────
-    /// <summary>
-    /// Dedicated RACI matrix generation: loads all raci_task* and raci_role* field
-    /// values, pairs them by index (role N + its activities), sends to the LLM with
-    /// a focused prompt, and stores the result as raci_content.
-    /// This is the "pass this table to LLM and replace" approach requested by the user.
-    /// </summary>
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> GenerateRaciContent(int intakeId)
-    {
-        var intake = await _db.IntakeRecords.FindAsync(intakeId);
-        if (intake == null) return NotFound();
+    // ── POST /Report/GenerateRaciContent — REMOVED ───────────────────────────
+    // The dedicated "Generate RACI Matrix" endpoint has been removed. The full AI
+    // analysis pipeline (RunAiAnalysisAsync) is now called directly from the Generate
+    // action, ensuring RACI, SOP, Volume, OSS and all other sections are processed
+    // through the same unified pipeline when clicking "Generate Final Report".
 
-        var raciSiblings = await _db.ReportFieldStatuses
-            .Where(f => f.IntakeRecordId == intakeId
-                     && f.FieldKey != "raci_content"
-                     && f.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
-                     && !string.IsNullOrWhiteSpace(f.FillValue))
-            .OrderBy(f => f.FieldKey)
+    // ── Helper: run the full AI field analysis pipeline ──────────────────────
+    /// <summary>
+    /// Runs section-by-section AI analysis for all BARTOK template fields, including a
+    /// dedicated RACI matrix generation pass. Upserts ReportFieldStatus rows in the DB.
+    /// Called by both AnalyzeFields (standalone re-analysis) and Generate (full pipeline).
+    /// Returns (sectionsAnalyzed, aiFilledCount) for progress reporting.
+    /// </summary>
+    private async Task<(int sectionsAnalyzed, int aiFilledCount)> RunAiAnalysisAsync(IntakeRecord intake)
+    {
+        var intakeId  = intake.Id;
+        var fieldDefs = _docxService.GetFieldDefinitions();
+
+        // Load all tasks with their artifacts and action logs
+        var tasks = await _db.IntakeTasks
+            .Where(t => t.IntakeRecordId == intakeId)
+            .Include(t => t.Documents)
+            .Include(t => t.ActionLogs)
             .ToListAsync();
 
-        if (raciSiblings.Count == 0)
-            return Json(new { success = false, message = "No RACI field data found. Run 'Re-run AI Field Analysis' first to extract RACI tasks and roles, then try again." });
+        // Existing field statuses — needed to resolve LinkedTaskId and for RACI supplement
+        var existingStatuses = await _db.ReportFieldStatuses
+            .Where(r => r.IntakeRecordId == intakeId)
+            .ToListAsync();
 
-        var raciContext = BuildRaciContext(raciSiblings);
+        // Intake-level documents (original uploads) — used as global background context
+        var intakeDocs = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null)
+            .ToListAsync();
+        var globalDocText = await AggregateIntakeDocumentsTextAsync(intakeDocs);
 
-        var generated = await _aiService.GenerateSingleFieldAsync(
-            intake, "raci_content", "RACI Assignments (LLM Response)",
-            null, intake.AnalysisResult, raciContext);
-
-        if (string.IsNullOrWhiteSpace(generated))
-            return Json(new { success = false, message = "AI could not generate RACI matrix. Ensure Azure OpenAI is configured and try again." });
-
-        var fieldDef = _docxService.GetFieldDefinitions()
-            .FirstOrDefault(f => f.Key == "raci_content");
-        var existing = await _db.ReportFieldStatuses
-            .FirstOrDefaultAsync(f => f.IntakeRecordId == intakeId && f.FieldKey == "raci_content");
-
-        var now = DateTime.UtcNow;
-        if (existing == null)
+        // ── Build field-key → related-tasks map ─────────────────────────────
+        const string reportGatherPrefix = "[Report] Gather: ";
+        var fieldTaskMap = new Dictionary<string, List<IntakeTask>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fd in fieldDefs)
         {
-            _db.ReportFieldStatuses.Add(new ReportFieldStatus
-            {
-                IntakeRecordId      = intakeId,
-                FieldKey            = "raci_content",
-                FieldLabel          = fieldDef?.Label ?? "RACI Assignments (LLM Response)",
-                Section             = fieldDef?.Section ?? "3. RACI",
-                TemplatePlaceholder = fieldDef?.TemplatePlaceholder ?? "",
-                Status              = "Available",
-                FillValue           = generated,
-                Notes               = $"Generated from {raciSiblings.Count} RACI field(s) by dedicated AI call.",
-                AnalyzedAt          = now,
-                UpdatedAt           = now
-            });
+            fieldTaskMap[fd.Key] = tasks
+                .Where(t =>
+                    t.Title.Equals(reportGatherPrefix + fd.Label, StringComparison.OrdinalIgnoreCase)
+                    || existingStatuses.Any(s =>
+                        s.FieldKey == fd.Key
+                        && !string.IsNullOrWhiteSpace(s.LinkedTaskId)
+                        && s.LinkedTaskId == t.TaskId))
+                .ToList();
         }
-        else
+
+        // ── Section-keyword task mapping (second pass) ────────────────────────
+        var sectionKeywordMap = fieldDefs
+            .GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Key
+                    .Split([' ', '.', ':', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => w.Trim().ToLowerInvariant())
+                    .Where(w => w.Length >= 3 && !int.TryParse(w, out _))
+                    .ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var taskWordMap = tasks.ToDictionary(
+            t => t.Id,
+            t => (t.Title + " " + (t.Description ?? ""))
+                    .Split([' ', '-', '_', '.', ','], StringSplitOptions.RemoveEmptyEntries)
+                    .Select(w => w.ToLowerInvariant())
+                    .Where(w => w.Length >= 3)
+                    .ToArray());
+
+        foreach (var sectionGroup in fieldDefs.GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase))
         {
-            existing.Status     = "Available";
-            existing.FillValue  = generated;
-            existing.Notes      = $"Regenerated from {raciSiblings.Count} RACI field(s) by dedicated AI call.";
-            existing.AnalyzedAt = now;
-            existing.UpdatedAt  = now;
+            var sectionKeywords = sectionKeywordMap[sectionGroup.Key];
+            if (sectionKeywords.Length == 0) continue;
+
+            var keywordMatchedTasks = tasks.Where(t =>
+            {
+                var taskWords = taskWordMap[t.Id];
+                return sectionKeywords.Any(kw =>
+                    t.Title.Contains(kw, StringComparison.OrdinalIgnoreCase)
+                    || (!string.IsNullOrWhiteSpace(t.Description)
+                        && t.Description.Contains(kw, StringComparison.OrdinalIgnoreCase))
+                    || taskWords.Any(tw =>
+                        kw.StartsWith(tw, StringComparison.OrdinalIgnoreCase)
+                        || tw.StartsWith(kw, StringComparison.OrdinalIgnoreCase)));
+            }).ToList();
+
+            if (keywordMatchedTasks.Count == 0) continue;
+
+            foreach (var fd in sectionGroup)
+                foreach (var t in keywordMatchedTasks.Where(t => !fieldTaskMap[fd.Key].Contains(t)))
+                    fieldTaskMap[fd.Key].Add(t);
+        }
+
+        var allTaskArtifactText = tasks.Count > 0
+            ? await AggregateArtifactTextAsync(tasks)
+            : null;
+
+        // ── Per-section AI analysis ──────────────────────────────────────────
+        var aiValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int sectionsAnalyzed = 0;
+
+        foreach (var section in fieldDefs.GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase))
+        {
+            var sectionFields = section.ToList();
+
+            var sectionTasks = sectionFields
+                .SelectMany(f => fieldTaskMap.TryGetValue(f.Key, out var ts)
+                    ? ts : Enumerable.Empty<IntakeTask>())
+                .Distinct()
+                .ToList();
+
+            var sectionArtifactText = sectionTasks.Count > 0
+                ? await AggregateArtifactTextAsync(sectionTasks)
+                : allTaskArtifactText;
+
+            // Cross-section artifact supplement
+            if (sectionTasks.Count > 0)
+            {
+                var crossSectionTasks = tasks.Where(t => !sectionTasks.Contains(t)).ToList();
+                if (crossSectionTasks.Count > 0)
+                {
+                    var crossText = await AggregateArtifactTextAsync(crossSectionTasks);
+                    if (!string.IsNullOrWhiteSpace(crossText))
+                        sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
+                            ? crossText
+                            : sectionArtifactText
+                              + "\n\n=== SUPPLEMENTARY ARTIFACTS FROM OTHER SECTIONS ===\n"
+                              + crossText;
+                }
+            }
+
+            // RACI supplement: prepend role-activity pairs for the RACI section
+            if (section.Key.Contains("RACI", StringComparison.OrdinalIgnoreCase))
+            {
+                var raciSiblings = existingStatuses
+                    .Where(s => s.FieldKey != "raci_content"
+                             && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
+                             && !string.IsNullOrWhiteSpace(s.FillValue))
+                    .OrderBy(s => s.FieldKey)
+                    .ToList();
+
+                if (raciSiblings.Count > 0)
+                {
+                    var raciContext = BuildRaciContext(raciSiblings);
+                    sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
+                        ? raciContext
+                        : raciContext + "\n\n" + sectionArtifactText;
+                }
+            }
+
+            var sectionValues = await _aiService.AnalyzeSectionFieldsAsync(
+                intake, section.Key, sectionFields,
+                sectionArtifactText, globalDocText, intake.AnalysisResult);
+
+            foreach (var kv in sectionValues)
+                aiValues[kv.Key] = kv.Value;
+
+            sectionsAnalyzed++;
+        }
+
+        // ── Dedicated RACI matrix generation (post-section-loop) ────────────────
+        // After all sections are analyzed, generate raci_content using a focused
+        // GenerateSingleFieldAsync call with the paired role-activity context.
+        // This overrides the AnalyzeSectionFieldsAsync result for the RACI section.
+        {
+            var raciSiblings = existingStatuses
+                .Where(s => s.FieldKey != "raci_content"
+                         && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(s.FillValue))
+                .OrderBy(s => s.FieldKey)
+                .ToList();
+
+            if (raciSiblings.Count > 0)
+            {
+                var raciCtx       = BuildRaciContext(raciSiblings);
+                var raciGenerated = await _aiService.GenerateSingleFieldAsync(
+                    intake, "raci_content", "RACI Assignments (LLM Response)",
+                    null, intake.AnalysisResult, raciCtx);
+                if (!string.IsNullOrWhiteSpace(raciGenerated))
+                {
+                    aiValues["raci_content"] = raciGenerated;
+                    _logger.LogInformation(
+                        "Dedicated RACI generation completed for intake {IntakeId} using {Count} sibling fields.",
+                        intake.IntakeId, raciSiblings.Count);
+                }
+            }
+        }
+
+        _logger.LogInformation(
+            "RunAiAnalysisAsync for intake {IntakeId}: {Sections} sections, {AiCount} fields extracted.",
+            intake.IntakeId, sectionsAnalyzed, aiValues.Count);
+
+        // ── Upsert field statuses ────────────────────────────────────────────
+        var now = DateTime.UtcNow;
+        int aiFilledCount = 0;
+
+        foreach (var fd in fieldDefs)
+        {
+            var existing = existingStatuses.FirstOrDefault(s => s.FieldKey == fd.Key);
+
+            aiValues.TryGetValue(fd.Key, out var aiVal);
+            if (!string.IsNullOrWhiteSpace(aiVal) && IsPlaceholderText(aiVal))
+                aiVal = null;
+
+            var fillValue = !string.IsNullOrWhiteSpace(aiVal) ? aiVal : null;
+            var notes     = !string.IsNullOrWhiteSpace(aiVal)
+                ? "Extracted by AI analysis of task artifacts and documents."
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(aiVal)) aiFilledCount++;
+
+            if (existing == null)
+            {
+                _db.ReportFieldStatuses.Add(new ReportFieldStatus
+                {
+                    IntakeRecordId      = intakeId,
+                    FieldKey            = fd.Key,
+                    FieldLabel          = fd.Label,
+                    Section             = fd.Section,
+                    TemplatePlaceholder = fd.TemplatePlaceholder,
+                    Status              = !string.IsNullOrWhiteSpace(fillValue) ? "Available" : "Missing",
+                    FillValue           = fillValue,
+                    Notes               = notes,
+                    AnalyzedAt          = now,
+                    UpdatedAt           = now
+                });
+            }
+            else
+            {
+                existing.TemplatePlaceholder = fd.TemplatePlaceholder;
+                existing.FieldLabel          = fd.Label;
+                existing.Section             = fd.Section;
+                existing.UpdatedAt           = now;
+                existing.AnalyzedAt          = now;
+
+                if (existing.Status != "NA")
+                {
+                    if (!string.IsNullOrWhiteSpace(fillValue))
+                    {
+                        existing.Status    = "Available";
+                        existing.FillValue = fillValue;
+                        existing.Notes     = notes;
+                    }
+                    else if (string.IsNullOrWhiteSpace(existing.FillValue))
+                    {
+                        existing.Status = "Missing";
+                    }
+                }
+            }
+        }
+
+        // Safety net: Status must always match the actual FillValue
+        foreach (var entry in _db.ChangeTracker.Entries<ReportFieldStatus>()
+            .Where(e => e.State is Microsoft.EntityFrameworkCore.EntityState.Added
+                                 or Microsoft.EntityFrameworkCore.EntityState.Modified))
+        {
+            var e = entry.Entity;
+            if (e.Status != "NA")
+            {
+                if (!string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Missing")
+                    e.Status = "Available";
+                else if (string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Available")
+                    e.Status = "Missing";
+            }
         }
 
         await _db.SaveChangesAsync();
-        return Json(new { success = true, value = generated });
+        return (sectionsAnalyzed, aiFilledCount);
     }
 
     // ── Helper: build role-activity paired RACI context string ───────────────
