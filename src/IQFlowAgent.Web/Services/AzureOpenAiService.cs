@@ -3006,6 +3006,191 @@ public class AzureOpenAiService : IAzureOpenAiService
         return result;
     }
 
+    // ── PolishDocumentFieldsAsync ─────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<Dictionary<string, string>> PolishDocumentFieldsAsync(
+        IntakeRecord intake,
+        IList<(string Key, string Label, string Section, string Value)> documentSnapshot,
+        string? artifactText)
+    {
+        _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
+        _currentIntakeId      = intake.Id;
+
+        var (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion) = await GetAiConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY")
+            || deployment.Equals("YOUR_DEPLOYMENT_NAME", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Azure OpenAI not configured — skipping document polish pass for intake {IntakeId}.",
+                intake.IntakeId);
+            return new Dictionary<string, string>();
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out _))
+        {
+            _logger.LogWarning("Azure OpenAI endpoint invalid — skipping polish pass.");
+            return new Dictionary<string, string>();
+        }
+
+        var requestUrl =
+            $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions" +
+            $"?api-version={apiVersion}";
+
+        // Build a key whitelist from the snapshot (only keys in the snapshot are accepted back)
+        var validKeys = new HashSet<string>(
+            documentSnapshot.Select(f => f.Key), StringComparer.OrdinalIgnoreCase);
+
+        // ── System prompt ─────────────────────────────────────────────────────
+        const string systemPrompt = """
+            You are a senior BARTOK Schedule 8 SOP document quality reviewer at TechM.
+            You will receive a COMPLETE draft BARTOK SOP document — every field that has already
+            been filled in is shown below, grouped by section.
+
+            YOUR TASK: Review each field and return an improved version that is:
+            - More professional, precise, and document-ready
+            - Consistent in tone across the whole document
+            - Free of vague or generic filler phrases ("to be confirmed", "as per process owner", etc.)
+            - Still grounded in the information already present — do NOT invent facts not in the draft
+
+            RULES:
+            1. Return ONLY fields where you have made a genuine improvement.
+               If a field is already well-written, OMIT it from your response.
+            2. Do NOT add information that is absent from the draft document or the source artifact text.
+            3. Do NOT change the format of special structured fields — they are already excluded.
+            4. Do NOT use placeholder language such as "[TO CONFIRM]", "TBC", or "N/A — not specified".
+               If you cannot improve a field without inventing information, omit it.
+            5. Keep field values concise and suitable for direct insertion into a Word document cell.
+            6. Respond ONLY with valid JSON (no markdown fences, no commentary):
+               {"fields": [{"key": "field_key", "fillValue": "improved value"}]}
+            """;
+
+        // ── User message: complete document snapshot ──────────────────────────
+        var sb = new System.Text.StringBuilder();
+
+        sb.AppendLine("=== BARTOK SOP DOCUMENT — COMPLETE DRAFT ===");
+        sb.AppendLine($"Process: {intake.ProcessName}");
+        sb.AppendLine($"Business Unit: {intake.BusinessUnit}  |  Department: {intake.Department}");
+        sb.AppendLine($"Process Owner: {intake.ProcessOwnerName} ({intake.ProcessOwnerEmail})");
+        sb.AppendLine($"Country: {intake.Country}  |  Description: {intake.Description}");
+        sb.AppendLine();
+
+        // Group fields by section for readability
+        var bySection = documentSnapshot
+            .GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key);
+
+        foreach (var section in bySection)
+        {
+            sb.AppendLine($"--- {section.Key} ---");
+            foreach (var (key, label, _, value) in section)
+                sb.AppendLine($"  [{key}] {label}: {value}");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("=== VALID FIELD KEYS (return ONLY keys from this list) ===");
+        sb.AppendLine(string.Join(", ", validKeys));
+
+        // Optionally include a short artifact excerpt as supporting context
+        if (!string.IsNullOrWhiteSpace(artifactText))
+        {
+            sb.AppendLine();
+            sb.AppendLine("=== SOURCE ARTIFACT CONTEXT (supporting reference) ===");
+            const int artifactCap = 6_000;
+            sb.AppendLine(artifactText.Length > artifactCap
+                ? artifactText[..artifactCap] + "\n[...truncated]"
+                : artifactText);
+        }
+
+        var userMessage = sb.ToString();
+
+        try
+        {
+            // Use a generous token budget — we may be returning up to ~50 fields
+            const int polishMaxTokens = 4_000;
+
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "PolishDocument") }
+                },
+                max_tokens  = Math.Min(maxTokens, polishMaxTokens),
+                temperature = 0.3,  // moderate — improve quality but stay grounded
+                top_p       = 1.0,
+                model       = modelVersion
+            };
+
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
+
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "PolishDocument");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Azure OpenAI returned HTTP {Code} during document polish for intake {IntakeId}: {Body}",
+                    (int)response.StatusCode, intake.IntakeId, errBody);
+                return new Dictionary<string, string>();
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(responseText);
+            var content = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            if (string.IsNullOrWhiteSpace(content))
+                return new Dictionary<string, string>();
+
+            return ParsePolishResponse(StripMarkdownFences(content), validKeys);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "PolishDocumentFieldsAsync failed for intake {IntakeId} — returning empty improvements.",
+                intake.IntakeId);
+            return new Dictionary<string, string>();
+        }
+    }
+
+    /// <summary>
+    /// Parses the JSON returned by <see cref="PolishDocumentFieldsAsync"/>.
+    /// Only keys present in <paramref name="validKeys"/> are accepted (security guard).
+    /// </summary>
+    private static Dictionary<string, string> ParsePolishResponse(
+        string json, HashSet<string> validKeys)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("fields", out var fieldsEl))
+                return result;
+
+            foreach (var el in fieldsEl.EnumerateArray())
+            {
+                var key = el.TryGetProperty("key",       out var k) ? k.GetString() ?? "" : "";
+                var val = el.TryGetProperty("fillValue", out var v) ? v.GetString() ?? "" : "";
+
+                if (validKeys.Contains(key) && !string.IsNullOrWhiteSpace(val))
+                    result[key] = val;
+            }
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON — return whatever was parsed so far
+        }
+        return result;
+    }
+
     // ── GenerateDescriptionAsync ───────────────────────────────────────────────
 
     /// <summary>

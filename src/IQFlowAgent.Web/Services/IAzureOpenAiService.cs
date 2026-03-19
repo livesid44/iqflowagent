@@ -90,4 +90,23 @@ public interface IAzureOpenAiService
         string? taskArtifactText,
         string? globalDocText,
         string? analysisJson);
+
+    /// <summary>
+    /// Performs a final quality-improvement pass over the entire BARTOK document.
+    /// Receives a snapshot of every field that has already been filled in (by the
+    /// initial AI analysis), re-reads the full document as a coherent whole, and
+    /// returns improved fill values for any fields whose content can be made more
+    /// professional, accurate, or complete — without adding information that is not
+    /// already present in the source data.
+    /// <para>
+    /// Structured multi-line blocks (RACI matrix, SOP steps, volumetrics) are excluded
+    /// from the polish pass because they have their own dedicated parsers.
+    /// </para>
+    /// Returns a dictionary of fieldKey → polished value (only improved fields are
+    /// included; empty dict when AI is not configured or no improvement is possible).
+    /// </summary>
+    Task<Dictionary<string, string>> PolishDocumentFieldsAsync(
+        IntakeRecord intake,
+        IList<(string Key, string Label, string Section, string Value)> documentSnapshot,
+        string? artifactText);
 }

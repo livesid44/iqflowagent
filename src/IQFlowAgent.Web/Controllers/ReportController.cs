@@ -300,9 +300,13 @@ public class ReportController : Controller
 
     // ── POST /Report/Generate ────────────────────────────────────────────────
     /// <summary>
-    /// Complete pipeline: runs AI analysis for all sections (RACI, SOP, Volume, OSS etc.)
-    /// using the same logic as AnalyzeFields, then generates the DOCX from the updated
-    /// field statuses. No separate "Generate RACI Matrix" step is required.
+    /// Complete pipeline:
+    ///   1. Runs AI analysis for all sections (RACI, SOP, Volume, OSS etc.)
+    ///   2. Reloads the filled field statuses
+    ///   3. Runs a final LLM "polish" pass — sends the complete document snapshot to the
+    ///      LLM so it can review and improve every section's content quality as a coherent
+    ///      whole, without adding information or changing structure.
+    ///   4. Generates the DOCX from the polished field values.
     /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
@@ -322,6 +326,72 @@ public class ReportController : Controller
             .Where(r => r.IntakeRecordId == intakeId)
             .ToListAsync();
 
+        // ── Step 3: final LLM polish pass ────────────────────────────────────────
+        // Build a document snapshot of all filled text fields (excluding structured
+        // blocks that have their own parsers: raci_content, sop_content, vol_content).
+        // Send the snapshot to the LLM for a single quality-review pass that improves
+        // professional tone, precision, and consistency across the whole document.
+        // The polished values are applied in-memory only — no DB write — so the
+        // database always reflects what the AI analysis extracted, while the generated
+        // DOCX gets the highest-quality version of every field.
+        try
+        {
+            // Fields excluded from polishing: they have dedicated structured parsers
+            // and their internal format (semicolons/pipes) would be damaged by a
+            // generic quality-improvement rewrite.
+            var structuredKeys = new HashSet<string>(
+                ["raci_content", "sop_content", "vol_content"],
+                StringComparer.OrdinalIgnoreCase);
+
+            var snapshot = fieldStatuses
+                .Where(fs =>
+                    fs.Status != "NA"
+                    && !string.IsNullOrWhiteSpace(fs.FillValue)
+                    && !structuredKeys.Contains(fs.FieldKey))
+                .Select(fs => (fs.FieldKey, fs.FieldLabel, fs.Section, fs.FillValue!))
+                .ToList();
+
+            if (snapshot.Count > 0)
+            {
+                // Collect all available artifact text for context
+                var allTasks = await _db.IntakeTasks
+                    .Where(t => t.IntakeRecordId == intakeId)
+                    .Include(t => t.Documents)
+                    .Include(t => t.ActionLogs)
+                    .ToListAsync();
+                var artifactText = allTasks.Count > 0
+                    ? await AggregateArtifactTextAsync(allTasks)
+                    : null;
+
+                var polishedValues = await _aiService.PolishDocumentFieldsAsync(
+                    intake, snapshot, artifactText);
+
+                // Apply polished values to fieldStatuses in-memory
+                int polishedCount = 0;
+                foreach (var kv in polishedValues)
+                {
+                    var fs = fieldStatuses.FirstOrDefault(f =>
+                        f.FieldKey.Equals(kv.Key, StringComparison.OrdinalIgnoreCase));
+                    if (fs != null && !IsPlaceholderText(kv.Value))
+                    {
+                        fs.FillValue = kv.Value;
+                        polishedCount++;
+                    }
+                }
+
+                _logger.LogInformation(
+                    "Document polish pass completed for intake {IntakeId}: {Count}/{Total} fields improved.",
+                    intake.IntakeId, polishedCount, snapshot.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Polish pass is best-effort — a failure must not block DOCX generation
+            _logger.LogWarning(ex,
+                "Document polish pass failed for intake {IntakeId} — proceeding with unpolished values.",
+                intake.IntakeId);
+        }
+
         // Locate the template
         var templatePath = Path.Combine(_env.WebRootPath, "templates", TemplateName);
         if (!System.IO.File.Exists(templatePath))
@@ -332,7 +402,7 @@ public class ReportController : Controller
 
         try
         {
-            // Generate the filled docx
+            // Generate the filled docx from the polished field values
             var docxBytes = await _docxService.GenerateReportAsync(intake, fieldStatuses, templatePath);
 
             var now = DateTime.UtcNow;
