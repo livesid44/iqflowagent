@@ -1872,13 +1872,21 @@ public class AzureOpenAiService : IAzureOpenAiService
 
             Special rules for multi-line block fields (use actual newlines \n in your response):
 
-            raciContent — produce a compact, pipe-delimited RACI matrix using EXACTLY this structure:
-              Line 1:  TASKS: [short task 1] | [short task 2] | [short task 3] | [short task 4]
+            raciContent — produce a compact RACI matrix using EXACTLY this structure:
+              Line 1:  TASKS: [short task 1] ; [short task 2] ; [short task 3] ; [short task 4]
               Line 2+: [Role name]: [a] | [b] | [c] | [d]
             Where each assignment is R, A, C, I, or a hyphen (-) for no assignment.
-            TASKS line: use concise 2–5 word task names derived from the source — NOT the full pipe-separated descriptions.
-            Example: "Submit Change Request", not "Compiles & describes change request | Outlines schedule requirements | ..."
-            Role names: copy the short role title from the source exactly.
+            CRITICAL — TASKS: line separator: use a SEMICOLON (;) between task names, NOT a pipe.
+            Pipe (|) is RESERVED for separating R/A/C/I assignments on each role line.
+            IMPORTANT — source data structure: the source RACI table has column headers that contain
+            long pipe-separated responsibility bullet lists, e.g.:
+              "Compiles & describes change request | Outlines schedule requirements | Indicates priority | ..."
+            These bullet lists describe WHAT the role does for that task — they are NOT the task name.
+            You MUST derive a concise 2–5 word task name from the OVERALL PURPOSE of the column, e.g.:
+              Source column header: "Compiles & describes change request | Outlines schedule requirements | ..."
+              Correct task name: "Submit Change Request"
+            FORBIDDEN on the TASKS: line: copying bullet list content or using pipe characters in task names.
+            Role names: copy the short role title from the source (e.g. "Change Requester").
             Derive real task names and role titles from the intake data and artifact text.
 
             sopContent — produce all SOP steps, one step per block:
@@ -2811,21 +2819,30 @@ public class AzureOpenAiService : IAzureOpenAiService
             // ── Per-field override for RACI data ──────────────────────────────
             (hasRaciField ? "\n\n" +
             "SPECIAL RULE FOR KEY \"raci_content\" (RACI Assignment Matrix) — overrides rule 4 for this field only:\n" +
-            "  Produce a compact, pipe-delimited RACI matrix using EXACTLY this line structure:\n" +
-            "    Line 1:  TASKS: [short task 1] | [short task 2] | [short task 3] | [short task 4]\n" +
+            "  Produce a structured RACI matrix using EXACTLY this line format:\n" +
+            "    Line 1:  TASKS: [short task 1] ; [short task 2] ; [short task 3] ; [short task 4]\n" +
             "    Line 2+: [Role name]: [a] | [b] | [c] | [d]\n" +
             "  Where each assignment [a]–[d] is exactly ONE of: R, A, C, I, or a hyphen (-).\n\n" +
+            "  CRITICAL — TASKS: line separator: use a SEMICOLON (;) between task names.\n" +
+            "  Pipe (|) is RESERVED only for separating R/A/C/I assignments on each role line.\n\n" +
+            "  IMPORTANT — how to read the source RACI table:\n" +
+            "  The source RACI table column headers contain long PIPE-SEPARATED RESPONSIBILITY BULLET LISTS, e.g.:\n" +
+            "    \"Compiles & describes change request | Outlines schedule requirements | Indicates priority | ...\"\n" +
+            "  These bullet lists describe WHAT a role does for that task — they are NOT the task name.\n" +
+            "  You MUST derive a concise 2–5 word task name from the OVERALL PURPOSE of the column:\n" +
+            "    Source column header: \"Compiles & describes change request | Outlines schedule requirements | ...\"\n" +
+            "    Correct task name: \"Submit Change Request\"\n\n" +
             "  Rules:\n" +
-            "  - TASKS line: derive a concise 2–5 word task name from each task column in the source.\n" +
-            "    FORBIDDEN: copying the full pipe-separated responsibility list as the task name.\n" +
-            "    WRONG EXAMPLE:  \"Compiles & describes change request | Outlines schedule requirements | ...\"\n" +
-            "    CORRECT EXAMPLE: \"Submit Change Request\"\n" +
+            "  - TASKS line: one concise 2–5 word task name per column, separated by SEMICOLONS.\n" +
+            "    FORBIDDEN: copying bullet list text or using pipe characters within a task name.\n" +
+            "    WRONG:   TASKS: Compiles & describes change request | Outlines schedule requirements | ...\n" +
+            "    CORRECT: TASKS: Submit Change Request ; Create Demand Entry ; Facilitate Communication ; Assess & Qualify Change\n" +
             "  - Role names: copy the short role title from the source (e.g. \"Change Requester\").\n" +
             "  - Each assignment cell: one letter (R / A / C / I) or a hyphen (-). No other text.\n" +
             "  - Include up to 4 tasks and up to 4 roles. If the source has more, select the most significant 4.\n" +
             "  - Do NOT include task descriptions, responsibilities, or any explanatory text in the matrix.\n" +
-            "  EXAMPLE OUTPUT (2 tasks, 2 roles):\n" +
-            "  TASKS: Submit Change Request | Assess & Approve Change\n" +
+            "  EXAMPLE OUTPUT (2 tasks, 2 roles — note semicolons between task names, pipes for assignments):\n" +
+            "  TASKS: Submit Change Request ; Assess & Approve Change\n" +
             "  Change Requester: R | -\n" +
             "  Change Approver: - | A" : "") +
             // ── Per-field override for SOP steps ──────────────────────────────

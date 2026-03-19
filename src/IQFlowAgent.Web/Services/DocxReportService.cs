@@ -412,11 +412,14 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
-    /// Parses a compact pipe-delimited RACI matrix (produced by the LLM) and inserts it
+    /// Parses a structured RACI matrix (produced by the LLM) and inserts it
     /// into the RACI table in the DOCX body as proper individual-cell table rows.
     /// Expected format:
-    ///   Line 1: TASKS: [Task 1] | [Task 2] | [Task 3] | [Task 4]
+    ///   Line 1: TASKS: [Task 1] ; [Task 2] ; [Task 3] ; [Task 4]
     ///   Line N: [Role name]: R | - | A | -
+    /// The TASKS: line uses semicolons to separate task names (avoiding collision with
+    /// the pipe characters that appear inside the source RACI column header descriptions).
+    /// Pipe-separated TASKS: lines are also accepted for backward compatibility.
     /// Falls back to <see cref="ReplaceTableDataWithLlmContent"/> when parsing fails.
     /// </summary>
     private static void ReplaceRaciTable(Body body, string raciContent)
@@ -432,10 +435,18 @@ public class DocxReportService : IDocxReportService
         {
             if (line.StartsWith("TASKS:", StringComparison.OrdinalIgnoreCase))
             {
-                taskNames = line["TASKS:".Length..]
-                    .Split('|', StringSplitOptions.TrimEntries)
+                var tasksPart = line["TASKS:".Length..];
+
+                // Prefer semicolon separator (avoids collision with in-cell pipe bullets).
+                // Fall back to pipe separator for responses that pre-date this format change.
+                var separator = tasksPart.Contains(';') ? ';' : '|';
+
+                taskNames = tasksPart
+                    .Split(separator, StringSplitOptions.TrimEntries)
                     .Where(t => !string.IsNullOrWhiteSpace(t))
-                    .Select(ShortenTaskName)  // enforce concise task names
+                    // Truncate as a safety net: if the LLM still copies a responsibility
+                    // bullet list (containing " | ") as the task name, shorten it.
+                    .Select(ShortenTaskName)
                     .ToArray();
             }
             else
