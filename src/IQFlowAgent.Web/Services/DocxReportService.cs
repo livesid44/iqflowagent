@@ -359,7 +359,7 @@ public class DocxReportService : IDocxReportService
     private static readonly string[] VolumeInstructionPatterns =
     [
         "Enter actual transaction volume",
-        "RACI Sharepoint",
+        "RACI SharePoint",
         "RACI Checkpoint",
         "3. Roles and Responsibilities",
         "Record actual transaction volumes",

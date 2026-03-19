@@ -66,14 +66,14 @@ public class AzureOpenAiService : IAzureOpenAiService
                 tenantSettings.AzureOpenAIDeploymentName, tenantSettings.AzureOpenAIApiVersion,
                 tenantSettings.AzureOpenAIMaxTokens,
                 !string.IsNullOrWhiteSpace(tenantSettings.AzureOpenAIModelVersion)
-                    ? tenantSettings.AzureOpenAIModelVersion : "gpt-5.2");
+                    ? tenantSettings.AzureOpenAIModelVersion : "gpt-4o");
         }
         var endpoint = _config["AzureOpenAI:Endpoint"];
         var apiKey = _config["AzureOpenAI:ApiKey"];
         var deployment = _config["AzureOpenAI:DeploymentName"];
         var apiVersion = _config["AzureOpenAI:ApiVersion"] ?? "2025-01-01-preview";
         var maxTokens = int.TryParse(_config["AzureOpenAI:MaxTokens"], out var mt) ? mt : DefaultMaxOutputTokens;
-        var modelVersion = _config["AzureOpenAI:ModelVersion"] ?? "gpt-5.2";
+        var modelVersion = _config["AzureOpenAI:ModelVersion"] ?? "gpt-4o";
         return (endpoint, apiKey, deployment, apiVersion, maxTokens, modelVersion);
     }
 
@@ -2796,7 +2796,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  Step 3 — IGNORE completely any text that is a form instruction or template placeholder.\n" +
             "           Specifically, NEVER use the following as the field value:\n" +
             "             \"Enter actual transaction volume\"\n" +
-            "             \"RACI Sharepoint\" / \"RACI Checkpoint\"\n" +
+            "             \"RACI SharePoint\" / \"RACI Checkpoint\"\n" +
             "             \"3. Roles and Responsibilities\"\n" +
             "             \"Record actual transaction volumes\"\n" +
             "           If you see these strings in the documents, skip them — they are template text.\n" +

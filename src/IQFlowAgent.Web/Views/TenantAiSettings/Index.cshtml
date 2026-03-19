@@ -19,6 +19,20 @@
         <div class="data-card" style="margin-bottom:24px;">
             <div class="card-header">Azure OpenAI Settings</div>
             <div class="card-body">
+                <div class="info-box" style="margin-bottom:18px;">
+                    <strong>Recommended models for BARTOK SOP analysis:</strong>
+                    <ul style="margin:8px 0 0 0;padding-left:20px;line-height:1.7;">
+                        <li><strong>gpt-4o</strong> — <em>Best choice.</em> 128 k-token context window handles large uploaded documents (Word, Excel, PDF) in a single pass. Excellent structured-output quality for RACI, SOP and escalation tables.</li>
+                        <li><strong>gpt-4o-mini</strong> — Faster and lower cost; suitable for smaller documents or high-volume intake processing where budget matters.</li>
+                        <li><strong>o3-mini</strong> — Strong multi-step reasoning; useful when analysis involves complex regulatory or compliance logic. Slower than gpt-4o.</li>
+                    </ul>
+                    <div style="margin-top:8px;font-size:12px;color:#666;">
+                        The <strong>Deployment Name</strong> must exactly match the deployment you created in
+                        <a href="https://ai.azure.com" target="_blank" rel="noopener">Azure AI Foundry</a>.
+                        The <strong>Model Version</strong> dropdown updates the <code>model</code> field sent in every API request
+                        and should match your deployment's underlying model.
+                    </div>
+                </div>
                 <div class="form-grid-2">
                     <div class="full-width">
                         <label class="form-label">Endpoint URL</label>
@@ -30,13 +44,15 @@
                     </div>
                     <div>
                         <label class="form-label">Deployment Name</label>
-                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="gpt-4o or gpt-5.2" id="deploymentNameInput" />
+                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="e.g. gpt-4o" id="deploymentNameInput" />
                     </div>
                     <div>
                         <label class="form-label">Model Version</label>
                         <select asp-for="AzureOpenAIModelVersion" class="form-input" id="modelVersionSelect" onchange="onModelVersionChange(this.value)">
-                            <option value="gpt-5.2">GPT-5.2 (Recommended — higher quality)</option>
-                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4o">gpt-4o ⭐ Recommended — best quality &amp; context window</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini — faster &amp; lower cost</option>
+                            <option value="o3-mini">o3-mini — advanced reasoning</option>
+                            <option value="gpt-5.2">gpt-5.2 — custom / future deployment</option>
                         </select>
                         <div style="font-size:11px;color:#888;margin-top:4px;">
                             Changing this will also update the Deployment Name field to match the selected model.
