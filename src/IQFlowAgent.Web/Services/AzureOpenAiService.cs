@@ -171,7 +171,8 @@ public class AzureOpenAiService : IAzureOpenAiService
                     }
                   ],
                   "checkPoints": [
-                    { "label": "checkpoint label", "status": "Pass|Fail|Warning", "note": "optional explanation" }
+                    { "sectionId": "DC", "label": "Document Control", "status": "Pass|Fail|Warning", "note": "optional explanation" },
+                    { "sectionId": "1",  "label": "Purpose & Scope",  "status": "Pass|Fail|Warning", "note": "optional explanation" }
                   ],
                   "qualityScore": 90,
                   "summary": "Brief executive summary of the process analysis."
@@ -188,6 +189,8 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 Rules for checkPoints:
                 - Include one checkpoint per BARTOK section (11 total) assessing whether its information is sufficient.
+                - "sectionId" must be the BARTOK section reference: "DC" for Document Control, "1" through "11" for the numbered sections.
+                - "label" must be the section name (without the number prefix), e.g. "Document Control", "Purpose & Scope", "Process Overview", "RACI", "SOP Steps", "Work Instructions", "Escalation & Exceptions", "SLAs & Performance", "Volumetrics", "Regulatory & Compliance", "Training", "OCC".
                 - status=Pass: enough information is present in the intake or document.
                 - status=Warning: partial information; some items need confirmation from the process owner.
                 - status=Fail: section is critically under-documented; a task must be created.

@@ -319,10 +319,11 @@ public class DocxReportService : IDocxReportService
             ClearRemainingPlaceholders(footerPart.Footer);
 
         // ── Structured section insertion ───────────────────────────────────────
-        // For RACI, SOP, and Volumetrics the template has multiple rows with
-        // identical placeholder text, causing duplicate content when using simple
-        // find-and-replace. Instead we clear all data rows and paste the LLM's
-        // checkpoint response as a single merged-cell block per section.
+        // For RACI, SOP, Volumetrics, and Work Instructions the template has
+        // multiple rows/paragraphs with identical placeholder text, causing
+        // duplicate content when using simple find-and-replace. Instead we
+        // clear all data rows/paragraphs and paste the LLM's checkpoint response
+        // as a single merged-cell block (or paragraph block) per section.
         var body = wordDoc.MainDocumentPart!.Document.Body!;
 
         var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
@@ -332,6 +333,35 @@ public class DocxReportService : IDocxReportService
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content");
         if (!string.IsNullOrWhiteSpace(sopValue))
             ReplaceSopTableRows(body, sopValue);
+
+        // ── Work Instructions 5 paragraph-block insertion ──────────────────────
+        // Section 5 is structured as paragraphs (not a table): a "5. Work
+        // Instructions" heading followed by step sub-headings "5.1 Step 1 —
+        // [Step Name]" and instruction paragraphs. The same placeholder [Step Name]
+        // appears in BOTH 5.1 and 5.2, so find-and-replace fills both sub-headings
+        // with the same value. We remove all step paragraphs and insert a single
+        // formatted block from the existing wi_* field values — same principle as
+        // the Volumetrics merged-cell approach.
+        var wiStepName = GetFieldFillValue(fieldStatuses, "wi_step_name") ?? string.Empty;
+        var wiInstr1a  = GetFieldFillValue(fieldStatuses, "wi_instr1a")   ?? string.Empty;
+        var wiInstr1b  = GetFieldFillValue(fieldStatuses, "wi_instr1b")   ?? string.Empty;
+        var wiInstr1c  = GetFieldFillValue(fieldStatuses, "wi_instr1c")   ?? string.Empty;
+        var wiInstr2a  = GetFieldFillValue(fieldStatuses, "wi_instr2a")   ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(wiStepName) || !string.IsNullOrWhiteSpace(wiInstr1a))
+        {
+            var wiContent = string.Empty;
+            if (!string.IsNullOrWhiteSpace(wiStepName))
+                wiContent += $"Step 1 — {wiStepName}";
+            if (!string.IsNullOrWhiteSpace(wiInstr1a))
+                wiContent += (wiContent.Length > 0 ? "\n" : "") + $"Instruction 1: {wiInstr1a}";
+            if (!string.IsNullOrWhiteSpace(wiInstr1b))
+                wiContent += $"\nInstruction 2: {wiInstr1b}";
+            if (!string.IsNullOrWhiteSpace(wiInstr1c))
+                wiContent += $"\nError Handling: {wiInstr1c}";
+            if (!string.IsNullOrWhiteSpace(wiInstr2a))
+                wiContent += $"\n\nStep 2 — Instruction 1: {wiInstr2a}";
+            ReplaceWorkInstructionParagraphs(body, wiContent);
+        }
 
         var volValue = GetFieldFillValue(fieldStatuses, "vol_content");
         if (!string.IsNullOrWhiteSpace(volValue))
@@ -837,6 +867,64 @@ public class DocxReportService : IDocxReportService
                 newRow.AppendChild(BuildRaciCell(cellValues[c], tmplCell));
             }
             table.AppendChild(newRow);
+        }
+    }
+
+    /// <summary>
+    /// Fixes the "5. Work Instructions" section which is structured as body paragraphs
+    /// (not a table). The template contains sub-heading paragraphs "5.1 Step 1 —
+    /// [Step Name]" and "5.2 Step 2 — [Step Name]" that share the same placeholder, so
+    /// find-and-replace fills every step heading with the same value. This method removes
+    /// all paragraphs from the WI heading down to (but not including) the "6." section,
+    /// then inserts <paramref name="content"/> as a formatted paragraph block — the same
+    /// principle as the merged-cell approach used for Volumetrics and SOP.
+    /// </summary>
+    private static void ReplaceWorkInstructionParagraphs(Body body, string content)
+    {
+        var bodyChildren = body.ChildElements.ToList();
+
+        int wiHeadingIdx   = -1;
+        int nextSectionIdx = bodyChildren.Count;
+
+        for (int i = 0; i < bodyChildren.Count; i++)
+        {
+            if (bodyChildren[i] is not Paragraph p) continue;
+            var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text));
+
+            if (wiHeadingIdx < 0 &&
+                txt.Contains("5. Work Instructions", StringComparison.OrdinalIgnoreCase))
+            {
+                wiHeadingIdx = i;
+            }
+            else if (wiHeadingIdx >= 0 && Regex.IsMatch(txt.TrimStart(), @"^6[\.\s]"))
+            {
+                nextSectionIdx = i;
+                break;
+            }
+        }
+
+        if (wiHeadingIdx < 0) return;
+
+        // Remove all paragraphs after the WI heading up to (but not including) the "6." heading.
+        for (int i = nextSectionIdx - 1; i > wiHeadingIdx; i--)
+            bodyChildren[i].Remove();
+
+        // After removals, the WI heading is still at wiHeadingIdx in the live DOM —
+        // retrieve it fresh from the body.
+        var headingPara = body.ChildElements.ElementAt(wiHeadingIdx) as Paragraph;
+        if (headingPara == null) return;
+
+        // Insert content lines as individual paragraphs after the WI heading.
+        // Iterate in reverse so that each InsertAfterSelf call builds the list in order.
+        var lines = content.Split('\n');
+        foreach (var line in lines.Reverse())
+        {
+            var newPara  = new Paragraph();
+            var textElem = new Text(line);
+            if (line.StartsWith(' ') || line.EndsWith(' '))
+                textElem.Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve;
+            newPara.AppendChild(new Run(textElem));
+            headingPara.InsertAfterSelf(newPara);
         }
     }
 

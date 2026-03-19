@@ -685,10 +685,18 @@
                     </span>
                     @if (pendingCount > 0)
                     {
-                        @* Check whether all pending checkpoints already have tasks (direct or via action item) *@
+                        @* Check whether all pending checkpoints already have tasks (direct or via action item).
+                           Accept both the new [Checkpoint][sectionId] format and the legacy [Checkpoint] format. *@
                         var allCpTasksExist = checkPoints.EnumerateArray()
                             .Where(c => { var st = c.TryGetProperty("status", out var sv) ? sv.GetString() : ""; return st == "Fail" || st == "Warning"; })
-                            .All(c => { var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : ""; return existingTitles.Contains($"[Checkpoint] {lbl}") || sectionsCoveredByTasks.Contains(lbl); });
+                            .All(c => {
+                                var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : "";
+                                var sid = c.TryGetProperty("sectionId", out var sv2) ? sv2.GetString() ?? "" : "";
+                                var newTitle = string.IsNullOrWhiteSpace(sid) ? $"[Checkpoint] {lbl}" : $"[Checkpoint][{sid}] {lbl}";
+                                return existingTitles.Contains(newTitle)
+                                    || existingTitles.Contains($"[Checkpoint] {lbl}")  // legacy format
+                                    || sectionsCoveredByTasks.Contains(lbl);
+                            });
                         if (allCpTasksExist)
                         {
                             <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
@@ -725,16 +733,29 @@
                     <tbody>
                         @foreach (var cp in checkPoints.EnumerateArray())
                         {
-                            var cpLabel  = cp.TryGetProperty("label",  out var cl) ? cl.GetString() ?? "" : "";
-                            var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "Warning" : "Warning";
-                            var cpNote   = cp.TryGetProperty("note",   out var cn) ? cn.GetString() ?? "" : "";
-                            var cpIcon   = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
-                            var cpTaskTitle = $"[Checkpoint] {cpLabel}";
+                            var cpLabel     = cp.TryGetProperty("label",     out var cl)  ? cl.GetString()  ?? "" : "";
+                            var cpStatus    = cp.TryGetProperty("status",    out var cs)  ? cs.GetString()  ?? "Warning" : "Warning";
+                            var cpNote      = cp.TryGetProperty("note",      out var cn)  ? cn.GetString()  ?? "" : "";
+                            var cpSectionId = cp.TryGetProperty("sectionId", out var csi) ? csi.GetString() ?? "" : "";
+                            var cpIcon      = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
+                            // Build title: include sectionId when available so it appears on the task board.
+                            var cpTaskTitle = string.IsNullOrWhiteSpace(cpSectionId)
+                                ? $"[Checkpoint] {cpLabel}"
+                                : $"[Checkpoint][{cpSectionId}] {cpLabel}";
                             var cpPriority  = cpStatus == "Fail" ? "High" : "Medium";
                             var cpIsPending = cpStatus == "Fail" || cpStatus == "Warning";
-                            var cpTaskExists = existingTitles.Contains(cpTaskTitle) || sectionsCoveredByTasks.Contains(cpLabel);
+                            // Accept both new and legacy title formats when checking for existing tasks.
+                            var cpTaskExists = existingTitles.Contains(cpTaskTitle)
+                                || existingTitles.Contains($"[Checkpoint] {cpLabel}")  // legacy format
+                                || sectionsCoveredByTasks.Contains(cpLabel);
                             <tr>
-                                <td>@cpLabel</td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(cpSectionId))
+                                    {
+                                        <span style="color:#999;font-size:0.75em;margin-right:4px;">[@cpSectionId]</span>
+                                    }
+                                    @cpLabel
+                                </td>
                                 <td>
                                     <span class="cp-status cp-@cpStatus">
                                         <i class="bi bi-@cpIcon"></i> @cpStatus

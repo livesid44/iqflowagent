@@ -397,13 +397,30 @@ public class RagProcessorService : BackgroundService
 
             foreach (var item in items)
             {
-                var title    = GetStringProp(item, "title", "label") ?? "Task";
-                var priority = GetStringProp(item, "priority") ?? (IsCheckPoint(item) ? "High" : "Medium");
-                var desc     = GetStringProp(item, "description", "note") ?? string.Empty;
-                var prefix   = IsCheckPoint(item) ? "[Checkpoint] " : string.Empty;
-                var fullTitle = prefix + title;
+                var title     = GetStringProp(item, "title", "label") ?? "Task";
+                var priority  = GetStringProp(item, "priority") ?? (IsCheckPoint(item) ? "High" : "Medium");
+                var desc      = GetStringProp(item, "description", "note") ?? string.Empty;
 
-                if (titleSet.Contains(fullTitle)) continue;
+                // For checkpoint tasks include the sectionId (e.g. "5") in the title so the
+                // task board immediately shows which BARTOK section needs attention.
+                string fullTitle;
+                if (IsCheckPoint(item))
+                {
+                    var sectionId = GetStringProp(item, "sectionId") ?? string.Empty;
+                    fullTitle = string.IsNullOrWhiteSpace(sectionId)
+                        ? $"[Checkpoint] {title}"
+                        : $"[Checkpoint][{sectionId}] {title}";
+                }
+                else
+                {
+                    fullTitle = title;
+                }
+
+                // Guard against duplicates — also check the legacy format (no sectionId)
+                // for checkpoints that were created before sectionId was introduced.
+                if (titleSet.Contains(fullTitle) ||
+                    (IsCheckPoint(item) && titleSet.Contains($"[Checkpoint] {title}")))
+                    continue;
                 titleSet.Add(fullTitle);
 
                 // Map each task to its BARTOK output-document section for traceability.
@@ -412,11 +429,15 @@ public class RagProcessorService : BackgroundService
                 if (IsCheckPoint(item))
                 {
                     var sectionName  = GetStringProp(item, "label") ?? "";
+                    var sectionId    = GetStringProp(item, "sectionId") ?? "";
                     var requiredInfo = GetStringProp(item, "note") ?? "";
                     if (!string.IsNullOrWhiteSpace(sectionName))
                     {
                         desc = desc.TrimEnd();
-                        desc += $"\n\n📄 BARTOK S8 SOP — Output Document Section\nSection : {sectionName}\nRequired: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See checkpoint status above." : requiredInfo)}";
+                        desc += $"\n\n📄 BARTOK S8 SOP — Output Document Section"
+                              + $"\nSection ID: {(string.IsNullOrWhiteSpace(sectionId) ? "—" : sectionId)}"
+                              + $"\nSection   : {sectionName}"
+                              + $"\nRequired  : {(string.IsNullOrWhiteSpace(requiredInfo) ? "See checkpoint status above." : requiredInfo)}";
                     }
                 }
                 else if (item.TryGetProperty("bartokSection", out var bsSec))

@@ -936,19 +936,29 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
             {
                 foreach (var cp in checkPoints.EnumerateArray())
                 {
-                    var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "" : "";
+                    var cpStatus    = cp.TryGetProperty("status",    out var cs)  ? cs.GetString()  ?? "" : "";
                     if (cpStatus != "Fail" && cpStatus != "Warning") continue;
 
-                    var cpLabel = cp.TryGetProperty("label", out var cl) ? cl.GetString() ?? "" : "";
-                    var cpNote  = cp.TryGetProperty("note",  out var cn) ? cn.GetString() ?? "" : "";
+                    var cpLabel     = cp.TryGetProperty("label",     out var cl)  ? cl.GetString()  ?? "" : "";
+                    var cpNote      = cp.TryGetProperty("note",      out var cn)  ? cn.GetString()  ?? "" : "";
+                    var cpSectionId = cp.TryGetProperty("sectionId", out var csi) ? csi.GetString() ?? "" : "";
 
                     if (string.IsNullOrWhiteSpace(cpLabel)) continue;
 
-                    var title       = $"[Checkpoint] {cpLabel}";
+                    // Include the BARTOK section ID in the task title when available so
+                    // the task board immediately shows which section needs attention.
+                    var title = string.IsNullOrWhiteSpace(cpSectionId)
+                        ? $"[Checkpoint] {cpLabel}"
+                        : $"[Checkpoint][{cpSectionId}] {cpLabel}";
+
                     var description = string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote;
                     var priority    = cpStatus == "Fail" ? "High" : "Medium";
 
-                    if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
+                    // Guard against duplicates using both the new title format and the legacy
+                    // format (tasks created before sectionId was introduced).
+                    if (await db.IntakeTasks.AnyAsync(tk =>
+                            tk.IntakeRecordId == record.Id &&
+                            (tk.Title == title || tk.Title == $"[Checkpoint] {cpLabel}")))
                         continue;
 
                     // Map checkpoint task to the BARTOK output document section
@@ -957,8 +967,9 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
 
 
 📄 BARTOK S8 SOP — Output Document Section
-Section : {cpLabel}
-Required: {(string.IsNullOrWhiteSpace(cpNote) ? "See checkpoint status above." : cpNote)}
+Section ID: {(string.IsNullOrWhiteSpace(cpSectionId) ? "—" : cpSectionId)}
+Section   : {cpLabel}
+Required  : {(string.IsNullOrWhiteSpace(cpNote) ? "See checkpoint status above." : cpNote)}
 """;
 
                     AddTask(db, record, title, description, priority, owner, now,
