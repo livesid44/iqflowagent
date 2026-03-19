@@ -329,10 +329,24 @@
             <div class="section-card">
                 <div class="section-header">
                     <div class="section-title">@sectionGroup.Key</div>
-                    <div class="section-counts">
-                        <span style="color:#10b981">✓ @sAvail ready</span>
-                        @if (sNA > 0) { <span style="margin-left:8px;color:#6b7280">N/A: @sNA</span> }
-                        @if (sMissing > 0) { <span style="margin-left:8px;color:#ef4444">⚠ @sMissing missing</span> }
+                    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                        <div class="section-counts">
+                            <span style="color:#10b981">✓ @sAvail ready</span>
+                            @if (sNA > 0) { <span style="margin-left:8px;color:#6b7280">N/A: @sNA</span> }
+                            @if (sMissing > 0) { <span style="margin-left:8px;color:#ef4444">⚠ @sMissing missing</span> }
+                        </div>
+                        @if (sectionGroup.Key.Contains("RACI"))
+                        {
+                            <button type="button"
+                                    id="btn-gen-raci"
+                                    class="btn-ai-gen"
+                                    style="font-size:0.73rem;padding:4px 10px;"
+                                    onclick="generateRaciMatrix(@intakeId)"
+                                    title="Generate RACI matrix from the extracted role and task definitions">
+                                🤖 Generate RACI Matrix
+                            </button>
+                            <span id="raci-gen-status" style="font-size:0.72rem;color:#6d28d9;"></span>
+                        }
                     </div>
                 </div>
 
@@ -446,6 +460,42 @@
 function toggleAiPanel(fieldId) {
     const panel = document.getElementById('ai-panel-' + fieldId);
     panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+async function generateRaciMatrix(intakeId) {
+    const btn      = document.getElementById('btn-gen-raci');
+    const statusEl = document.getElementById('raci-gen-status');
+    // Find any antiforgery token on the page
+    const token    = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+    btn.disabled      = true;
+    btn.textContent   = '⏳ Generating…';
+    statusEl.textContent = '';
+
+    const formData = new FormData();
+    formData.append('intakeId', intakeId);
+    formData.append('__RequestVerificationToken', token);
+
+    try {
+        const resp = await fetch('/Report/GenerateRaciContent', { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = '✓ RACI matrix generated — reload to review.';
+            statusEl.style.color = '#059669';
+            // Reload to show updated raci_content field
+            setTimeout(() => location.reload(), 1200);
+        } else {
+            statusEl.textContent = '✗ ' + (data.message || 'Generation failed.');
+            statusEl.style.color = '#dc2626';
+            btn.disabled    = false;
+            btn.textContent = '🤖 Generate RACI Matrix';
+        }
+    } catch (ex) {
+        statusEl.textContent = '✗ Network error: ' + ex.message;
+        statusEl.style.color = '#dc2626';
+        btn.disabled    = false;
+        btn.textContent = '🤖 Generate RACI Matrix';
+    }
 }
 
 async function runAiGenerate(fieldId, fieldLabel) {

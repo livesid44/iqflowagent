@@ -281,12 +281,8 @@ public class ReportController : Controller
             }
 
             // ── RACI supplement: existing RACI field values as structured context ──
-            // When the RACI section is being re-analyzed, any previously extracted
-            // individual RACI field values (e.g. raci_task1…4, raci_role1…4 from a
-            // prior analysis run) are concatenated and prepended to the artifact text.
-            // This implements the "concat all RACI fields and send to LLM" approach —
-            // the LLM can derive concise task names and role assignments from the already-
-            // extracted role-responsibility text rather than having to re-parse the raw doc.
+            // Prepend role-activity pairs to the artifact text so the LLM can derive
+            // concise task names directly from already-extracted data.
             if (section.Key.Contains("RACI", StringComparison.OrdinalIgnoreCase))
             {
                 var raciSiblings = existingStatuses
@@ -298,12 +294,7 @@ public class ReportController : Controller
 
                 if (raciSiblings.Count > 0)
                 {
-                    var sbRaci = new System.Text.StringBuilder();
-                    sbRaci.AppendLine("=== Previously Extracted RACI Data (use as primary source for the matrix) ===");
-                    sbRaci.AppendLine("Derive concise 2–5 word task names and role titles from these values:");
-                    foreach (var sf in raciSiblings)
-                        sbRaci.AppendLine($"{sf.FieldLabel}: {sf.FillValue}");
-                    var raciContext = sbRaci.ToString();
+                    var raciContext = BuildRaciContext(raciSiblings);
                     sectionArtifactText = string.IsNullOrWhiteSpace(sectionArtifactText)
                         ? raciContext
                         : raciContext + "\n\n" + sectionArtifactText;
@@ -325,6 +316,36 @@ public class ReportController : Controller
         // All field extraction is now done exclusively by the LLM (AnalyzeSectionFieldsAsync),
         // which receives the raw document text from uploaded files and extracts values verbatim.
         // This avoids the fragility of hardcoded patterns that break when document formats change.
+
+        // ── Dedicated RACI matrix generation (post-section-loop) ────────────────
+        // After all sections are analyzed, if individual RACI fields (raci_task*/raci_role*)
+        // exist in the DB (from any previous run), generate raci_content using a focused
+        // GenerateSingleFieldAsync call with paired role-activity context. This overrides
+        // the AnalyzeSectionFieldsAsync result because GenerateSingleFieldAsync has a more
+        // targeted RACI system prompt and the pre-extracted data is the clearest source.
+        {
+            var raciSiblings = existingStatuses
+                .Where(s => s.FieldKey != "raci_content"
+                         && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(s.FillValue))
+                .OrderBy(s => s.FieldKey)
+                .ToList();
+
+            if (raciSiblings.Count > 0)
+            {
+                var raciCtx      = BuildRaciContext(raciSiblings);
+                var raciGenerated = await _aiService.GenerateSingleFieldAsync(
+                    intake, "raci_content", "RACI Assignments (LLM Response)",
+                    null, intake.AnalysisResult, raciCtx);
+                if (!string.IsNullOrWhiteSpace(raciGenerated))
+                {
+                    aiValues["raci_content"] = raciGenerated;
+                    _logger.LogInformation(
+                        "Dedicated RACI generation completed for intake {IntakeId} using {Count} sibling fields.",
+                        intake.IntakeId, raciSiblings.Count);
+                }
+            }
+        }
 
         _logger.LogInformation(
             "Section-by-section analysis for intake {IntakeId}: {Sections} sections, " +
@@ -555,11 +576,10 @@ public class ReportController : Controller
         var artifactText = string.IsNullOrWhiteSpace(combinedDocText) ? null : combinedDocText;
 
         // ── RACI supplement: concat existing RACI sibling field values ──────────
-        // When generating raci_content, any previously extracted individual RACI
-        // field values (e.g. raci_task1…4, raci_role1…4) are loaded from the DB
-        // and prepended to the artifact text as structured context. The LLM can then
-        // derive concise task names and role assignments directly from these values
-        // ("concat all RACI fields and send to LLM" approach).
+        // When generating raci_content, load all raci_task*/raci_role* sibling
+        // fields and build a clear role-activity-paired context block. This gives
+        // GenerateSingleFieldAsync (which has a focused RACI prompt) the best
+        // possible input to produce an accurate pipe-delimited RACI matrix.
         if (field.FieldKey.Equals("raci_content", StringComparison.OrdinalIgnoreCase))
         {
             var raciSiblings = await _db.ReportFieldStatuses
@@ -572,12 +592,7 @@ public class ReportController : Controller
 
             if (raciSiblings.Count > 0)
             {
-                var sbRaci = new System.Text.StringBuilder();
-                sbRaci.AppendLine("=== Previously Extracted RACI Data (use as primary source for the matrix) ===");
-                sbRaci.AppendLine("Derive concise 2–5 word task names and role titles from these values:");
-                foreach (var sf in raciSiblings)
-                    sbRaci.AppendLine($"{sf.FieldLabel}: {sf.FillValue}");
-                var raciContext = sbRaci.ToString();
+                var raciContext = BuildRaciContext(raciSiblings);
                 artifactText = string.IsNullOrWhiteSpace(artifactText)
                     ? raciContext
                     : raciContext + "\n\n" + artifactText;
@@ -725,9 +740,130 @@ public class ReportController : Controller
             report.ReportFileName);
     }
 
-    // ── Helper: aggregate readable artifact text ─────────────────────────────
-    private async Task<string?> AggregateArtifactTextAsync(List<IntakeTask> tasks)
+    // ── POST /Report/GenerateRaciContent ─────────────────────────────────────
+    /// <summary>
+    /// Dedicated RACI matrix generation: loads all raci_task* and raci_role* field
+    /// values, pairs them by index (role N + its activities), sends to the LLM with
+    /// a focused prompt, and stores the result as raci_content.
+    /// This is the "pass this table to LLM and replace" approach requested by the user.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> GenerateRaciContent(int intakeId)
     {
+        var intake = await _db.IntakeRecords.FindAsync(intakeId);
+        if (intake == null) return NotFound();
+
+        var raciSiblings = await _db.ReportFieldStatuses
+            .Where(f => f.IntakeRecordId == intakeId
+                     && f.FieldKey != "raci_content"
+                     && f.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
+                     && !string.IsNullOrWhiteSpace(f.FillValue))
+            .OrderBy(f => f.FieldKey)
+            .ToListAsync();
+
+        if (raciSiblings.Count == 0)
+            return Json(new { success = false, message = "No RACI field data found. Run 'Re-run AI Field Analysis' first to extract RACI tasks and roles, then try again." });
+
+        var raciContext = BuildRaciContext(raciSiblings);
+
+        var generated = await _aiService.GenerateSingleFieldAsync(
+            intake, "raci_content", "RACI Assignments (LLM Response)",
+            null, intake.AnalysisResult, raciContext);
+
+        if (string.IsNullOrWhiteSpace(generated))
+            return Json(new { success = false, message = "AI could not generate RACI matrix. Ensure Azure OpenAI is configured and try again." });
+
+        var fieldDef = _docxService.GetFieldDefinitions()
+            .FirstOrDefault(f => f.Key == "raci_content");
+        var existing = await _db.ReportFieldStatuses
+            .FirstOrDefaultAsync(f => f.IntakeRecordId == intakeId && f.FieldKey == "raci_content");
+
+        var now = DateTime.UtcNow;
+        if (existing == null)
+        {
+            _db.ReportFieldStatuses.Add(new ReportFieldStatus
+            {
+                IntakeRecordId      = intakeId,
+                FieldKey            = "raci_content",
+                FieldLabel          = fieldDef?.Label ?? "RACI Assignments (LLM Response)",
+                Section             = fieldDef?.Section ?? "3. RACI",
+                TemplatePlaceholder = fieldDef?.TemplatePlaceholder ?? "",
+                Status              = "Available",
+                FillValue           = generated,
+                Notes               = $"Generated from {raciSiblings.Count} RACI field(s) by dedicated AI call.",
+                AnalyzedAt          = now,
+                UpdatedAt           = now
+            });
+        }
+        else
+        {
+            existing.Status     = "Available";
+            existing.FillValue  = generated;
+            existing.Notes      = $"Regenerated from {raciSiblings.Count} RACI field(s) by dedicated AI call.";
+            existing.AnalyzedAt = now;
+            existing.UpdatedAt  = now;
+        }
+
+        await _db.SaveChangesAsync();
+        return Json(new { success = true, value = generated });
+    }
+
+    // ── Helper: build role-activity paired RACI context string ───────────────
+    /// <summary>
+    /// Pairs raci_roleN (role name) with raci_taskN (activities) to create a clear,
+    /// role-labelled context block for the LLM. The LLM can then derive concise
+    /// task names from the activities and produce an accurate R/A/C/I matrix.
+    /// </summary>
+    private static string BuildRaciContext(IList<ReportFieldStatus> raciSiblings)
+    {
+        var taskFields = raciSiblings
+            .Where(f => f.FieldKey.StartsWith("raci_task", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f.FieldKey)
+            .ToList();
+        var roleFields = raciSiblings
+            .Where(f => f.FieldKey.StartsWith("raci_role", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f.FieldKey)
+            .ToList();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("=== RACI Source Data: Roles and their Activities ===");
+        sb.AppendLine("Use this data to create a compact pipe-delimited RACI matrix.");
+        sb.AppendLine("Each role below has a list of activities (pipe-separated) they perform in this process.");
+        sb.AppendLine("Derive concise 2–5 word task names from the activity lists for the TASKS line.");
+        sb.AppendLine();
+
+        bool anyEntry = false;
+        for (int i = 1; i <= 4; i++)
+        {
+            var roleField = roleFields.FirstOrDefault(f =>
+                f.FieldKey.Equals($"raci_role{i}", StringComparison.OrdinalIgnoreCase));
+            var taskField = taskFields.FirstOrDefault(f =>
+                f.FieldKey.Equals($"raci_task{i}", StringComparison.OrdinalIgnoreCase));
+
+            if (roleField != null || taskField != null)
+            {
+                anyEntry = true;
+                var roleName = roleField?.FillValue ?? $"Role {i}";
+                sb.AppendLine($"Role {i}: {roleName}");
+                if (taskField != null)
+                    sb.AppendLine($"  Activities: {taskField.FillValue}");
+                sb.AppendLine();
+            }
+        }
+
+        // Fallback: any siblings not matched by the raci_task/raci_role pattern
+        if (!anyEntry)
+        {
+            foreach (var f in raciSiblings)
+                sb.AppendLine($"{f.FieldLabel}: {f.FillValue}");
+        }
+
+        return sb.ToString();
+    }
+
+    // ── Helper: aggregate readable artifact text ─────────────────────────────
+    private async Task<string?> AggregateArtifactTextAsync(List<IntakeTask> tasks)    {
         var sb = new System.Text.StringBuilder();
 
         foreach (var task in tasks)
