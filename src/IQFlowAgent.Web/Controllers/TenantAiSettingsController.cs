@@ -25,6 +25,12 @@ public class TenantAiSettingsDto
     public string? AzureStorageContainerName    { get; set; }
     public string? AzureSpeechRegion            { get; set; }
     public string? AzureSpeechApiKey            { get; set; }
+    public string? AzureDocumentIntelligenceEndpoint { get; set; }
+    public string? AzureDocumentIntelligenceApiKey { get; set; }
+    public string? AzureOpenAIEmbeddingDeployment { get; set; }
+    public string? AzureSearchEndpoint { get; set; }
+    public string? AzureSearchApiKey { get; set; }
+    public string? AzureSearchIndexName { get; set; }
 }
 
 [Authorize(Roles = "SuperAdmin,Admin")]
@@ -115,6 +121,12 @@ public class TenantAiSettingsController : Controller
                     AzureStorageContainerName      = model.AzureStorageContainerName ?? "intakes",
                     AzureSpeechRegion              = model.AzureSpeechRegion ?? string.Empty,
                     AzureSpeechApiKey              = model.AzureSpeechApiKey ?? string.Empty,
+                    AzureDocumentIntelligenceEndpoint = model.AzureDocumentIntelligenceEndpoint ?? string.Empty,
+                    AzureDocumentIntelligenceApiKey   = model.AzureDocumentIntelligenceApiKey ?? string.Empty,
+                    AzureOpenAIEmbeddingDeployment    = model.AzureOpenAIEmbeddingDeployment ?? "text-embedding-3-small",
+                    AzureSearchEndpoint               = model.AzureSearchEndpoint ?? string.Empty,
+                    AzureSearchApiKey                 = model.AzureSearchApiKey ?? string.Empty,
+                    AzureSearchIndexName              = model.AzureSearchIndexName ?? "iqflow-rag-chunks",
                     UpdatedAt                      = DateTime.UtcNow,
                     UpdatedByUserId                = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty,
                 });
@@ -131,6 +143,12 @@ public class TenantAiSettingsController : Controller
                 existing.AzureStorageContainerName     = model.AzureStorageContainerName ?? "intakes";
                 existing.AzureSpeechRegion             = model.AzureSpeechRegion ?? string.Empty;
                 existing.AzureSpeechApiKey             = model.AzureSpeechApiKey ?? string.Empty;
+                existing.AzureDocumentIntelligenceEndpoint = model.AzureDocumentIntelligenceEndpoint ?? string.Empty;
+                existing.AzureDocumentIntelligenceApiKey   = model.AzureDocumentIntelligenceApiKey ?? string.Empty;
+                existing.AzureOpenAIEmbeddingDeployment    = model.AzureOpenAIEmbeddingDeployment ?? "text-embedding-3-small";
+                existing.AzureSearchEndpoint               = model.AzureSearchEndpoint ?? string.Empty;
+                existing.AzureSearchApiKey                 = model.AzureSearchApiKey ?? string.Empty;
+                existing.AzureSearchIndexName              = model.AzureSearchIndexName ?? "iqflow-rag-chunks";
                 existing.UpdatedAt                     = DateTime.UtcNow;
                 existing.UpdatedByUserId               = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
             }

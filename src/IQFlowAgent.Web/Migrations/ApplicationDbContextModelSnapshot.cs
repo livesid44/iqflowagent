@@ -826,6 +826,30 @@ namespace IQFlowAgent.Web.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AzureOpenAIEmbeddingDeployment")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AzureDocumentIntelligenceEndpoint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AzureDocumentIntelligenceApiKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AzureSearchEndpoint")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AzureSearchApiKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AzureSearchIndexName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AzureSpeechApiKey")
                         .IsRequired()
                         .HasColumnType("TEXT");

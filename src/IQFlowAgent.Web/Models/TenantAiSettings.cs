@@ -28,6 +28,18 @@ public class TenantAiSettings
     /// </summary>
     public bool UseCountryFilterByLot { get; set; } = false;
 
+    // Azure Document Intelligence (OCR for PDF, images, PPTX)
+    public string AzureDocumentIntelligenceEndpoint { get; set; } = string.Empty;
+    public string AzureDocumentIntelligenceApiKey { get; set; } = string.Empty;
+
+    // Azure OpenAI Embeddings
+    public string AzureOpenAIEmbeddingDeployment { get; set; } = "text-embedding-3-small";
+
+    // Azure AI Search
+    public string AzureSearchEndpoint { get; set; } = string.Empty;
+    public string AzureSearchApiKey { get; set; } = string.Empty;
+    public string AzureSearchIndexName { get; set; } = "iqflow-rag-chunks";
+
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public string? UpdatedByUserId { get; set; }
 }
