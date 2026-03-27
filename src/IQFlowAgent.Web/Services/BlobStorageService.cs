@@ -299,6 +299,13 @@ public class BlobStorageService : IBlobStorageService
         }
     }
 
+    public Task<string> UploadToFolderAsync(Stream content, string folderPath, string fileName, string contentType)
+    {
+        // Combine folder path and file name: {folderPath}/{fileName}
+        var blobName = $"{folderPath.TrimEnd('/')}/{fileName}";
+        return UploadAsync(content, blobName, contentType);
+    }
+
     // -------------------------------------------------------------------------
 
     private async Task<BlobContainerClient> GetContainerClientAsync()

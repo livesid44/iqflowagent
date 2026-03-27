@@ -31,4 +31,9 @@ public interface IBlobStorageService
     /// connection string does not contain a shared key (e.g. SAS-only connections).
     /// </summary>
     Task<string> GenerateSasDownloadUrlAsync(string blobUrl, TimeSpan? expiry = null);
+
+    /// <summary>Uploads content using a structured folder path. Returns blob URL.
+    /// <paramref name="folderPath"/> format: {tenantId}/{intakeId}/documents (no trailing slash).
+    /// </summary>
+    Task<string> UploadToFolderAsync(Stream content, string folderPath, string fileName, string contentType);
 }

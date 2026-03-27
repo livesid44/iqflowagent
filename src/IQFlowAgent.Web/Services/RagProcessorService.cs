@@ -28,7 +28,13 @@ public class RagProcessorService : BackgroundService
         new(StringComparer.OrdinalIgnoreCase)
         { ".txt", ".csv", ".json", ".xml", ".md", ".log" };
 
-    private const int MaxTextCharsPerFile = 8_000;
+    private static readonly HashSet<string> OpenXmlExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        { ".docx", ".xlsx" };
+
+    private static readonly HashSet<string> OcrExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        { ".pdf", ".pptx", ".jpg", ".jpeg", ".png", ".tiff", ".bmp" };
 
     public RagProcessorService(
         IBackgroundJobQueue queue,
@@ -109,6 +115,13 @@ public class RagProcessorService : BackgroundService
         var speechSvc   = scope.ServiceProvider.GetRequiredService<IAzureSpeechService>();
         var blobSvc     = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
 
+        var docIntel  = scope.ServiceProvider.GetRequiredService<IDocumentIntelligenceService>();
+        var embedSvc  = scope.ServiceProvider.GetRequiredService<IAzureEmbeddingService>();
+        var searchSvc = scope.ServiceProvider.GetRequiredService<IAzureSearchService>();
+
+        if (searchSvc.IsConfigured())
+            await searchSvc.EnsureIndexExistsAsync(ct);
+
         var job = await db.RagJobs
             .Include(j => j.IntakeRecord)
             .FirstOrDefaultAsync(j => j.Id == ragJobId, ct);
@@ -157,12 +170,36 @@ public class RagProcessorService : BackgroundService
                 else
                 {
                     // ── Read text content for RAG ──────────────────────────
-                    var text = await ReadDocumentTextAsync(doc, blobSvc, ct);
+                    var text = await ReadDocumentTextAsync(doc, blobSvc, docIntel, ct);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
                         aggregatedText.AppendLine($"=== File: {doc.FileName} ===");
                         aggregatedText.AppendLine(text);
                         aggregatedText.AppendLine();
+
+                        // ── Chunk + Embed + Index into Azure AI Search ─────
+                        if (searchSvc.IsConfigured() && embedSvc.IsConfigured())
+                        {
+                            var chunks = RagDocumentChunker.Chunk(text);
+                            var chunkRecords = new List<DocumentChunkRecord>();
+                            for (int i = 0; i < chunks.Count; i++)
+                            {
+                                var embedding = await embedSvc.GetEmbeddingAsync(chunks[i], ct) ?? Array.Empty<float>();
+                                chunkRecords.Add(new DocumentChunkRecord(
+                                    Id            : $"{intake.Id}-{doc.Id}-{i}",
+                                    IntakeDbId    : intake.Id,
+                                    IntakePublicId: intake.IntakeId,
+                                    TenantId      : intake.TenantId,
+                                    FolderPath    : $"{intake.TenantId}/{intake.IntakeId}/documents",
+                                    DocumentName  : doc.FileName,
+                                    Content       : chunks[i],
+                                    ChunkIndex    : i,
+                                    Embedding     : embedding
+                                ));
+                            }
+                            await searchSvc.IndexChunksAsync(chunkRecords, ct);
+                            _logger.LogInformation("Indexed {Count} chunks from {FileName} into Azure AI Search.", chunks.Count, doc.FileName);
+                        }
                     }
                 }
 
@@ -264,8 +301,10 @@ public class RagProcessorService : BackgroundService
             string sopPath;
             if (await blobSvc.IsConfiguredAsync())
             {
-                sopPath = await blobSvc.UploadAsync(
+                var sopFolderPath = $"{intake.TenantId}/{intake.IntakeId}/sop";
+                sopPath = await blobSvc.UploadToFolderAsync(
                     new MemoryStream(sopBytes),
+                    sopFolderPath,
                     sopFileName,
                     "application/pdf");
             }
@@ -311,27 +350,23 @@ public class RagProcessorService : BackgroundService
     // ─── Read text from document ──────────────────────────────────────────────
 
     private async Task<string?> ReadDocumentTextAsync(
-        IntakeDocument doc, IBlobStorageService blobSvc, CancellationToken ct)
+        IntakeDocument doc, IBlobStorageService blobSvc,
+        IDocumentIntelligenceService docIntel, CancellationToken ct)
     {
         var ext = Path.GetExtension(doc.FileName).ToLowerInvariant();
-        if (!TextExtensions.Contains(ext)) return null;
 
         try
         {
-            string? text = null;
+            if (TextExtensions.Contains(ext))
+            {
+                // Plain text: read directly
+                if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    return await blobSvc.DownloadTextAsync(doc.FilePath);
 
-            if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                text = await blobSvc.DownloadTextAsync(doc.FilePath);
-            }
-            else
-            {
-                // Local path: map /uploads/... to physical path
                 var localPath = doc.FilePath.StartsWith('/')
                     ? Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))
                     : doc.FilePath;
 
-                // Boundary check: must be inside wwwroot
                 var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
                 var fullPath    = Path.GetFullPath(localPath);
                 if (!fullPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase))
@@ -339,20 +374,52 @@ public class RagProcessorService : BackgroundService
                     _logger.LogWarning("Document path '{Path}' is outside uploads root — skipping.", doc.FilePath);
                     return null;
                 }
-
-                if (File.Exists(fullPath))
-                    text = await File.ReadAllTextAsync(fullPath, ct);
+                return File.Exists(fullPath) ? await File.ReadAllTextAsync(fullPath, ct) : null;
             }
 
-            return string.IsNullOrWhiteSpace(text) ? null
-                : text.Length > MaxTextCharsPerFile ? text[..MaxTextCharsPerFile] + "...[truncated]"
-                : text;
+            if (OpenXmlExtensions.Contains(ext))
+            {
+                var bytes = await DownloadBytesAsync(doc, blobSvc, ct);
+                if (bytes == null) return null;
+                return DocumentTextExtractor.Extract(bytes, ext);
+            }
+
+            if (OcrExtensions.Contains(ext))
+            {
+                var bytes = await DownloadBytesAsync(doc, blobSvc, ct);
+                if (bytes == null) return null;
+                return await docIntel.ExtractTextAsync(bytes, doc.FileName);
+            }
+
+            _logger.LogDebug("Skipping unsupported extension '{Ext}' for {FileName}.", ext, doc.FileName);
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to read text from document {DocId} ({FileName}).", doc.Id, doc.FileName);
             return null;
         }
+    }
+
+    /// <summary>Downloads document bytes either from blob URL or local disk.</summary>
+    private async Task<byte[]?> DownloadBytesAsync(
+        IntakeDocument doc, IBlobStorageService blobSvc, CancellationToken ct)
+    {
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return await blobSvc.DownloadBytesAsync(doc.FilePath);
+
+        var localPath = doc.FilePath.StartsWith('/')
+            ? Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))
+            : doc.FilePath;
+
+        var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+        var fullPath    = Path.GetFullPath(localPath);
+        if (!fullPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Document path '{Path}' is outside uploads root — skipping.", doc.FilePath);
+            return null;
+        }
+        return File.Exists(fullPath) ? await File.ReadAllBytesAsync(fullPath, ct) : null;
     }
 
     // ─── Auto-create tasks from analysis ─────────────────────────────────────
@@ -553,9 +620,11 @@ public class RagProcessorService : BackgroundService
         try
         {
             using var fs = File.OpenRead(physicalPath);
-            var blobUrl = await blobSvc.UploadAsync(
+            var folderPath = $"{intake.TenantId}/{intake.IntakeId}/audio";
+            var blobUrl = await blobSvc.UploadToFolderAsync(
                 fs,
-                Path.GetFileName(doc.FilePath),
+                folderPath,
+                doc.FileName,
                 doc.ContentType ?? "application/octet-stream");
 
             _logger.LogInformation("Uploaded audio/video {FileName} to blob: {Url}", doc.FileName, blobUrl);

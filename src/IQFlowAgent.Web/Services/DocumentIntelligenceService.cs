@@ -32,26 +32,25 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
 
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ITenantContextService _tenantContext;
     private readonly ILogger<DocumentIntelligenceService> _logger;
 
     public DocumentIntelligenceService(
         IConfiguration config,
         IHttpClientFactory httpClientFactory,
+        ITenantContextService tenantContext,
         ILogger<DocumentIntelligenceService> logger)
     {
         _config            = config;
         _httpClientFactory = httpClientFactory;
+        _tenantContext     = tenantContext;
         _logger            = logger;
     }
 
     public bool IsConfigured()
     {
-        var ep  = _config["AzureDocumentIntelligence:Endpoint"];
-        var key = _config["AzureDocumentIntelligence:ApiKey"];
-        return !string.IsNullOrWhiteSpace(ep)
-            && !string.IsNullOrWhiteSpace(key)
-            && !ep.Contains("YOUR_ENDPOINT",  StringComparison.OrdinalIgnoreCase)
-            && !key.Contains("YOUR_API_KEY",  StringComparison.OrdinalIgnoreCase);
+        var (ep, key) = GetDocIntelConfigAsync().GetAwaiter().GetResult();
+        return !string.IsNullOrWhiteSpace(ep) && !string.IsNullOrWhiteSpace(key);
     }
 
     public async Task<string?> ExtractTextAsync(byte[] bytes, string fileName)
@@ -61,8 +60,9 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         if (!SupportedExtensions.Contains(ext)) return null;
 
-        var endpoint = _config["AzureDocumentIntelligence:Endpoint"]!.TrimEnd('/');
-        var apiKey   = _config["AzureDocumentIntelligence:ApiKey"]!;
+        var (endpoint, apiKey) = await GetDocIntelConfigAsync();
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)) return null;
+        endpoint = endpoint.TrimEnd('/');
 
         var analyzeUrl =
             $"{endpoint}/documentintelligence/documentModels/{ModelId}:analyze" +
@@ -140,6 +140,28 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
             _logger.LogError(ex, "Document Intelligence extraction threw for {File}.", fileName);
             return null;
         }
+    }
+
+    // ── Config resolution ──────────────────────────────────────────────────────
+
+    private async Task<(string? endpoint, string? apiKey)> GetDocIntelConfigAsync()
+    {
+        var tenantSettings = await _tenantContext.GetCurrentTenantAiSettingsAsync();
+        if (tenantSettings != null
+            && !string.IsNullOrWhiteSpace(tenantSettings.AzureDocumentIntelligenceEndpoint)
+            && !string.IsNullOrWhiteSpace(tenantSettings.AzureDocumentIntelligenceApiKey)
+            && !tenantSettings.AzureDocumentIntelligenceEndpoint.Contains("YOUR_ENDPOINT",  StringComparison.OrdinalIgnoreCase)
+            && !tenantSettings.AzureDocumentIntelligenceApiKey.Contains("YOUR_API_KEY",     StringComparison.OrdinalIgnoreCase))
+        {
+            return (tenantSettings.AzureDocumentIntelligenceEndpoint,
+                    tenantSettings.AzureDocumentIntelligenceApiKey);
+        }
+        var ep  = _config["AzureDocumentIntelligence:Endpoint"];
+        var key = _config["AzureDocumentIntelligence:ApiKey"];
+        if (string.IsNullOrWhiteSpace(ep) || ep.Contains("YOUR_ENDPOINT",  StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(key) || key.Contains("YOUR_API_KEY", StringComparison.OrdinalIgnoreCase))
+            return (null, null);
+        return (ep, key);
     }
 
     // ── Response parser ────────────────────────────────────────────────────────

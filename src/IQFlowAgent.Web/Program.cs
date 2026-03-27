@@ -72,6 +72,8 @@ builder.Services.AddScoped<IAzureSpeechService, AzureSpeechService>();
 builder.Services.AddScoped<IPiiScanService, PiiScanService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddScoped<IDocumentIntelligenceService, DocumentIntelligenceService>();
+builder.Services.AddScoped<IAzureEmbeddingService, AzureEmbeddingService>();
+builder.Services.AddScoped<IAzureSearchService, AzureSearchService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 
