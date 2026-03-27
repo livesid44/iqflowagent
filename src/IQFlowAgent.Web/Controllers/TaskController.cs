@@ -253,19 +253,29 @@ public class TaskController : Controller
 
         var ext = Path.GetExtension(artifact.FileName);
         var uniqueSuffix = DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
+        var safeFileName = $"{task.TaskId}-{uniqueSuffix}{ext}";
         string filePath;
 
         if (await _blobService.IsConfiguredAsync())
         {
-            var blobName = $"{task.TaskId}-{uniqueSuffix}{ext}";
-            using var stream = artifact.OpenReadStream();
-            filePath = await _blobService.UploadAsync(stream, blobName, artifact.ContentType);
+            // Resolve intake to get tenantId and intakeId for folder structure
+            var intakeRecord = await _db.IntakeRecords.FindAsync(task.IntakeRecordId);
+            if (intakeRecord != null)
+            {
+                var folderPath = $"{intakeRecord.TenantId}/{intakeRecord.IntakeId}/tasks";
+                using var stream = artifact.OpenReadStream();
+                filePath = await _blobService.UploadToFolderAsync(stream, folderPath, safeFileName, artifact.ContentType);
+            }
+            else
+            {
+                using var stream = artifact.OpenReadStream();
+                filePath = await _blobService.UploadAsync(stream, safeFileName, artifact.ContentType);
+            }
         }
         else
         {
             var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
             Directory.CreateDirectory(uploadsDir);
-            var safeFileName = $"{task.TaskId}-{uniqueSuffix}{ext}";
             var fullPath = Path.Combine(uploadsDir, safeFileName);
             using var stream = new FileStream(fullPath, FileMode.Create);
             await artifact.CopyToAsync(stream);

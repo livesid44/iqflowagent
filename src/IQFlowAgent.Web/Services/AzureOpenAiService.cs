@@ -6,7 +6,7 @@ namespace IQFlowAgent.Web.Services;
 
 public class AzureOpenAiService : IAzureOpenAiService
 {
-    private const int MaxDocumentChars = 8000;
+    private const int MaxDocumentChars = 40_000;
     private const int DefaultMaxOutputTokens = 2000;
     private const int MaxAnalysisJsonChars = 4000;  // max chars from AI analysis sent in field-analysis prompt
     // 20 000 chars covers multiple multi-sheet Excel files + Word docs + task comments while
@@ -23,6 +23,8 @@ public class AzureOpenAiService : IAzureOpenAiService
     private readonly ITenantContextService _tenantContext;
     private readonly IPiiScanService _piiScanner;
     private readonly IAuditLogService _auditLog;
+    private readonly IAzureSearchService _searchService;
+    private readonly IAzureEmbeddingService _embeddingService;
 
     // Accumulates PII findings detected during the most recent AnalyzeIntakeAsync call.
     // Reset to empty at the start of each AnalyzeIntakeAsync invocation.
@@ -38,14 +40,17 @@ public class AzureOpenAiService : IAzureOpenAiService
 
     public AzureOpenAiService(IConfiguration config, ILogger<AzureOpenAiService> logger,
         IHttpClientFactory httpClientFactory, ITenantContextService tenantContext,
-        IPiiScanService piiScanner, IAuditLogService auditLog)
+        IPiiScanService piiScanner, IAuditLogService auditLog,
+        IAzureSearchService searchService, IAzureEmbeddingService embeddingService)
     {
-        _config = config;
-        _logger = logger;
+        _config           = config;
+        _logger           = logger;
         _httpClientFactory = httpClientFactory;
-        _tenantContext = tenantContext;
-        _piiScanner = piiScanner;
-        _auditLog = auditLog;
+        _tenantContext    = tenantContext;
+        _piiScanner       = piiScanner;
+        _auditLog         = auditLog;
+        _searchService    = searchService;
+        _embeddingService = embeddingService;
     }
 
     /// <inheritdoc />
@@ -180,20 +185,22 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 Rules for actionItems:
                 - Only create an action item for a section where information is genuinely missing or insufficient.
+                - IMPORTANT: If a section's document excerpts (shown above) clearly provide the required information, do NOT create an action item for that section.
                 - Set priority=High for critical sections: Document Control, 2. Process Overview, 4. SOP Steps.
                 - Set priority=Medium for supporting sections: 3. RACI, 5. Work Instructions, 6. Escalation & Exceptions, 7. SLAs & Performance, 8. Volumetrics.
                 - Set priority=Low for sections that can be confirmed later: 9. Regulatory & Compliance, 10. Training, 11. OCC.
                 - "bartokSection" must exactly name the section (e.g. "4. SOP Steps").
                 - "requiredInfo" must list the specific data items that are absent or unconfirmed.
-                - If the uploaded document clearly covers a section, do NOT create a task for it.
 
                 Rules for checkPoints:
-                - Include one checkpoint per BARTOK section (11 total) assessing whether its information is sufficient.
-                - "sectionId" must be the BARTOK section reference: "DC" for Document Control, "1" through "11" for the numbered sections.
-                - "label" must be the section name (without the number prefix), e.g. "Document Control", "Purpose & Scope", "Process Overview", "RACI", "SOP Steps", "Work Instructions", "Escalation & Exceptions", "SLAs & Performance", "Volumetrics", "Regulatory & Compliance", "Training", "OCC".
-                - status=Pass: enough information is present in the intake or document.
-                - status=Warning: partial information; some items need confirmation from the process owner.
-                - status=Fail: section is critically under-documented; a task must be created.
+                - Include one checkpoint per BARTOK section (11 total).
+                - "sectionId": "DC" for Document Control, "1"–"11" for numbered sections.
+                - "label": section name without number prefix.
+                - CRITICAL: The uploaded document excerpts above show exactly what information is available per section. Base your status SOLELY on what is actually present in those excerpts, not on what might theoretically be missing.
+                - status=Pass: The excerpts contain sufficient information to write a meaningful, complete section in the BARTOK SOP output. If the document covers the section's core requirements, use Pass. Be generous — minor gaps do not warrant Warning.
+                - status=Warning: ONLY use Warning when SPECIFIC, NAMED data items are demonstrably absent from the excerpts AND are genuinely required to complete the section. Name exactly what is missing in the "note" field.
+                - status=Fail: Use ONLY when a section has zero relevant content in the excerpts — it cannot be written at all without new information.
+                - When a comprehensive document is uploaded covering the process, expect the majority of checkpoints to be Pass. Having more than 3 Warning/Fail checkpoints for a well-documented intake would be unusual.
 
                 actionItems: concrete steps to collect missing information required for the BARTOK S8 SOP output document.
                 checkPoints: section-level readiness checks for the BARTOK S8 SOP output document.
@@ -204,10 +211,10 @@ public class AzureOpenAiService : IAzureOpenAiService
                 messages = new object[]
                 {
                     new { role = "system", content = systemPrompt },
-                    new { role = "user",   content = await EnforcePiiPolicyAsync(BuildUserMessage(intake, documentText), "AnalyzeIntake") }
+                    new { role = "user",   content = await EnforcePiiPolicyAsync(await BuildUserMessageAsync(intake, documentText), "AnalyzeIntake") }
                 },
                 max_tokens  = maxTokens,
-                temperature = 0.7,
+                temperature = 0.3,
                 top_p       = 1.0,
                 model       = modelVersion   // hint to the Azure OpenAI API about the desired model version
             };
@@ -1449,7 +1456,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             outcome        : "MockResponse");
     }
 
-    private static string BuildUserMessage(IntakeRecord intake, string? documentText)
+    private async Task<string> BuildUserMessageAsync(IntakeRecord intake, string? documentText)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Process Name: {intake.ProcessName}");
@@ -1463,14 +1470,52 @@ public class AzureOpenAiService : IAzureOpenAiService
         sb.AppendLine($"Location: {intake.City}, {intake.Country} ({intake.SiteLocation})");
         sb.AppendLine($"Time Zone: {intake.TimeZone}");
 
-        if (!string.IsNullOrWhiteSpace(documentText))
+        if (string.IsNullOrWhiteSpace(documentText))
+            return sb.ToString();
+
+        sb.AppendLine();
+
+        // Use Azure AI Search for per-section semantic retrieval when configured
+        if (_searchService.IsConfigured() && _embeddingService.IsConfigured())
         {
+            sb.AppendLine("=== Uploaded Document Excerpts (by BARTOK section) ===");
+            sb.AppendLine("The following excerpts were retrieved from the uploaded document for each BARTOK section.");
             sb.AppendLine();
+
+            foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
+            {
+                var sectionEmbedding = await _embeddingService.GetEmbeddingAsync(sectionName);
+                var chunks = await _searchService.SearchAsync(intake.Id, sectionEmbedding, sectionName, topK: 5);
+                if (chunks.Count > 0)
+                {
+                    sb.AppendLine($"--- [{sectionId}] {sectionName} (retrieved from uploaded document) ---");
+                    foreach (var chunk in chunks)
+                        sb.AppendLine(chunk);
+                    sb.AppendLine();
+                }
+            }
+        }
+        else if (documentText.Length <= MaxDocumentChars)
+        {
+            // Short document: include verbatim
             sb.AppendLine("=== Uploaded Document Content ===");
-            var truncated = documentText.Length > MaxDocumentChars
-                ? documentText[..MaxDocumentChars] + "\n[...truncated]"
-                : documentText;
-            sb.AppendLine(truncated);
+            sb.AppendLine(documentText);
+        }
+        else
+        {
+            // Long document, no vector search: use keyword-based per-section excerpts
+            sb.AppendLine("=== Uploaded Document Excerpts (by BARTOK section) ===");
+            var allChunks = RagDocumentChunker.Chunk(documentText);
+            foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
+            {
+                var excerpt = RagDocumentChunker.GetTopChunksForSection(sectionName, allChunks, topK: 3);
+                if (!string.IsNullOrWhiteSpace(excerpt))
+                {
+                    sb.AppendLine($"--- [{sectionId}] {sectionName} ---");
+                    sb.AppendLine(excerpt);
+                    sb.AppendLine();
+                }
+            }
         }
 
         return sb.ToString();
