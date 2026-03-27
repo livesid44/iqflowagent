@@ -521,16 +521,32 @@ public class IntakeController : Controller
 
             if (model.NewDocument != null && model.NewDocument.Length > 0)
             {
-                // Always save to local disk — background job uploads to blob if configured.
-                var ext = Path.GetExtension(model.NewDocument.FileName);
-                var blobName = $"{record.IntakeId}-v{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
-                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
-                Directory.CreateDirectory(uploadsDir);
-                var fullPath = Path.Combine(uploadsDir, blobName);
-                using var stream = new FileStream(fullPath, FileMode.Create);
-                await model.NewDocument.CopyToAsync(stream);
-                newFilePath = $"/uploads/{blobName}";
-                _logger.LogInformation("Saved replacement document for {IntakeId} to disk: {Path}", record.IntakeId, newFilePath);
+                var ext      = Path.GetExtension(model.NewDocument.FileName);
+                var safeFile = $"{record.IntakeId}-v{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
+
+                if (await _blobService.IsConfiguredAsync())
+                {
+                    // Upload directly to the per-intake blob folder.
+                    var tenantId   = _tenantContext.GetCurrentTenantId();
+                    var folderPath = $"{tenantId}/{record.IntakeId}/documents";
+                    await using var ms = new MemoryStream();
+                    await model.NewDocument.CopyToAsync(ms);
+                    ms.Position = 0;
+                    newFilePath = await _blobService.UploadToFolderAsync(
+                        ms, folderPath, model.NewDocument.FileName, model.NewDocument.ContentType ?? "application/octet-stream");
+                }
+                else
+                {
+                    // Blob not configured — save to local disk; RAG processor will upload later.
+                    var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
+                    Directory.CreateDirectory(uploadsDir);
+                    var fullPath = Path.Combine(uploadsDir, safeFile);
+                    using var stream = new FileStream(fullPath, FileMode.Create);
+                    await model.NewDocument.CopyToAsync(stream);
+                    newFilePath = $"/uploads/{safeFile}";
+                }
+
+                _logger.LogInformation("Saved replacement document for {IntakeId} to: {Path}", record.IntakeId, newFilePath);
 
                 record.UploadedFileName        = model.NewDocument.FileName;
                 record.UploadedFilePath        = newFilePath;

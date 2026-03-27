@@ -169,6 +169,12 @@ public class RagProcessorService : BackgroundService
                 }
                 else
                 {
+                    // ── Upload local file to per-intake blob folder ────────
+                    // When Blob Storage is configured and the document is still on
+                    // local disk, migrate it to blob now (deferred from the HTTP POST
+                    // that originally saved it locally to keep the response fast).
+                    await EnsureDocumentInBlobAsync(doc, intake, db, blobSvc, ct);
+
                     // ── Read text content for RAG ──────────────────────────
                     var text = await ReadDocumentTextAsync(doc, blobSvc, docIntel, ct);
                     if (!string.IsNullOrWhiteSpace(text))
@@ -588,6 +594,57 @@ public class RagProcessorService : BackgroundService
         };
 
     // ─── Blob upload helpers ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// If the document is stored at a local disk path and Azure Blob Storage is
+    /// configured, upload it to the per-intake folder (<c>{tenantId}/{intakeId}/documents/</c>)
+    /// and update <see cref="IntakeDocument.FilePath"/> to the blob URL so that
+    /// all intake files are co-located under one folder in the storage account.
+    /// </summary>
+    private async Task EnsureDocumentInBlobAsync(
+        IntakeDocument doc,
+        IntakeRecord   intake,
+        ApplicationDbContext db,
+        IBlobStorageService blobSvc,
+        CancellationToken ct)
+    {
+        // Already in blob storage — nothing to do.
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return;
+
+        if (!await blobSvc.IsConfiguredAsync()) return;
+
+        try
+        {
+            var localPath = doc.FilePath.StartsWith('/')
+                ? Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))
+                : doc.FilePath;
+
+            var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+            var fullPath    = Path.GetFullPath(localPath);
+            if (!fullPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(fullPath))
+                return;
+
+            var folderPath  = $"{intake.TenantId}/{intake.IntakeId}/documents";
+            var contentType = doc.ContentType ?? "application/octet-stream";
+
+            await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var blobUrl = await blobSvc.UploadToFolderAsync(stream, folderPath, doc.FileName, contentType);
+
+            doc.FilePath = blobUrl;
+            await db.SaveChangesAsync(ct);
+
+            _logger.LogInformation(
+                "Uploaded {FileName} to blob folder {Folder} for intake {IntakeId}.",
+                doc.FileName, folderPath, intake.IntakeId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not upload {FileName} to blob for intake {IntakeId} — keeping local path.",
+                doc.FileName, intake.IntakeId);
+        }
+    }
 
     /// <summary>
     /// If the audio/video document is stored at a local disk path and blob storage is
