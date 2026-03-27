@@ -6,7 +6,7 @@
 @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "tenantaisettings" } })
 <main class="app-main">
     <div class="page-title">AI &amp; Storage Settings</div>
-    <div class="page-subtitle">Configure Azure OpenAI, Blob Storage and Speech-to-Text for <strong>@tenant?.Name</strong></div>
+    <div class="page-subtitle">Configure Azure OpenAI, Blob Storage, Speech-to-Text, Document Intelligence, AI Search and Embeddings for <strong>@tenant?.Name</strong></div>
     @if (TempData["Success"] != null) { <div class="alert-success-bar" id="save-success">@TempData["Success"]</div> }
     <div class="alert-error-bar" id="save-error" style="display:none"></div>
     <div class="alert-success-bar" id="save-ok" style="display:none"></div>
@@ -105,6 +105,68 @@
                         <div class="info-box">
                             <strong>How to get Speech credentials:</strong> Go to <em>Azure Portal &rarr; Create a resource &rarr; Speech service</em>.
                             Copy the Key and Region from <em>Keys and Endpoint</em>. The region must match the resource (e.g. <code>eastus</code>).
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">
+                Azure Document Intelligence Settings
+                <span style="font-size:12px;font-weight:400;color:#888;margin-left:8px;">Required for PDF, image, and PPTX text extraction</span>
+            </div>
+            <div class="card-body">
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Endpoint URL</label>
+                        <input asp-for="AzureDocumentIntelligenceEndpoint" class="form-input" placeholder="https://your-di-resource.cognitiveservices.azure.com/" />
+                    </div>
+                    <div>
+                        <label class="form-label">API Key</label>
+                        <input asp-for="AzureDocumentIntelligenceApiKey" class="form-input" type="password" placeholder="Your Document Intelligence API key" autocomplete="off" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>Required for PDF, image, and PPTX text extraction.</strong> Go to <em>Azure Portal &rarr; Document Intelligence resource &rarr; Keys and Endpoint</em> to get your credentials. When configured, the RAG pipeline will extract text from all uploaded document formats including PDFs and scanned images, enabling full BARTOK section analysis.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">Azure AI Search &amp; Embeddings Settings</div>
+            <div class="card-body">
+                <div style="font-weight:600;margin-bottom:12px;color:#374151;">AI Search</div>
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Search Endpoint URL</label>
+                        <input asp-for="AzureSearchEndpoint" class="form-input" placeholder="https://your-search.search.windows.net" />
+                    </div>
+                    <div>
+                        <label class="form-label">Search API Key</label>
+                        <input asp-for="AzureSearchApiKey" class="form-input" type="password" placeholder="Your Azure AI Search API key" autocomplete="off" />
+                    </div>
+                    <div>
+                        <label class="form-label">Index Name</label>
+                        <input asp-for="AzureSearchIndexName" class="form-input" placeholder="iqflow-rag-chunks" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>Used for semantic chunk retrieval.</strong> Create an Azure AI Search resource (Basic tier or above) in the Azure Portal. The index will be auto-created on first use. Hybrid search (vector + keyword) is used to find the most relevant document sections for each BARTOK SOP section.
+                        </div>
+                    </div>
+                </div>
+                <div style="font-weight:600;margin-top:20px;margin-bottom:12px;color:#374151;">Embeddings</div>
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Embedding Deployment Name</label>
+                        <input asp-for="AzureOpenAIEmbeddingDeployment" class="form-input" placeholder="text-embedding-3-small" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>Deploy text-embedding-3-small in Azure AI Foundry</strong> and enter the deployment name here. This generates 1536-dimension vectors for semantic search. If not configured, the system falls back to keyword-based chunk retrieval.
                         </div>
                     </div>
                 </div>
