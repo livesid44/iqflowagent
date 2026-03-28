@@ -798,12 +798,19 @@ public class IntakeController : Controller
         return RedirectToAction(nameof(AnalysisResult), new { id });
     }
 
+    // Extensions handled by each extraction strategy in RunAnalysisInBackgroundAsync
+    private static readonly HashSet<string> _openXmlExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".docx", ".xlsx" };
+    private static readonly HashSet<string> _ocrExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".pptx", ".jpg", ".jpeg", ".png", ".tiff", ".bmp" };
+
     private async Task RunAnalysisInBackgroundAsync(int intakeId, string? filePath, string webRoot)
     {
         using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var ai = scope.ServiceProvider.GetRequiredService<IAzureOpenAiService>();
-        var blob = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
+        var db       = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var ai       = scope.ServiceProvider.GetRequiredService<IAzureOpenAiService>();
+        var blob     = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
+        var docIntel = scope.ServiceProvider.GetRequiredService<IDocumentIntelligenceService>();
 
         try
         {
@@ -813,25 +820,57 @@ public class IntakeController : Controller
             record.Status = "Analyzing";
             await db.SaveChangesAsync();
 
-            // Try to read document text for AI analysis
+            // Extract document text using the full multi-format pipeline.
+            // This mirrors RagProcessorService so that re-analysis gets the same
+            // rich content as the initial RAG job (PDF/Word/Excel/image OCR support).
             string? docText = null;
             if (!string.IsNullOrWhiteSpace(filePath))
             {
-                if (await blob.IsConfiguredAsync() && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                var ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+                // Download bytes for binary formats
+                byte[]? docBytes = null;
+                if (blob != null && await blob.IsConfiguredAsync()
+                    && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Download from Azure Blob Storage
-                    docText = await blob.DownloadTextAsync(filePath);
+                    docBytes = await blob.DownloadBytesAsync(filePath);
                 }
                 else
                 {
-                    // Read from local disk (fallback path)
-                    var fullPath = Path.Combine(webRoot, filePath.TrimStart('/'));
-                    if (System.IO.File.Exists(fullPath))
+                    var uploadsRoot = Path.GetFullPath(Path.Combine(webRoot, "uploads"));
+                    var localPath   = Path.GetFullPath(Path.Combine(webRoot, filePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+                    if (localPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)
+                        && System.IO.File.Exists(localPath))
                     {
-                        var ext = Path.GetExtension(fullPath).ToLowerInvariant();
                         if (ParseableExtensions.Contains(ext))
-                            docText = await System.IO.File.ReadAllTextAsync(fullPath);
+                        {
+                            // Plain text — read directly (no need for bytes)
+                            docText = await System.IO.File.ReadAllTextAsync(localPath);
+                        }
+                        else
+                        {
+                            docBytes = await System.IO.File.ReadAllBytesAsync(localPath);
+                        }
                     }
+                }
+
+                // Extract from bytes when available
+                if (docText == null && docBytes != null)
+                {
+                    if (_openXmlExts.Contains(ext))
+                    {
+                        docText = DocumentTextExtractor.Extract(docBytes, ext);
+                    }
+                    else if (_ocrExts.Contains(ext) && docIntel.IsConfigured())
+                    {
+                        var fileName = System.IO.Path.GetFileName(filePath);
+                        docText = await docIntel.ExtractTextAsync(docBytes, fileName);
+                    }
+
+                    // Fallback: for blob text files that DownloadTextAsync doesn't handle
+                    // (it filters by extension), try decoding as UTF-8 for plain-text blobs
+                    if (docText == null && ParseableExtensions.Contains(ext))
+                        docText = System.Text.Encoding.UTF8.GetString(docBytes);
                 }
             }
 

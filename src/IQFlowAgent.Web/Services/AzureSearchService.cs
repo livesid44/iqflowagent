@@ -30,8 +30,14 @@ public class AzureSearchService : IAzureSearchService
 
     public bool IsConfigured()
     {
-        var cfg = GetSearchConfigAsync().GetAwaiter().GetResult();
-        return cfg.HasValue;
+        // Fast synchronous check against static config only (avoids DB deadlock).
+        // Tenant settings override is applied in the actual async methods.
+        var endpoint = _config["AzureSearch:Endpoint"];
+        var apiKey   = _config["AzureSearch:ApiKey"];
+        return !string.IsNullOrWhiteSpace(endpoint)
+            && !string.IsNullOrWhiteSpace(apiKey)
+            && !endpoint.Contains("YOUR_", StringComparison.OrdinalIgnoreCase)
+            && !apiKey.Contains("YOUR_",   StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task EnsureIndexExistsAsync(CancellationToken ct = default)

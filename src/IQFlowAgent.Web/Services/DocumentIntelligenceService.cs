@@ -49,14 +49,18 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
 
     public bool IsConfigured()
     {
-        var (ep, key) = GetDocIntelConfigAsync().GetAwaiter().GetResult();
-        return !string.IsNullOrWhiteSpace(ep) && !string.IsNullOrWhiteSpace(key);
+        // Fast synchronous check against static config only (avoids DB deadlock).
+        // Tenant settings override is applied in ExtractTextAsync via GetDocIntelConfigAsync.
+        var ep  = _config["AzureDocumentIntelligence:Endpoint"];
+        var key = _config["AzureDocumentIntelligence:ApiKey"];
+        return !string.IsNullOrWhiteSpace(ep)
+            && !string.IsNullOrWhiteSpace(key)
+            && !ep.Contains("YOUR_",  StringComparison.OrdinalIgnoreCase)
+            && !key.Contains("YOUR_", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<string?> ExtractTextAsync(byte[] bytes, string fileName)
     {
-        if (!IsConfigured()) return null;
-
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         if (!SupportedExtensions.Contains(ext)) return null;
 

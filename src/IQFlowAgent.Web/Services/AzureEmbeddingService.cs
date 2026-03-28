@@ -29,8 +29,16 @@ public class AzureEmbeddingService : IAzureEmbeddingService
 
     public bool IsConfigured()
     {
-        var cfg = GetEmbeddingConfigAsync().GetAwaiter().GetResult();
-        return cfg.HasValue;
+        // Fast synchronous check against static config only (avoids DB deadlock).
+        // Tenant settings override is applied in the actual async methods.
+        var endpoint = _config["AzureOpenAI:Endpoint"];
+        var apiKey   = _config["AzureOpenAI:ApiKey"];
+        var deploy   = _config["AzureOpenAI:EmbeddingDeployment"];
+        return !string.IsNullOrWhiteSpace(endpoint)
+            && !string.IsNullOrWhiteSpace(apiKey)
+            && !string.IsNullOrWhiteSpace(deploy)
+            && !endpoint.Contains(PlaceholderEndpoint, StringComparison.OrdinalIgnoreCase)
+            && !apiKey.Contains(PlaceholderKey,        StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<float[]?> GetEmbeddingAsync(string text, CancellationToken ct = default)
