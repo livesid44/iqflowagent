@@ -107,26 +107,28 @@ internal static class RagDocumentChunker
                                        "2 business days", "5 business days"],
 
         ["Volumetrics"]             = ["volume", "transaction volume", "monthly", "peak volume",
-                                       "annual", "forecast", "count", "quantity",
+                                       "annual", "forecast",
                                        "transactions per day", "items per month",
-                                       "daily", "weekly", "per day", "per month",
-                                       "number of", "transaction count", "total transactions",
+                                       "daily volumes", "weekly volumes", "per day", "per month",
+                                       "total transactions", "transaction count",
                                        "incidents per", "cases per", "requests per",
-                                       "average", "high season", "low season"],
+                                       "high season", "low season"],
 
-        ["Regulatory & Compliance"] = ["regulation", "compliance", "gdpr", "iso", "audit",
-                                       "control", "evidence", "framework", "obligation",
-                                       "standard", "policy", "compulsory", "mandatory",
-                                       "cross-referencing", "cross referencing",
-                                       "must be", "is required", "shall",
-                                       "data protection", "data privacy", "confidential",
-                                       "regulatory", "legal requirement", "legislative"],
+        ["Regulatory & Compliance"] = ["regulation", "compliance regulation", "gdpr", "iso 27001",
+                                       "iso 9001", "iso 22301", "hipaa", "sox",
+                                       "audit", "audit trail", "audit evidence",
+                                       "evidence", "regulatory obligation", "regulatory framework",
+                                       "data protection", "data privacy",
+                                       "data protection regulation", "dpa 2018",
+                                       "legislative", "legal requirement", "legal obligation",
+                                       "policy compliance", "regulatory compliance",
+                                       "techm control framework", "techm framework"],
 
-        ["Training"]                = ["training", "module", "competency", "e-learning",
-                                       "classroom", "on-the-job", "assessment",
-                                       "training material", "induction",
-                                       "learning", "learning objectives", "skill",
-                                       "qualification", "knowledge check", "certification",
+        ["Training"]                = ["training", "training module", "training material",
+                                       "competency", "e-learning", "elearning",
+                                       "classroom training", "on-the-job training",
+                                       "induction", "learning objectives",
+                                       "certification", "knowledge check",
                                        "onboarding", "upskilling", "refresher"],
 
         ["OCC"]                     = ["occ", "orange customer contract",
@@ -152,10 +154,10 @@ internal static class RagDocumentChunker
             "5"   => "work instructions detailed steps portal access navigate system how to log in fill in submit create update",
             "6"   => "escalation exceptions triggers escalation path RCA root cause analysis post-incident review PMIR corrective preventive actions major incident resolution",
             "7"   => "SLA service level performance metrics KPI target measurement reporting breach resolution timeframe business days",
-            "8"   => "volumetrics transaction volume monthly peak annual forecast count per day per month",
-            "9"   => "regulatory compliance policy mandatory obligatory regulation standard audit control evidence framework",
-            "10"  => "training module competency e-learning classroom induction on-the-job assessment",
-            "11"  => "OCC Orange Customer Contract obligation reference schedule 8",
+            "8"   => "volumetrics transaction volume monthly peak annual forecast transactions per day per month",
+            "9"   => "regulatory compliance GDPR ISO 27001 ISO 9001 audit data protection regulation legislation legal obligation",
+            "10"  => "training module competency e-learning classroom induction on-the-job training material upskilling",
+            "11"  => "OCC Orange Customer Contract obligation schedule 8 contractual obligation",
             _     => sectionName,
         };
 
@@ -254,13 +256,34 @@ internal static class RagDocumentChunker
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Counts how many times <paramref name="pattern"/> appears in <paramref name="text"/>.
+    /// For single-word patterns (those without a space), a lightweight word-boundary
+    /// check is applied: the character immediately before and after the match must
+    /// not be an ASCII letter.  This prevents short keywords such as "occ" from
+    /// matching inside longer words like "occasionally", and "iso" from matching
+    /// inside "supervisor".
+    /// Multi-word phrases are matched as plain substrings (no boundary check) because
+    /// they are already specific enough to avoid false positives.
+    /// </summary>
     private static int CountOccurrences(string text, string pattern)
     {
         if (string.IsNullOrEmpty(pattern)) return 0;
+        bool requireWordBoundary = !pattern.Contains(' ');
         int count = 0, idx = 0;
         while ((idx = text.IndexOf(pattern, idx, StringComparison.Ordinal)) >= 0)
         {
-            count++;
+            if (requireWordBoundary)
+            {
+                bool startOk = idx == 0 || !char.IsLetter(text[idx - 1]);
+                bool endOk   = idx + pattern.Length >= text.Length
+                               || !char.IsLetter(text[idx + pattern.Length]);
+                if (startOk && endOk) count++;
+            }
+            else
+            {
+                count++;
+            }
             idx += pattern.Length;
         }
         return count;
