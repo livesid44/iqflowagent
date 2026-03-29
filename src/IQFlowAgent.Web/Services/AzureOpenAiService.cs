@@ -1,5 +1,6 @@
 using IQFlowAgent.Web.Models;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 
 namespace IQFlowAgent.Web.Services;
@@ -33,6 +34,11 @@ public class AzureOpenAiService : IAzureOpenAiService
     // is never accessed concurrently from different threads.
     private readonly List<PiiFinding> _lastAnalysisPiiFindings = new();
 
+    // Accumulates warnings about Azure service degradations (e.g. embedding service returned
+    // null, Azure AI Search threw an exception) during the most recent AnalyzeIntakeAsync call.
+    // Reset to empty at the start of each AnalyzeIntakeAsync invocation.
+    private readonly List<string> _lastServiceWarnings = new();
+
     // ── Audit-log context ─────────────────────────────────────────────────────
     // Set at the start of each public method so the PII helper can log correctly.
     private string _currentCorrelationId = string.Empty;
@@ -55,6 +61,9 @@ public class AzureOpenAiService : IAzureOpenAiService
 
     /// <inheritdoc />
     public IReadOnlyList<PiiFinding> GetLastPiiFindings() => _lastAnalysisPiiFindings.AsReadOnly();
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> GetLastServiceWarnings() => _lastServiceWarnings.AsReadOnly();
 
     private async Task<(string? endpoint, string? apiKey, string? deployment, string apiVersion, int maxTokens, string modelVersion)> GetAiConfigAsync()
     {
@@ -86,6 +95,7 @@ public class AzureOpenAiService : IAzureOpenAiService
     {
         // Reset findings so GetLastPiiFindings() reflects only this invocation.
         _lastAnalysisPiiFindings.Clear();
+        _lastServiceWarnings.Clear();
         _currentCorrelationId = Guid.NewGuid().ToString("N")[..12];
         _currentIntakeId      = intake.Id;
 
@@ -1500,37 +1510,87 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         sb.AppendLine();
 
-        // Use Azure AI Search for per-section semantic retrieval when configured
-        if (_searchService.IsConfigured() && _embeddingService.IsConfigured())
-        {
-            sb.AppendLine("=== Uploaded Document Excerpts (by BARTOK section) ===");
-            sb.AppendLine("CRITICAL INSTRUCTION: Each section below shows text retrieved from the uploaded document that is relevant to that BARTOK section.");
-            sb.AppendLine("Any section labelled CONTENT FOUND must be assessed as Pass or Warning — NEVER Fail.");
-            sb.AppendLine("Only sections labelled NO CONTENT FOUND may be assessed as Fail.");
-            sb.AppendLine();
+        // Pre-compute keyword-based chunks once — used for cross-validation in the Azure AI
+        // Search path and as the primary source in the keyword-only fallback path.
+        // The early-return above guarantees documentText is non-null/non-whitespace here.
+        var allChunks = RagDocumentChunker.Chunk(documentText!);
 
-            foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
+        // Determine which retrieval path to use. Even if Azure AI Search is configured,
+        // we may fall back to keyword retrieval if the service encounters an error.
+        bool azureSearchUsed = _searchService.IsConfigured() && _embeddingService.IsConfigured();
+
+        if (azureSearchUsed)
+        {
+            // Build Azure Search output into a local StringBuilder so that, if the service
+            // path throws part-way through, we can fall back cleanly to keyword retrieval
+            // without leaving partial content in the main builder.
+            var azureSb = new StringBuilder();
+            try
             {
-                var sectionQuery     = RagDocumentChunker.GetSectionSearchQuery(sectionId, sectionName);
-                var sectionEmbedding = await _embeddingService.GetEmbeddingAsync(sectionQuery);
-                var chunks           = await _searchService.SearchAsync(intake.Id, sectionEmbedding, sectionQuery, topK: 5);
-                if (chunks.Count > 0)
+                azureSb.AppendLine("=== Uploaded Document Excerpts (by BARTOK section) ===");
+                azureSb.AppendLine("CRITICAL INSTRUCTION: Each section below shows text retrieved from the uploaded document that is relevant to that BARTOK section.");
+                azureSb.AppendLine("Any section labelled CONTENT FOUND must be assessed as Pass or Warning — NEVER Fail.");
+                azureSb.AppendLine("Only sections labelled NO CONTENT FOUND may be assessed as Fail.");
+                azureSb.AppendLine();
+
+                foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
                 {
-                    sb.AppendLine($"--- [{sectionId}] {sectionName} — CONTENT FOUND (status: Pass or Warning only) ---");
-                    foreach (var chunk in chunks)
-                        sb.AppendLine(chunk);
-                    sb.AppendLine();
+                    var sectionQuery     = RagDocumentChunker.GetSectionSearchQuery(sectionId, sectionName);
+                    var sectionEmbedding = await _embeddingService.GetEmbeddingAsync(sectionQuery);
+
+                    // Record a warning the first time the embedding service returns null.
+                    if (sectionEmbedding == null && _lastServiceWarnings.Count == 0)
+                        _lastServiceWarnings.Add(
+                            "Azure Embedding service returned no result during section analysis. " +
+                            "Vector search was disabled for this run; section accuracy may be reduced.");
+
+                    var vectorChunks = await _searchService.SearchAsync(
+                        intake.Id, sectionEmbedding, sectionQuery, topK: 5);
+
+                    // Cross-validate: vector search always returns up to topK results by cosine
+                    // similarity regardless of actual relevance — a section can be falsely
+                    // labelled CONTENT FOUND even when the document has no matching content
+                    // (e.g. Training, OCC, Volumetrics on an incident-management document).
+                    // Keyword scoring acts as a confirmation gate: only accept the vector results
+                    // when the same content also scores against this section's keyword list.
+                    var hasKeywordContent =
+                        !string.IsNullOrWhiteSpace(
+                            RagDocumentChunker.GetTopChunksForSection(sectionName, allChunks, topK: 1));
+
+                    if (vectorChunks.Count > 0 && hasKeywordContent)
+                    {
+                        azureSb.AppendLine($"--- [{sectionId}] {sectionName} — CONTENT FOUND (status: Pass or Warning only) ---");
+                        foreach (var chunk in vectorChunks)
+                            azureSb.AppendLine(chunk);
+                        azureSb.AppendLine();
+                    }
+                    else
+                    {
+                        azureSb.AppendLine($"--- [{sectionId}] {sectionName} — NO CONTENT FOUND in document ---");
+                        azureSb.AppendLine();
+                    }
                 }
-                else
-                {
-                    sb.AppendLine($"--- [{sectionId}] {sectionName} — NO CONTENT FOUND in document ---");
-                    sb.AppendLine();
-                }
+
+                // Commit the Azure Search output only on full success.
+                sb.Append(azureSb);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Azure AI Search/Embedding failed for intake {IntakeId} — falling back to keyword-based section retrieval.",
+                    intake.Id);
+                if (_lastServiceWarnings.Count == 0)
+                    _lastServiceWarnings.Add(
+                        "Azure AI Search service encountered an error during section retrieval. " +
+                        "Keyword-based fallback was used — results may be less precise.");
+                azureSearchUsed = false;
             }
         }
-        else
+
+        if (!azureSearchUsed)
         {
-            // Always use keyword-based per-section excerpts, regardless of document length.
+            // Keyword-based per-section excerpts — used when Azure AI Search is not configured
+            // or when the Azure Search path encountered a service error.
             // Structuring excerpts by BARTOK section lets the AI directly see which content
             // maps where, instead of having to apply implicit semantic reasoning on a verbatim dump.
             sb.AppendLine("=== Uploaded Document Excerpts (organized by BARTOK section) ===");
@@ -1539,7 +1599,6 @@ public class AzureOpenAiService : IAzureOpenAiService
             sb.AppendLine("Only sections labelled NO CONTENT FOUND may be assessed as Fail.");
             sb.AppendLine();
 
-            var allChunks = RagDocumentChunker.Chunk(documentText);
             foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
             {
                 var excerpt = RagDocumentChunker.GetTopChunksForSection(sectionName, allChunks, topK: 3);
@@ -1558,7 +1617,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 
             // For documents that fit in the context window, also append the full text
             // so the AI can reference details not captured by keyword excerpts above.
-            if (documentText.Length <= MaxDocumentChars)
+            if (documentText!.Length <= MaxDocumentChars)
             {
                 sb.AppendLine("=== Full Uploaded Document (for complete reference) ===");
                 sb.AppendLine(documentText);

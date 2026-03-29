@@ -251,6 +251,21 @@ public class RagProcessorService : BackgroundService
                         filesProcessed = job.ProcessedFiles
                     },
                     ct);
+
+                // Send a separate warning notification for any Azure service degradations
+                // that occurred during analysis (e.g. embedding returned null, search threw).
+                var serviceWarnings = aiService.GetLastServiceWarnings();
+                if (serviceWarnings.Count > 0)
+                {
+                    await _hub.Clients.Group($"user-{job.NotifyUserId}").SendAsync(
+                        "ServiceWarning",
+                        new
+                        {
+                            intakeId = intake.IntakeId,
+                            warnings = serviceWarnings
+                        },
+                        ct);
+                }
             }
         }
         catch (Exception ex)

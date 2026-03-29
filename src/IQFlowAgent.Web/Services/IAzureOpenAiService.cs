@@ -15,6 +15,14 @@ public interface IAzureOpenAiService
     IReadOnlyList<PiiFinding> GetLastPiiFindings();
 
     /// <summary>
+    /// Returns human-readable warning messages about Azure service degradations that
+    /// occurred during the most recent call to <see cref="AnalyzeIntakeAsync"/>.
+    /// Examples: embedding service returned null, Azure AI Search threw an exception.
+    /// The list is empty when all services responded normally.
+    /// </summary>
+    IReadOnlyList<string> GetLastServiceWarnings();
+
+    /// <summary>
     /// Verifies whether all tasks for an intake have sufficient closure evidence.
     /// Returns structured JSON with per-task verdicts and an overall canCloseIntake flag.
     /// </summary>
