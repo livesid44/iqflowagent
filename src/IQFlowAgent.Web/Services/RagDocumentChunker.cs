@@ -36,18 +36,25 @@ internal static class RagDocumentChunker
         ["Purpose & Scope"]         = ["purpose", "scope", "objective", "countries in scope",
                                        "input artefact", "applicable", "intended for",
                                        "geography", "in-scope", "aim", "goal", "applies to",
-                                       "this document", "this process", "this sop"],
+                                       "this document", "this process", "this sop",
+                                       "this procedure", "introduction", "in scope",
+                                       "out of scope", "coverage", "applicability"],
 
         ["Process Overview"]        = ["overview", "description", "process owner", "volume",
                                        "monthly volume", "peak", "hours of operation",
                                        "systems used", "tools", "weekday", "weekend", "holiday",
                                        "incident", "unplanned", "disruption", "service",
                                        "major incident", "definition", "terminology",
-                                       "background", "context"],
+                                       "background", "context", "process description",
+                                       "business process", "as-is process", "to-be process",
+                                       "lifecycle", "end to end", "end-to-end"],
 
         ["RACI"]                    = ["responsible", "accountable", "consulted", "informed",
                                        "raci", "role", "task owner", "matrix", "r/a/c/i",
-                                       "who is", "team responsible", "assigned to"],
+                                       "who is", "team responsible", "assigned to",
+                                       "accountability", "ownership", "stakeholder",
+                                       "responsible party", "roles and responsibilities",
+                                       "responsibility matrix", "team ownership"],
 
         // Broad: covers any described process activity, incident-type workflows,
         // ServiceNow case handling, categorisation, investigation, resolution, etc.
@@ -70,7 +77,11 @@ internal static class RagDocumentChunker
                                        "log in", "system access", "unify desk",
                                        "servicenow", "mytools", "tool",
                                        "complete the form", "fill in", "submit",
-                                       "open a", "create a", "update the"],
+                                       "open a", "create a", "update the",
+                                       "user guide", "system guide", "instruction",
+                                       "reference guide", "quick guide",
+                                       "select", "choose", "drop-down", "dropdown",
+                                       "search for", "filter by"],
 
         // Broad: covers RCA, post-incident review, PMIR, corrective/preventive actions
         ["Escalation & Exceptions"] = ["escalation", "exception", "trigger",
@@ -97,21 +108,32 @@ internal static class RagDocumentChunker
 
         ["Volumetrics"]             = ["volume", "transaction volume", "monthly", "peak volume",
                                        "annual", "forecast", "count", "quantity",
-                                       "transactions per day", "items per month"],
+                                       "transactions per day", "items per month",
+                                       "daily", "weekly", "per day", "per month",
+                                       "number of", "transaction count", "total transactions",
+                                       "incidents per", "cases per", "requests per",
+                                       "average", "high season", "low season"],
 
         ["Regulatory & Compliance"] = ["regulation", "compliance", "gdpr", "iso", "audit",
                                        "control", "evidence", "framework", "obligation",
                                        "standard", "policy", "compulsory", "mandatory",
                                        "cross-referencing", "cross referencing",
-                                       "must be", "is required", "shall"],
+                                       "must be", "is required", "shall",
+                                       "data protection", "data privacy", "confidential",
+                                       "regulatory", "legal requirement", "legislative"],
 
         ["Training"]                = ["training", "module", "competency", "e-learning",
                                        "classroom", "on-the-job", "assessment",
-                                       "training material", "induction"],
+                                       "training material", "induction",
+                                       "learning", "learning objectives", "skill",
+                                       "qualification", "knowledge check", "certification",
+                                       "onboarding", "upskilling", "refresher"],
 
-        ["OCC"]                     = ["occ", "orange customer contract", "contract obligation",
-                                       "reference number", "customer obligation",
-                                       "schedule 8", "sow"],
+        ["OCC"]                     = ["occ", "orange customer contract",
+                                       "contract obligation", "customer obligation",
+                                       "schedule 8", "sow", "statement of work",
+                                       "contractual obligation", "customer contract",
+                                       "occ reference", "occ number", "occ clause"],
     };
 
     /// <summary>
@@ -209,6 +231,9 @@ internal static class RagDocumentChunker
             return string.Join("\n\n", chunks.Take(topK));
 
         // Score each chunk by total keyword frequency (simple but effective).
+        // Only return chunks that actually contain at least one section keyword —
+        // zero-score chunks are random document content unrelated to this section
+        // and would cause the AI to label the section as CONTENT FOUND incorrectly.
         var scored = chunks
             .Select((chunk, idx) =>
             {
@@ -216,10 +241,13 @@ internal static class RagDocumentChunker
                 int score = keywords.Sum(kw => CountOccurrences(lower, kw));
                 return (chunk, idx, score);
             })
+            .Where(x => x.score > 0)   // exclude chunks with no keyword matches
             .OrderByDescending(x => x.score)
             .Take(topK)
             .OrderBy(x => x.idx)   // restore document order for readability
             .ToList();
+
+        if (scored.Count == 0) return string.Empty;   // no relevant content found
 
         return string.Join("\n\n[...]\n\n", scored.Select(x => x.chunk));
     }

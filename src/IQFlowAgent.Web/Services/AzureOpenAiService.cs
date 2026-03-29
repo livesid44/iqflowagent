@@ -204,7 +204,9 @@ public class AzureOpenAiService : IAzureOpenAiService
                 Rules for actionItems:
                 - Only create an action item for a section where information is genuinely missing or insufficient.
                 - IMPORTANT: If a section's document excerpts (shown above) clearly provide the required information — even if using different terminology than BARTOK — do NOT create an action item for that section.
+                - The excerpts shown are keyword-matched: they contain actual document content relevant to that BARTOK section. If a section is labelled CONTENT FOUND, treat the excerpts as evidence the section IS covered.
                 - Creating unnecessary action items produces tasks that frustrate users. When in doubt, do NOT create an action item.
+                - Only create an action item if you can name a SPECIFIC required data item (e.g. "monthly transaction volumes for 12 months") that is completely absent from the excerpts AND from the full document. Do not create vague action items.
                 - Set priority=High for critical sections: Document Control, 2. Process Overview, 4. SOP Steps.
                 - Set priority=Medium for supporting sections: 3. RACI, 5. Work Instructions, 6. Escalation & Exceptions, 7. SLAs & Performance, 8. Volumetrics.
                 - Set priority=Low for sections that can be confirmed later: 9. Regulatory & Compliance, 10. Training, 11. OCC.
@@ -216,10 +218,11 @@ public class AzureOpenAiService : IAzureOpenAiService
                 - "sectionId": "DC" for Document Control, "1"–"11" for numbered sections.
                 - "label": section name without number prefix.
                 - MANDATORY RULE: The user message labels each section excerpt as either "CONTENT FOUND" or "NO CONTENT FOUND".
+                  * "CONTENT FOUND" means the keyword-based retrieval found document content relevant to this section. This is strong evidence the section IS covered.
                   * If the label says "CONTENT FOUND" → status MUST be "Pass" or "Warning". It CANNOT be "Fail".
                   * If the label says "NO CONTENT FOUND" → status may be "Fail" or "Warning" depending on how critical the section is.
-                - status=Pass: The document excerpt covers the section's topic. Default to Pass for any "CONTENT FOUND" section unless specific required data items are demonstrably absent.
-                - status=Warning: Use when the document excerpt exists but specific named data items are missing. Name exactly what is absent in the "note" field.
+                - status=Pass: The document excerpt covers the section's topic. Default to Pass for any "CONTENT FOUND" section. Only downgrade to Warning if a SPECIFIC named data item (not the whole section) is demonstrably absent.
+                - status=Warning: Use SPARINGLY. Only when the document excerpt shows the section exists but is missing a specific, named piece of required data. Name exactly what is absent in the "note" field.
                 - status=Fail: Use ONLY for sections explicitly labelled "NO CONTENT FOUND" where the section is critical and cannot be drafted without new information.
                 - When a comprehensive process document is uploaded, expect MOST checkpoints to be Pass. More than 3–4 Warning/Fail checkpoints for a well-documented process intake is unusual and likely indicates over-strict assessment.
                 - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. Marking a covered section as Fail/Warning creates unnecessary work for users. Be generous — Pass is correct whenever the excerpt shows the document touches on the section's subject matter.
