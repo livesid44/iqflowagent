@@ -284,4 +284,52 @@ public class AzureSpeechService : IAzureSpeechService
 
         [End of transcript — Generated: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC]
         """;
+
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync(int tenantId)
+    {
+        var settings = await _db.TenantAiSettings.FirstOrDefaultAsync(x => x.TenantId == tenantId);
+
+        if (settings is null
+            || string.IsNullOrWhiteSpace(settings.AzureSpeechRegion)
+            || string.IsNullOrWhiteSpace(settings.AzureSpeechApiKey)
+            || settings.AzureSpeechApiKey.Equals("YOUR_SPEECH_KEY", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, 0, "Azure Speech is not configured. Please provide Speech Region and API Key.");
+        }
+
+        var region = settings.AzureSpeechRegion.Trim();
+        var apiKey = settings.AzureSpeechApiKey.Trim();
+
+        // Lightweight check: list the first base model — validates both region and key
+        var url = $"https://{region}.api.cognitive.microsoft.com/speechtotext/v3.2/models/base?top=1";
+
+        try
+        {
+            var http = _httpFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", apiKey);
+            var response = await http.GetAsync(url);
+            var code = (int)response.StatusCode;
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Azure Speech connection test succeeded for region '{Region}'.", region);
+                return (true, code, $"Connected successfully to Azure Speech in region '{region}'.");
+            }
+
+            var hint = code switch
+            {
+                401 => " Check your API Key.",
+                403 => " Access denied — verify the subscription and region.",
+                404 => $" Region '{region}' may be incorrect.",
+                _   => string.Empty
+            };
+            _logger.LogWarning("Azure Speech connection test returned HTTP {Code} for region '{Region}'.", code, region);
+            return (false, code, $"Azure Speech returned HTTP {code}.{hint}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Azure Speech connection test failed for region '{Region}'.", region);
+            return (false, 0, $"Connection failed: {ex.Message}");
+        }
+    }
 }

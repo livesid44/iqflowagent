@@ -21,4 +21,10 @@ public interface IDocumentIntelligenceService
     /// service is not configured — the caller should fall back to OpenXML extraction.
     /// </summary>
     Task<string?> ExtractTextAsync(byte[] bytes, string fileName);
+
+    /// <summary>
+    /// Verifies that the configured Document Intelligence endpoint and API key are reachable.
+    /// Returns a success flag, HTTP status code, and a human-readable message.
+    /// </summary>
+    Task<(bool success, int statusCode, string message)> TestConnectionAsync();
 }

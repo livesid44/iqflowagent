@@ -36,4 +36,10 @@ public interface IBlobStorageService
     /// <paramref name="folderPath"/> format: {tenantId}/{intakeId}/documents (no trailing slash).
     /// </summary>
     Task<string> UploadToFolderAsync(Stream content, string folderPath, string fileName, string contentType);
+
+    /// <summary>
+    /// Verifies that the configured Azure Blob Storage connection string and container
+    /// are reachable. Returns a success flag, HTTP status code, and a human-readable message.
+    /// </summary>
+    Task<(bool success, int statusCode, string message)> TestConnectionAsync();
 }

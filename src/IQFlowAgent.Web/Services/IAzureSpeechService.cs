@@ -16,4 +16,10 @@ public interface IAzureSpeechService
     /// <param name="tenantId">Tenant whose Speech credentials to use.</param>
     /// <param name="fileName">Original file name (used for language hint and logging).</param>
     Task<string> TranscribeAsync(string audioBlobUrl, int tenantId, string fileName);
+
+    /// <summary>
+    /// Verifies that the configured Azure Speech credentials are valid for the given tenant
+    /// by making a lightweight REST call to the Speech service.
+    /// </summary>
+    Task<(bool success, int statusCode, string message)> TestConnectionAsync(int tenantId);
 }

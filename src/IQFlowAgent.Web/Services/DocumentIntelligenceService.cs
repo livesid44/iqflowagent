@@ -244,4 +244,48 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
 
         return sb.ToString();
     }
+
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
+    {
+        var (endpoint, apiKey) = await GetDocIntelConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey))
+        {
+            return (false, 0,
+                "Azure Document Intelligence is not configured. Please provide Endpoint and API Key.");
+        }
+
+        // GET /documentintelligence/documentModels?api-version=... lists available models —
+        // a lightweight authenticated request that validates both endpoint and key.
+        var url = $"{endpoint.TrimEnd('/')}/documentintelligence/documentModels?api-version={ApiVersion}&top=1";
+
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", apiKey);
+            var response = await http.GetAsync(url);
+            var code = (int)response.StatusCode;
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Document Intelligence connection test succeeded for '{Endpoint}'.", endpoint);
+                return (true, code, $"Connected successfully to Azure Document Intelligence at '{endpoint}'.");
+            }
+
+            var hint = code switch
+            {
+                401 => " Authentication failed — check your API Key.",
+                403 => " Access denied — verify subscription and permissions.",
+                404 => " Endpoint may be incorrect or the resource does not exist.",
+                _   => string.Empty
+            };
+            _logger.LogWarning("Document Intelligence test returned HTTP {Code} for '{Endpoint}'.", code, endpoint);
+            return (false, code, $"Azure Document Intelligence returned HTTP {code}.{hint}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Document Intelligence connection test failed for '{Endpoint}'.", endpoint);
+            return (false, 0, $"Connection failed: {ex.Message}");
+        }
+    }
 }

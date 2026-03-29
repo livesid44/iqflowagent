@@ -322,4 +322,49 @@ public class AzureSearchService : IAzureSearchService
 
         return (endpoint, apiKey, indexName ?? DefaultIndexName);
     }
+
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
+    {
+        var cfg = await GetSearchConfigAsync();
+
+        if (!cfg.HasValue)
+        {
+            return (false, 0,
+                "Azure AI Search is not configured. Please provide Search Endpoint and API Key.");
+        }
+
+        var (endpoint, apiKey, _) = cfg.Value;
+
+        // GET /servicestats?api-version=... — lightweight authenticated probe
+        var url = $"{endpoint.TrimEnd('/')}/servicestats?api-version={ApiVersion}";
+
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
+            var response = await http.GetAsync(url);
+            var code = (int)response.StatusCode;
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Azure AI Search connection test succeeded for '{Endpoint}'.", endpoint);
+                return (true, code, $"Connected successfully to Azure AI Search at '{endpoint}'.");
+            }
+
+            var hint = code switch
+            {
+                401 => " Authentication failed — check your API Key.",
+                403 => " Access denied — verify subscription and permissions.",
+                404 => " Endpoint may be incorrect or the resource does not exist.",
+                _   => string.Empty
+            };
+            _logger.LogWarning("Azure AI Search test returned HTTP {Code} for '{Endpoint}'.", code, endpoint);
+            return (false, code, $"Azure AI Search returned HTTP {code}.{hint}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Azure AI Search connection test failed for '{Endpoint}'.", endpoint);
+            return (false, 0, $"Connection failed: {ex.Message}");
+        }
+    }
 }

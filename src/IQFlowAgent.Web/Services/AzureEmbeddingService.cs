@@ -131,4 +131,54 @@ public class AzureEmbeddingService : IAzureEmbeddingService
 
         return (endpoint, apiKey, deployment, apiVersion);
     }
+
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
+    {
+        var cfg = await GetEmbeddingConfigAsync();
+
+        if (!cfg.HasValue)
+        {
+            return (false, 0,
+                "Azure Embeddings are not configured. Please provide Endpoint, API Key and Embedding Deployment Name.");
+        }
+
+        var (endpoint, apiKey, deployment, apiVersion) = cfg.Value;
+        var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/embeddings?api-version={apiVersion}";
+
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
+
+            var body = JsonSerializer.Serialize(new { input = "test" });
+            var response = await http.PostAsync(url,
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            var code = (int)response.StatusCode;
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "Azure Embedding connection test succeeded for deployment '{Deployment}'.", deployment);
+                return (true, code,
+                    $"Connected successfully to Azure OpenAI Embeddings deployment '{deployment}'.");
+            }
+
+            var hint = code switch
+            {
+                401 => " Authentication failed — check your API Key.",
+                403 => " Access denied — verify subscription and permissions.",
+                404 => $" Deployment '{deployment}' was not found. Check the Embedding Deployment Name.",
+                _   => string.Empty
+            };
+            _logger.LogWarning(
+                "Azure Embedding test returned HTTP {Code} for deployment '{Deployment}'.", code, deployment);
+            return (false, code, $"Azure Embeddings returned HTTP {code}.{hint}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Azure Embedding connection test failed for deployment '{Deployment}'.", deployment);
+            return (false, 0, $"Connection failed: {ex.Message}");
+        }
+    }
 }

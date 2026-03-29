@@ -332,4 +332,46 @@ public class BlobStorageService : IBlobStorageService
         var container = _config["AzureStorage:ContainerName"] ?? "intakes";
         return (conn, container);
     }
+
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
+    {
+        var (conn, containerName) = await GetStorageConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(conn)
+            || conn.Equals(PlaceholderConnection, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, 0, "Azure Blob Storage is not configured. Please provide a Connection String.");
+        }
+
+        try
+        {
+            var serviceClient = new BlobServiceClient(conn);
+            var containerClient = serviceClient.GetBlobContainerClient(containerName);
+            // GetProperties validates auth without listing blobs
+            await containerClient.GetPropertiesAsync();
+            return (true, 200, $"Connected successfully to Azure Blob Storage container '{containerName}'.");
+        }
+        catch (Azure.RequestFailedException ex)
+        {
+            var code = ex.Status;
+            if (code == 404)
+            {
+                // Container doesn't exist yet but credentials are valid
+                return (true, 200,
+                    $"Authentication successful. Container '{containerName}' does not exist yet — it will be created on first use.");
+            }
+            var hint = code switch
+            {
+                403 => " Check that the connection string has the correct permissions.",
+                401 => " The connection string or account key appears to be invalid.",
+                _   => string.Empty
+            };
+            return (false, code, $"Azure Storage error ({ex.ErrorCode}): {ex.Message}.{hint}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Blob Storage connection test failed");
+            return (false, 0, $"Connection failed: {ex.Message}");
+        }
+    }
 }

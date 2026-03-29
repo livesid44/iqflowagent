@@ -39,18 +39,33 @@ public class TenantAiSettingsController : Controller
     private readonly ApplicationDbContext _db;
     private readonly ITenantContextService _tenantContext;
     private readonly IAzureOpenAiService _aiService;
+    private readonly IBlobStorageService _blobService;
+    private readonly IAzureSpeechService _speechService;
+    private readonly IDocumentIntelligenceService _docIntelService;
+    private readonly IAzureSearchService _searchService;
+    private readonly IAzureEmbeddingService _embeddingService;
     private readonly ILogger<TenantAiSettingsController> _logger;
 
     public TenantAiSettingsController(
         ApplicationDbContext db,
         ITenantContextService tenantContext,
         IAzureOpenAiService aiService,
+        IBlobStorageService blobService,
+        IAzureSpeechService speechService,
+        IDocumentIntelligenceService docIntelService,
+        IAzureSearchService searchService,
+        IAzureEmbeddingService embeddingService,
         ILogger<TenantAiSettingsController> logger)
     {
-        _db = db;
-        _tenantContext = tenantContext;
-        _aiService = aiService;
-        _logger = logger;
+        _db              = db;
+        _tenantContext   = tenantContext;
+        _aiService       = aiService;
+        _blobService     = blobService;
+        _speechService   = speechService;
+        _docIntelService = docIntelService;
+        _searchService   = searchService;
+        _embeddingService = embeddingService;
+        _logger          = logger;
     }
 
     public async Task<IActionResult> Index()
@@ -176,6 +191,87 @@ public class TenantAiSettingsController : Controller
         catch (Exception ex)
         {
             _logger.LogError(ex, "TenantAiSettings/TestConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure Blob Storage credentials.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestBlobConnection()
+    {
+        try
+        {
+            var (success, statusCode, message) = await _blobService.TestConnectionAsync();
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestBlobConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure Speech credentials.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestSpeechConnection()
+    {
+        try
+        {
+            var tenantId = _tenantContext.GetCurrentTenantId();
+            var (success, statusCode, message) = await _speechService.TestConnectionAsync(tenantId);
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestSpeechConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure Document Intelligence credentials.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestDocIntelConnection()
+    {
+        try
+        {
+            var (success, statusCode, message) = await _docIntelService.TestConnectionAsync();
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestDocIntelConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure AI Search credentials.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestSearchConnection()
+    {
+        try
+        {
+            var (success, statusCode, message) = await _searchService.TestConnectionAsync();
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestSearchConnection failed");
+            return Json(new { success = false, statusCode = 0, message = ex.Message });
+        }
+    }
+
+    // Tests the currently-saved Azure Embeddings deployment.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TestEmbeddingsConnection()
+    {
+        try
+        {
+            var (success, statusCode, message) = await _embeddingService.TestConnectionAsync();
+            return Json(new { success, statusCode, message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TenantAiSettings/TestEmbeddingsConnection failed");
             return Json(new { success = false, statusCode = 0, message = ex.Message });
         }
     }
