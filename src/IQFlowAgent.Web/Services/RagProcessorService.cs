@@ -550,15 +550,18 @@ public class RagProcessorService : BackgroundService
 
                 var task = new IntakeTask
                 {
-                    TaskId         = "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper(),
-                    IntakeRecordId = intake.Id,
-                    Title          = fullTitle,
-                    Description    = desc,
-                    Status         = "Open",
-                    Priority       = NormalisePriority(priority),
-                    Owner          = intake.ProcessOwnerEmail,
-                    DueDate        = DateTime.UtcNow.AddHours(48),
-                    CreatedAt      = DateTime.UtcNow
+                    TaskId            = "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper(),
+                    IntakeRecordId    = intake.Id,
+                    Title             = fullTitle,
+                    Description       = desc,
+                    Status            = "Open",
+                    Priority          = NormalisePriority(priority),
+                    Owner             = intake.ProcessOwnerEmail,
+                    DueDate           = DateTime.UtcNow.AddHours(48),
+                    CreatedAt         = DateTime.UtcNow,
+                    // Store the BARTOK section so per-task document re-analysis can target
+                    // the correct section keywords without relying on the title pattern.
+                    BartokSectionName = IsCheckPoint(item) ? (GetStringProp(item, "label") ?? string.Empty) : null
                 };
                 db.IntakeTasks.Add(task);
                 await db.SaveChangesAsync(ct);

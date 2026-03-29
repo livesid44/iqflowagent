@@ -474,6 +474,9 @@ namespace IQFlowAgent.Web.Migrations
                     b.Property<string>("NaReason")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BartokSectionName")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Owner")
                         .IsRequired()
                         .HasColumnType("TEXT");

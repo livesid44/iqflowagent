@@ -1081,7 +1081,8 @@ Required  : {(string.IsNullOrWhiteSpace(cpNote) ? "See checkpoint status above."
 """;
 
                     AddTask(db, record, title, description, priority, owner, now,
-                        $"Task automatically created from pending checkpoint '{cpLabel}' (status: {cpStatus}) for intake {record.IntakeId}.");
+                        $"Task automatically created from pending checkpoint '{cpLabel}' (status: {cpStatus}) for intake {record.IntakeId}.",
+                        bartokSectionName: cpLabel);
                 }
             }
 
@@ -1096,20 +1097,21 @@ Required  : {(string.IsNullOrWhiteSpace(cpNote) ? "See checkpoint status above."
 
     private static void AddTask(ApplicationDbContext db, IntakeRecord record,
         string title, string description, string priority, string owner,
-        DateTime now, string logComment)
+        DateTime now, string logComment, string? bartokSectionName = null)
     {
         var task = new IntakeTask
         {
-            TaskId          = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
-            IntakeRecordId  = record.Id,
-            Title           = title,
-            Description     = description,
-            Priority        = priority,
-            Owner           = owner,
-            Status          = "Open",
-            CreatedAt       = now,
-            DueDate         = now.AddHours(48),
-            CreatedByUserId = record.CreatedByUserId
+            TaskId            = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
+            IntakeRecordId    = record.Id,
+            Title             = title,
+            Description       = description,
+            Priority          = priority,
+            Owner             = owner,
+            Status            = "Open",
+            CreatedAt         = now,
+            DueDate           = now.AddHours(48),
+            CreatedByUserId   = record.CreatedByUserId,
+            BartokSectionName = bartokSectionName
         };
         db.IntakeTasks.Add(task);
 

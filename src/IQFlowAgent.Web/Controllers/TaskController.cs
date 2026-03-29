@@ -14,16 +14,19 @@ public class TaskController : Controller
     private readonly ApplicationDbContext _db;
     private readonly IBlobStorageService _blobService;
     private readonly IAzureOpenAiService _aiService;
+    private readonly IDocumentIntelligenceService _docIntel;
     private readonly ILogger<TaskController> _logger;
     private readonly IWebHostEnvironment _env;
 
     public TaskController(ApplicationDbContext db, IBlobStorageService blobService,
         IAzureOpenAiService aiService,
+        IDocumentIntelligenceService docIntel,
         ILogger<TaskController> logger, IWebHostEnvironment env)
     {
         _db = db;
         _blobService = blobService;
         _aiService = aiService;
+        _docIntel = docIntel;
         _logger = logger;
         _env = env;
     }
@@ -336,6 +339,88 @@ public class TaskController : Controller
         return RedirectToAction(nameof(Details), new { id });
     }
 
+    // ── POST /Task/AnalyzeForTask/{id} ───────────────────────────────────────
+    // Re-analyzes the uploaded artifacts for a specific task using the task's
+    // BARTOK section keywords.  If the uploaded document does not contain relevant
+    // content for the section, the task is immediately reopened so the user knows
+    // more information is required.  If it does contain content the task keeps its
+    // current status and a confirmation comment is added.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AnalyzeForTask(int id)
+    {
+        var task = await _db.IntakeTasks
+            .Include(t => t.Documents)
+            .Include(t => t.ActionLogs)
+            .FirstOrDefaultAsync(t => t.Id == id);
+        if (task == null) return NotFound();
+
+        var sectionName = task.BartokSectionName;
+        if (string.IsNullOrWhiteSpace(sectionName))
+        {
+            TempData["Error"] = "This task is not linked to a specific BARTOK section and cannot be re-analysed.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        // ── Aggregate artifact text from files uploaded to this task ──────────
+        var artifactText = await AggregateArtifactTextAsync(new List<IntakeTask> { task });
+
+        if (string.IsNullOrWhiteSpace(artifactText))
+        {
+            TempData["Error"] = "No artifact content found. Please upload a document before running analysis.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        // ── Keyword-based RAG scoring for the section ─────────────────────────
+        // Chunk the artifact and score it against the section's keywords.
+        var chunks    = RagDocumentChunker.Chunk(artifactText);
+        var topChunks = RagDocumentChunker.GetTopChunksForSection(sectionName, chunks, topK: 1);
+        var hasContent = !string.IsNullOrWhiteSpace(topChunks);
+
+        var now = DateTime.UtcNow;
+
+        if (hasContent)
+        {
+            // Content found — log a pass comment, keep current status.
+            _db.TaskActionLogs.Add(new TaskActionLog
+            {
+                IntakeTaskId    = task.Id,
+                ActionType      = "Comment",
+                Comment         = $"✅ Document analysis passed for section '{sectionName}': relevant content found in the uploaded artifact. No action required.",
+                CreatedAt       = now,
+                CreatedByUserId = User.Identity?.Name,
+                CreatedByName   = User.Identity?.Name
+            });
+
+            await _db.SaveChangesAsync();
+            TempData["Success"] = $"Analysis passed — relevant content found for '{sectionName}'.";
+        }
+        else
+        {
+            // No relevant content — reopen the task so the user must provide a better document.
+            var oldStatus = task.Status;
+            task.Status      = "Open";
+            task.CompletedAt = null;
+
+            _db.TaskActionLogs.Add(new TaskActionLog
+            {
+                IntakeTaskId    = task.Id,
+                ActionType      = "StatusChange",
+                OldStatus       = oldStatus,
+                NewStatus       = "Open",
+                Comment         = $"⚠️ Document analysis failed for section '{sectionName}': the uploaded artifact does not contain sufficient content for this section. Task has been reopened — please upload a document that covers this section.",
+                CreatedAt       = now,
+                CreatedByUserId = User.Identity?.Name,
+                CreatedByName   = User.Identity?.Name
+            });
+
+            await _db.SaveChangesAsync();
+            TempData["Error"] = $"Analysis failed — no relevant content found for '{sectionName}'. Task has been reopened.";
+        }
+
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
     // ── POST /Task/MarkNotApplicable/{id} ────────────────────────────────────
     [HttpPost]
     [ValidateAntiForgeryToken]
@@ -344,23 +429,35 @@ public class TaskController : Controller
         var task = await _db.IntakeTasks.FindAsync(id);
         if (task == null) return NotFound();
 
+        // A comment explaining why the task is N/A is mandatory.
+        if (string.IsNullOrWhiteSpace(naReason))
+        {
+            TempData["Error"] = "A reason is required when marking a task as Not Applicable.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        var oldStatus = task.Status;
         task.IsNotApplicable = true;
-        task.NaReason = naReason?.Trim();
+        task.NaReason        = naReason.Trim();
+
+        // Auto-close: N/A tasks are considered closed immediately.
+        task.Status      = "Cancelled";
+        task.CompletedAt = DateTime.UtcNow;
 
         _db.TaskActionLogs.Add(new TaskActionLog
         {
             IntakeTaskId    = task.Id,
             ActionType      = "StatusChange",
-            OldStatus       = task.Status,
-            NewStatus       = task.Status,
-            Comment         = $"Task marked as Not Applicable. Reason: {(string.IsNullOrWhiteSpace(naReason) ? "Not provided" : naReason.Trim())}",
+            OldStatus       = oldStatus,
+            NewStatus       = "Cancelled",
+            Comment         = $"Task marked as Not Applicable (auto-closed). Reason: {naReason.Trim()}",
             CreatedAt       = DateTime.UtcNow,
             CreatedByUserId = User.Identity?.Name,
             CreatedByName   = User.Identity?.Name
         });
 
         await _db.SaveChangesAsync();
-        TempData["Success"] = "Task marked as Not Applicable — it will be bypassed in AI closure verification.";
+        TempData["Success"] = "Task marked as Not Applicable and closed — it will be bypassed in AI closure verification.";
         return RedirectToAction(nameof(Details), new { id });
     }
 
