@@ -17,13 +17,13 @@ public class IntakeController : Controller
     private readonly IBlobStorageService _blobService;
     private readonly ILogger<IntakeController> _logger;
     private readonly IWebHostEnvironment _env;
-    private readonly IServiceProvider _services;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITenantContextService _tenantContext;
     private readonly IBackgroundJobQueue _jobQueue;
 
     public IntakeController(ApplicationDbContext db, IAzureOpenAiService aiService,
         IBlobStorageService blobService, ILogger<IntakeController> logger,
-        IWebHostEnvironment env, IServiceProvider services, ITenantContextService tenantContext,
+        IWebHostEnvironment env, IServiceScopeFactory scopeFactory, ITenantContextService tenantContext,
         IBackgroundJobQueue jobQueue)
     {
         _db = db;
@@ -31,7 +31,7 @@ public class IntakeController : Controller
         _blobService = blobService;
         _logger = logger;
         _env = env;
-        _services = services;
+        _scopeFactory = scopeFactory;
         _tenantContext = tenantContext;
         _jobQueue = jobQueue;
     }
@@ -422,6 +422,7 @@ public class IntakeController : Controller
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
         await PopulateLotCountryViewBagAsync(tenantId);
+        ViewBag.FieldConfigs = await LoadFieldConfigDictAsync(tenantId);
 
         var vm = new IntakeEditViewModel
         {
@@ -475,6 +476,12 @@ public class IntakeController : Controller
                         .Select(e => e.ErrorMessage)
                         .ToList()
                 });
+            // Repopulate ViewBag data the view depends on
+            var tid = _tenantContext.GetCurrentTenantId();
+            ViewBag.Departments  = await _db.MasterDepartments.Where(d => d.IsActive && d.TenantId == tid).OrderBy(d => d.Name).Select(d => d.Name).ToListAsync();
+            ViewBag.LobsByDept   = await _db.MasterLobs.Where(l => l.IsActive && l.TenantId == tid).OrderBy(l => l.DepartmentName).ThenBy(l => l.Name).Select(l => new { l.DepartmentName, l.Name }).ToListAsync();
+            await PopulateLotCountryViewBagAsync(tid);
+            ViewBag.FieldConfigs = await LoadFieldConfigDictAsync(tid);
             return View(model);
         }
 
@@ -767,6 +774,7 @@ public class IntakeController : Controller
 
         record.Status = "Submitted";
         record.AnalysisResult = null;
+        record.AnalyzedAt     = null;
         await _db.SaveChangesAsync();
 
         var webRoot = _env.WebRootPath;
@@ -806,7 +814,7 @@ public class IntakeController : Controller
 
     private async Task RunAnalysisInBackgroundAsync(int intakeId, string? filePath, string webRoot)
     {
-        using var scope = _services.CreateScope();
+        using var scope = _scopeFactory.CreateScope();
         var db       = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var ai       = scope.ServiceProvider.GetRequiredService<IAzureOpenAiService>();
         var blob     = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
@@ -894,7 +902,7 @@ public class IntakeController : Controller
             _logger.LogError(ex, "Background analysis failed for intake id {IntakeId}", intakeId);
             try
             {
-                using var scope2 = _services.CreateScope();
+                using var scope2 = _scopeFactory.CreateScope();
                 var db2 = scope2.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var rec = await db2.IntakeRecords.FindAsync(intakeId);
                 if (rec != null) { rec.Status = "Error"; await db2.SaveChangesAsync(); }

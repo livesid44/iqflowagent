@@ -35,31 +35,65 @@ internal static class RagDocumentChunker
 
         ["Purpose & Scope"]         = ["purpose", "scope", "objective", "countries in scope",
                                        "input artefact", "applicable", "intended for",
-                                       "geography", "in-scope"],
+                                       "geography", "in-scope", "aim", "goal", "applies to",
+                                       "this document", "this process", "this sop"],
 
         ["Process Overview"]        = ["overview", "description", "process owner", "volume",
                                        "monthly volume", "peak", "hours of operation",
-                                       "systems used", "tools", "weekday", "weekend", "holiday"],
+                                       "systems used", "tools", "weekday", "weekend", "holiday",
+                                       "incident", "unplanned", "disruption", "service",
+                                       "major incident", "definition", "terminology",
+                                       "background", "context"],
 
         ["RACI"]                    = ["responsible", "accountable", "consulted", "informed",
-                                       "raci", "role", "task owner", "matrix", "r/a/c/i"],
+                                       "raci", "role", "task owner", "matrix", "r/a/c/i",
+                                       "who is", "team responsible", "assigned to"],
 
+        // Broad: covers any described process activity, incident-type workflows,
+        // ServiceNow case handling, categorisation, investigation, resolution, etc.
         ["SOP Steps"]               = ["step", "sop step", "action", "procedure",
                                        "decision point", "automation", "system used",
-                                       "expected output", "process step", "manual"],
+                                       "expected output", "process step", "manual",
+                                       "incident", "case", "task", "log", "record",
+                                       "categorize", "categorise", "investigate",
+                                       "diagnose", "resolve", "prioritize", "prioritise",
+                                       "workflow", "process flow", "handle", "assign",
+                                       "ticket", "request", "classification", "unify",
+                                       "servicenow", "service now", "mytools",
+                                       "level 1", "level 2", "l1", "l2", "support team",
+                                       "impact", "urgency", "priority"],
 
+        // Broad: covers portal usage, ServiceNow navigation, system-specific steps
         ["Work Instructions"]       = ["work instruction", "navigate", "click", "enter",
                                        "login", "screen", "field", "error handling",
-                                       "detailed step", "how to"],
+                                       "detailed step", "how to", "portal", "access",
+                                       "log in", "system access", "unify desk",
+                                       "servicenow", "mytools", "tool",
+                                       "complete the form", "fill in", "submit",
+                                       "open a", "create a", "update the"],
 
+        // Broad: covers RCA, post-incident review, PMIR, corrective/preventive actions
         ["Escalation & Exceptions"] = ["escalation", "exception", "trigger",
                                        "escalation path", "resolution timeframe",
                                        "approval required", "exception handling",
-                                       "escalate to"],
+                                       "escalate to",
+                                       "rca", "root cause", "root cause analysis",
+                                       "post-incident", "post incident",
+                                       "post major incident", "incident review",
+                                       "pmir", "post major incident review",
+                                       "corrective action", "preventive action",
+                                       "lessons learned", "draft rca", "final rca",
+                                       "investigation", "incident resolution",
+                                       "major incident", "sla breach",
+                                       "business days", "2 business days", "5 business days"],
 
         ["SLAs & Performance"]      = ["sla", "service level", "kpi", "metric", "target",
                                        "performance", "measurement", "reporting frequency",
-                                       "actual vs target", "turnaround time"],
+                                       "actual vs target", "turnaround time",
+                                       "breach", "sla breach", "resolution time",
+                                       "response time", "within", "business days",
+                                       "time to resolve", "time to respond",
+                                       "2 business days", "5 business days"],
 
         ["Volumetrics"]             = ["volume", "transaction volume", "monthly", "peak volume",
                                        "annual", "forecast", "count", "quantity",
@@ -67,7 +101,9 @@ internal static class RagDocumentChunker
 
         ["Regulatory & Compliance"] = ["regulation", "compliance", "gdpr", "iso", "audit",
                                        "control", "evidence", "framework", "obligation",
-                                       "standard", "policy"],
+                                       "standard", "policy", "compulsory", "mandatory",
+                                       "cross-referencing", "cross referencing",
+                                       "must be", "is required", "shall"],
 
         ["Training"]                = ["training", "module", "competency", "e-learning",
                                        "classroom", "on-the-job", "assessment",
@@ -77,6 +113,29 @@ internal static class RagDocumentChunker
                                        "reference number", "customer obligation",
                                        "schedule 8", "sow"],
     };
+
+    /// <summary>
+    /// Returns a richer natural-language search query for a BARTOK section.
+    /// Used for vector/semantic search so that section embeddings cast a wider
+    /// net than the bare section name alone.
+    /// </summary>
+    internal static string GetSectionSearchQuery(string sectionId, string sectionName) =>
+        sectionId switch
+        {
+            "DC"  => "document control author approver version date prepared by sign-off",
+            "1"   => "purpose scope objective countries in scope applicable intended for input artefacts",
+            "2"   => "process overview description background context systems used tools process owner incident major incident definitions terminology",
+            "3"   => "RACI responsible accountable consulted informed role assignment matrix",
+            "4"   => "process steps SOP steps procedures workflow actions incident case handling categorise investigate resolve assign ticket ServiceNow Unify Desk",
+            "5"   => "work instructions detailed steps portal access navigate system how to log in fill in submit create update",
+            "6"   => "escalation exceptions triggers escalation path RCA root cause analysis post-incident review PMIR corrective preventive actions major incident resolution",
+            "7"   => "SLA service level performance metrics KPI target measurement reporting breach resolution timeframe business days",
+            "8"   => "volumetrics transaction volume monthly peak annual forecast count per day per month",
+            "9"   => "regulatory compliance policy mandatory obligatory regulation standard audit control evidence framework",
+            "10"  => "training module competency e-learning classroom induction on-the-job assessment",
+            "11"  => "OCC Orange Customer Contract obligation reference schedule 8",
+            _     => sectionName,
+        };
 
     /// <summary>
     /// Ordered list of all BARTOK sections: (sectionId, sectionName).

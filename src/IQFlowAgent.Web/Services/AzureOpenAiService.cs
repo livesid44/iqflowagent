@@ -138,12 +138,30 @@ public class AzureOpenAiService : IAzureOpenAiService
                   3. RACI              : 4 task names specific to this process, 4 role titles, RACI assignments (R/A/C/I per cell)
                   4. SOP Steps         : Step-by-step actions, responsible role per step, system used per step, expected output per step, decision points, automation status, opportunity rating, automation type
                   5. Work Instructions : Detailed step-by-step instructions (including navigation, field entries, error handling) for each SOP step
-                  6. Escalation & Exceptions : Escalation triggers, escalation paths, resolution timeframes, exception types, exception handling approach, approval requirements
+                  6. Escalation & Exceptions : Escalation triggers, escalation paths, resolution timeframes, exception types, exception handling approach, approval requirements, RCA/post-incident review procedures
                   7. SLAs & Performance: SLA metric names, measurement methods, reporting frequency, measurement tools, actual vs target performance data
                   8. Volumetrics       : Transaction type(s) and volume detail, volume notes (peaks/anomalies/seasonal factors), volume forecast
                   9. Regulatory & Compliance : Applicable regulations/standards, obligations, controls in the process, evidence artefacts, TechM Framework references
                   10. Training         : Training module names, delivery methods, competency verification approach
                   11. OCC              : Orange Customer Contract reference numbers, obligations, how the process addresses each obligation
+
+                CRITICAL SECTION-MAPPING RULE:
+                The uploaded document will almost certainly use DIFFERENT section names, numbers, and structure than BARTOK.
+                You MUST map the document's content to BARTOK sections based on TOPIC AND SUBJECT MATTER, not based on
+                section numbers or headings matching. For example:
+                  - Any description of how the process works, incident lifecycle, case management, or step-by-step handling
+                    → satisfies "4. SOP Steps" and/or "2. Process Overview"
+                  - Any content about RCA (Root Cause Analysis), Post-Incident Review, PMIR, corrective/preventive actions,
+                    incident resolution timelines (e.g. "2 business days", "5 business days"), or investigation procedures
+                    → satisfies "6. Escalation & Exceptions"
+                  - Any content about SLAs, service levels, breach criteria, resolution timeframes, or performance targets
+                    → satisfies "7. SLAs & Performance"
+                  - Any content about portals, tools, navigation, system usage (ServiceNow, Unify Desk, MyTools, etc.)
+                    → satisfies "5. Work Instructions"
+                  - Any definitions of terms, incident types, categories, priorities, or service impact levels
+                    → satisfies "2. Process Overview" (background/context is sufficient for this section)
+                  - Any content about compliance obligations, mandatory steps, cross-referencing requirements
+                    → satisfies "9. Regulatory & Compliance"
 
                 YOUR TASK:
                 1. Review the intake form and uploaded document.
@@ -185,7 +203,8 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 Rules for actionItems:
                 - Only create an action item for a section where information is genuinely missing or insufficient.
-                - IMPORTANT: If a section's document excerpts (shown above) clearly provide the required information, do NOT create an action item for that section. Creating unnecessary action items produces duplicate tasks that frustrate users.
+                - IMPORTANT: If a section's document excerpts (shown above) clearly provide the required information — even if using different terminology than BARTOK — do NOT create an action item for that section.
+                - Creating unnecessary action items produces tasks that frustrate users. When in doubt, do NOT create an action item.
                 - Set priority=High for critical sections: Document Control, 2. Process Overview, 4. SOP Steps.
                 - Set priority=Medium for supporting sections: 3. RACI, 5. Work Instructions, 6. Escalation & Exceptions, 7. SLAs & Performance, 8. Volumetrics.
                 - Set priority=Low for sections that can be confirmed later: 9. Regulatory & Compliance, 10. Training, 11. OCC.
@@ -196,12 +215,12 @@ public class AzureOpenAiService : IAzureOpenAiService
                 - Include one checkpoint per BARTOK section (11 total).
                 - "sectionId": "DC" for Document Control, "1"–"11" for numbered sections.
                 - "label": section name without number prefix.
-                - CRITICAL: The uploaded document excerpts above show exactly what information is available per section. Base your status SOLELY on what is actually present in those excerpts, not on what might theoretically be missing.
-                - status=Pass: The excerpts contain sufficient information to write a meaningful, complete section in the BARTOK SOP output. If the document covers the section's core requirements, use Pass. Be generous — minor gaps do not warrant Warning. A task will NOT be created for Pass checkpoints, so default to Pass whenever the section has any meaningful content.
-                - status=Warning: ONLY use Warning when SPECIFIC, NAMED data items are demonstrably absent from the excerpts AND are genuinely required to complete the section. Name exactly what is missing in the "note" field.
-                - status=Fail: Use ONLY when a section has zero relevant content in the excerpts — it cannot be written at all without new information.
-                - When a comprehensive document is uploaded covering the process, expect the majority of checkpoints to be Pass. Having more than 3 Warning/Fail checkpoints for a well-documented intake would be unusual.
-                - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. If you mark a checkpoint Fail or Warning when the document already contains that information, unnecessary duplicate tasks will be created. Be accurate — Pass = document covers it, Fail/Warning = genuinely missing.
+                - CRITICAL: The uploaded document excerpts above show exactly what information is available. Apply the SECTION-MAPPING RULE above — match content to BARTOK sections by topic, not by heading name.
+                - status=Pass: ANY relevant content exists in the document for this BARTOK section's topic, regardless of how it is structured or named in the source document. A task will NOT be created for Pass checkpoints. Default to Pass whenever the document touches on the section's subject matter.
+                - status=Warning: ONLY use Warning when SPECIFIC, NAMED data items are demonstrably absent AND are genuinely required. Name exactly what is missing in the "note" field.
+                - status=Fail: Use ONLY when the document has ZERO relevant content for this section — it cannot be written at all without new information.
+                - When a comprehensive process document is uploaded, expect MOST checkpoints to be Pass. More than 3–4 Warning/Fail checkpoints for a well-documented process intake is unusual and likely indicates over-strict assessment.
+                - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. Marking a covered section as Fail/Warning creates unnecessary work for users. Be generous — Pass is correct whenever the document provides useful input for that section.
 
                 actionItems: concrete steps to collect missing information required for the BARTOK S8 SOP output document.
                 checkPoints: section-level readiness checks for the BARTOK S8 SOP output document.
@@ -1485,8 +1504,9 @@ public class AzureOpenAiService : IAzureOpenAiService
 
             foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
             {
-                var sectionEmbedding = await _embeddingService.GetEmbeddingAsync(sectionName);
-                var chunks = await _searchService.SearchAsync(intake.Id, sectionEmbedding, sectionName, topK: 5);
+                var sectionQuery    = RagDocumentChunker.GetSectionSearchQuery(sectionId, sectionName);
+                var sectionEmbedding = await _embeddingService.GetEmbeddingAsync(sectionQuery);
+                var chunks = await _searchService.SearchAsync(intake.Id, sectionEmbedding, sectionQuery, topK: 5);
                 if (chunks.Count > 0)
                 {
                     sb.AppendLine($"--- [{sectionId}] {sectionName} (retrieved from uploaded document) ---");
