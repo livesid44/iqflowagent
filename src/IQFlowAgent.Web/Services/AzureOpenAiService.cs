@@ -7,7 +7,7 @@ namespace IQFlowAgent.Web.Services;
 public class AzureOpenAiService : IAzureOpenAiService
 {
     private const int MaxDocumentChars = 40_000;
-    private const int DefaultMaxOutputTokens = 2000;
+    private const int DefaultMaxOutputTokens = 4000;
     private const int MaxAnalysisJsonChars = 4000;  // max chars from AI analysis sent in field-analysis prompt
     // 20 000 chars covers multiple multi-sheet Excel files + Word docs + task comments while
     // staying comfortably within the 128 k-token context window of gpt-4o / gpt-4-turbo.
@@ -212,15 +212,17 @@ public class AzureOpenAiService : IAzureOpenAiService
                 - "requiredInfo" must list the specific data items that are absent or unconfirmed.
 
                 Rules for checkPoints:
-                - Include one checkpoint per BARTOK section (11 total).
+                - Include one checkpoint per BARTOK section (12 total — Document Control + sections 1–11).
                 - "sectionId": "DC" for Document Control, "1"–"11" for numbered sections.
                 - "label": section name without number prefix.
-                - CRITICAL: The uploaded document excerpts above show exactly what information is available. Apply the SECTION-MAPPING RULE above — match content to BARTOK sections by topic, not by heading name.
-                - status=Pass: ANY relevant content exists in the document for this BARTOK section's topic, regardless of how it is structured or named in the source document. A task will NOT be created for Pass checkpoints. Default to Pass whenever the document touches on the section's subject matter.
-                - status=Warning: ONLY use Warning when SPECIFIC, NAMED data items are demonstrably absent AND are genuinely required. Name exactly what is missing in the "note" field.
-                - status=Fail: Use ONLY when the document has ZERO relevant content for this section — it cannot be written at all without new information.
+                - MANDATORY RULE: The user message labels each section excerpt as either "CONTENT FOUND" or "NO CONTENT FOUND".
+                  * If the label says "CONTENT FOUND" → status MUST be "Pass" or "Warning". It CANNOT be "Fail".
+                  * If the label says "NO CONTENT FOUND" → status may be "Fail" or "Warning" depending on how critical the section is.
+                - status=Pass: The document excerpt covers the section's topic. Default to Pass for any "CONTENT FOUND" section unless specific required data items are demonstrably absent.
+                - status=Warning: Use when the document excerpt exists but specific named data items are missing. Name exactly what is absent in the "note" field.
+                - status=Fail: Use ONLY for sections explicitly labelled "NO CONTENT FOUND" where the section is critical and cannot be drafted without new information.
                 - When a comprehensive process document is uploaded, expect MOST checkpoints to be Pass. More than 3–4 Warning/Fail checkpoints for a well-documented process intake is unusual and likely indicates over-strict assessment.
-                - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. Marking a covered section as Fail/Warning creates unnecessary work for users. Be generous — Pass is correct whenever the document provides useful input for that section.
+                - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. Marking a covered section as Fail/Warning creates unnecessary work for users. Be generous — Pass is correct whenever the excerpt shows the document touches on the section's subject matter.
 
                 actionItems: concrete steps to collect missing information required for the BARTOK S8 SOP output document.
                 checkPoints: section-level readiness checks for the BARTOK S8 SOP output document.
@@ -1499,43 +1501,64 @@ public class AzureOpenAiService : IAzureOpenAiService
         if (_searchService.IsConfigured() && _embeddingService.IsConfigured())
         {
             sb.AppendLine("=== Uploaded Document Excerpts (by BARTOK section) ===");
-            sb.AppendLine("The following excerpts were retrieved from the uploaded document for each BARTOK section.");
+            sb.AppendLine("CRITICAL INSTRUCTION: Each section below shows text retrieved from the uploaded document that is relevant to that BARTOK section.");
+            sb.AppendLine("Any section labelled CONTENT FOUND must be assessed as Pass or Warning — NEVER Fail.");
+            sb.AppendLine("Only sections labelled NO CONTENT FOUND may be assessed as Fail.");
             sb.AppendLine();
 
             foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
             {
-                var sectionQuery    = RagDocumentChunker.GetSectionSearchQuery(sectionId, sectionName);
+                var sectionQuery     = RagDocumentChunker.GetSectionSearchQuery(sectionId, sectionName);
                 var sectionEmbedding = await _embeddingService.GetEmbeddingAsync(sectionQuery);
-                var chunks = await _searchService.SearchAsync(intake.Id, sectionEmbedding, sectionQuery, topK: 5);
+                var chunks           = await _searchService.SearchAsync(intake.Id, sectionEmbedding, sectionQuery, topK: 5);
                 if (chunks.Count > 0)
                 {
-                    sb.AppendLine($"--- [{sectionId}] {sectionName} (retrieved from uploaded document) ---");
+                    sb.AppendLine($"--- [{sectionId}] {sectionName} — CONTENT FOUND (status: Pass or Warning only) ---");
                     foreach (var chunk in chunks)
                         sb.AppendLine(chunk);
                     sb.AppendLine();
                 }
+                else
+                {
+                    sb.AppendLine($"--- [{sectionId}] {sectionName} — NO CONTENT FOUND in document ---");
+                    sb.AppendLine();
+                }
             }
-        }
-        else if (documentText.Length <= MaxDocumentChars)
-        {
-            // Short document: include verbatim
-            sb.AppendLine("=== Uploaded Document Content ===");
-            sb.AppendLine(documentText);
         }
         else
         {
-            // Long document, no vector search: use keyword-based per-section excerpts
-            sb.AppendLine("=== Uploaded Document Excerpts (by BARTOK section) ===");
+            // Always use keyword-based per-section excerpts, regardless of document length.
+            // Structuring excerpts by BARTOK section lets the AI directly see which content
+            // maps where, instead of having to apply implicit semantic reasoning on a verbatim dump.
+            sb.AppendLine("=== Uploaded Document Excerpts (organized by BARTOK section) ===");
+            sb.AppendLine("CRITICAL INSTRUCTION: Each section below shows the most relevant text from the uploaded document.");
+            sb.AppendLine("Any section labelled CONTENT FOUND must be assessed as Pass or Warning — NEVER Fail.");
+            sb.AppendLine("Only sections labelled NO CONTENT FOUND may be assessed as Fail.");
+            sb.AppendLine();
+
             var allChunks = RagDocumentChunker.Chunk(documentText);
             foreach (var (sectionId, sectionName) in RagDocumentChunker.BartokSections)
             {
                 var excerpt = RagDocumentChunker.GetTopChunksForSection(sectionName, allChunks, topK: 3);
                 if (!string.IsNullOrWhiteSpace(excerpt))
                 {
-                    sb.AppendLine($"--- [{sectionId}] {sectionName} ---");
+                    sb.AppendLine($"--- [{sectionId}] {sectionName} — CONTENT FOUND (status: Pass or Warning only) ---");
                     sb.AppendLine(excerpt);
                     sb.AppendLine();
                 }
+                else
+                {
+                    sb.AppendLine($"--- [{sectionId}] {sectionName} — NO CONTENT FOUND in document ---");
+                    sb.AppendLine();
+                }
+            }
+
+            // For documents that fit in the context window, also append the full text
+            // so the AI can reference details not captured by keyword excerpts above.
+            if (documentText.Length <= MaxDocumentChars)
+            {
+                sb.AppendLine("=== Full Uploaded Document (for complete reference) ===");
+                sb.AppendLine(documentText);
             }
         }
 
