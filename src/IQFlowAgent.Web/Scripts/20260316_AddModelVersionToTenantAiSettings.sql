@@ -203,7 +203,6 @@ GO
 --   END CATCH;
 -- =============================================================================
 
-GOTO EndOfScript;
 EndOfScript:
 PRINT '';
 PRINT '=== Script complete ===';
