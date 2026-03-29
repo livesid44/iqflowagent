@@ -231,11 +231,11 @@ public class AzureOpenAiService : IAzureOpenAiService
                   * "CONTENT FOUND" means the keyword-based retrieval found document content relevant to this section. This is strong evidence the section IS covered.
                   * If the label says "CONTENT FOUND" → status MUST be "Pass" or "Warning". It CANNOT be "Fail".
                   * If the label says "NO CONTENT FOUND" → status may be "Fail" or "Warning" depending on how critical the section is.
-                - status=Pass: The document excerpt covers the section's topic. Default to Pass for any "CONTENT FOUND" section. Only downgrade to Warning if a SPECIFIC named data item (not the whole section) is demonstrably absent.
-                - status=Warning: Use SPARINGLY. Only when the document excerpt shows the section exists but is missing a specific, named piece of required data. Name exactly what is absent in the "note" field.
-                - status=Fail: Use ONLY for sections explicitly labelled "NO CONTENT FOUND" where the section is critical and cannot be drafted without new information.
-                - When a comprehensive process document is uploaded, expect MOST checkpoints to be Pass. More than 3–4 Warning/Fail checkpoints for a well-documented process intake is unusual and likely indicates over-strict assessment.
-                - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. Marking a covered section as Fail/Warning creates unnecessary work for users. Be generous — Pass is correct whenever the excerpt shows the document touches on the section's subject matter.
+                - status=Pass: The document excerpt covers the section's topic. Default to Pass for any "CONTENT FOUND" section. Only downgrade to Warning if a SPECIFIC named data item (not the whole section) is demonstrably and critically absent.
+                - status=Warning: Use very sparingly (0–3 times per document). Only when the excerpt clearly shows the section exists but is irrecoverably missing one critical named piece of required data (e.g. "no monthly volume numbers anywhere in the document"). Warning is informational only — it does NOT trigger a task. Name exactly what is absent in the "note" field.
+                - status=Fail: Use ONLY for sections explicitly labelled "NO CONTENT FOUND" where the section cannot be drafted at all without new information from the process owner.
+                - When a comprehensive process document is uploaded, expect MOST checkpoints to be Pass. More than 2–3 Fail checkpoints for a well-documented process intake is unusual and likely indicates over-strict assessment.
+                - IMPORTANT: Tasks are auto-created ONLY for Fail checkpoints — Warning does NOT create a task. Warning is an informational badge only. Therefore: use Pass liberally for any "CONTENT FOUND" section that touches the topic; use Warning when content is present but a specific named BARTOK data item is absent; use Fail ONLY for "NO CONTENT FOUND" sections. Avoid using Warning as a catch-all — it should be rare (0–3 per comprehensive document).
 
                 actionItems: concrete steps to collect missing information required for the BARTOK S8 SOP output document.
                 checkPoints: section-level readiness checks for the BARTOK S8 SOP output document.

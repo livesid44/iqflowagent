@@ -467,10 +467,11 @@ public class RagProcessorService : BackgroundService
                 .Where(l => !string.IsNullOrWhiteSpace(l))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // Combine checkpoints (Fail/Warning) with action items that are NOT covered by a
-            // checkpoint, so that the checkpoint version is the single authoritative task.
+            // Combine checkpoints (Fail only — Warning is informational, creates no task) with
+            // action items that are NOT covered by a Fail/Warning checkpoint, so that the
+            // checkpoint version is the single authoritative task when a section truly has no content.
             var items = GetJsonArraySafe(doc.RootElement, "checkPoints")
-                .Where(IsFailOrWarn)
+                .Where(IsFailStatus)
                 .Concat(GetJsonArraySafe(doc.RootElement, "actionItems")
                     .Where(item =>
                     {
@@ -595,6 +596,17 @@ public class RagProcessorService : BackgroundService
         var status = GetStringProp(el, "status") ?? string.Empty;
         return status.Equals("Fail", StringComparison.OrdinalIgnoreCase)
             || status.Equals("Warning", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns true only for "Fail" checkpoints — the only status that auto-creates a task.
+    /// "Warning" checkpoints (content present but incomplete) are informational badges in the
+    /// UI and do not require a task; the section can still be partially drafted.
+    /// </summary>
+    private static bool IsFailStatus(System.Text.Json.JsonElement el)
+    {
+        var status = GetStringProp(el, "status") ?? string.Empty;
+        return status.Equals("Fail", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsCheckPoint(System.Text.Json.JsonElement el) =>

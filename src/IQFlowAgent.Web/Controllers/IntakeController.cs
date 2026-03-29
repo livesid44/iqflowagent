@@ -1027,15 +1027,17 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
                 }
             }
 
-            // ── Pending Check Points (Fail / Warning) ────────────────────────
-            // Checkpoint tasks are always created for every Fail/Warning section and
-            // supersede any action item for the same section (skipped above).
+            // ── Pending Check Points (Fail only) ─────────────────────────────
+            // Checkpoint tasks are created only for Fail sections — sections where the
+            // document contains NO relevant content and information must be gathered.
+            // Warning checkpoints (content present but incomplete) are informational only
+            // and do NOT create tasks; the section can still be partially drafted.
             if (root.TryGetProperty("checkPoints", out var checkPoints))
             {
                 foreach (var cp in checkPoints.EnumerateArray())
                 {
                     var cpStatus    = cp.TryGetProperty("status",    out var cs)  ? cs.GetString()  ?? "" : "";
-                    if (cpStatus != "Fail" && cpStatus != "Warning") continue;
+                    if (cpStatus != "Fail") continue;
 
                     var cpLabel     = cp.TryGetProperty("label",     out var cl)  ? cl.GetString()  ?? "" : "";
                     var cpNote      = cp.TryGetProperty("note",      out var cn)  ? cn.GetString()  ?? "" : "";
