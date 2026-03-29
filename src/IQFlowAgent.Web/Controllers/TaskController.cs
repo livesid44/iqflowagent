@@ -127,9 +127,33 @@ public class TaskController : Controller
         if (string.IsNullOrWhiteSpace(title) || title == "[BATCH]" || title == "[BATCH-CP]")
             return BadRequest("Invalid task title.");
 
-        // Guard: if a task with the same title already exists, redirect to it
-        var existing = await _db.IntakeTasks
-            .FirstOrDefaultAsync(t => t.IntakeRecordId == intakeRecordId && t.Title == title);
+        // Guard: if a task with the same title already exists, redirect to it.
+        // For checkpoint tasks (title starts with "[Checkpoint]"), also check
+        // whether a task for the same BARTOK section already exists under the
+        // new [Checkpoint][sectionId] format or the legacy [Checkpoint] format
+        // so that the user can never accidentally create two tasks for the same section.
+        IntakeTask? existing;
+        if (title.StartsWith("[Checkpoint]", StringComparison.OrdinalIgnoreCase))
+        {
+            // Extract the bare checkpoint label: strip "[Checkpoint][...] " or "[Checkpoint] " prefix.
+            var bareLabel = System.Text.RegularExpressions.Regex.Replace(
+                title, @"^\[Checkpoint\](\[[^\]]*\])?\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+            existing = await _db.IntakeTasks
+                .FirstOrDefaultAsync(t =>
+                    t.IntakeRecordId == intakeRecordId
+                    && (t.Title == title
+                        || t.Title.StartsWith($"[Checkpoint] {bareLabel}", StringComparison.OrdinalIgnoreCase)
+                        || System.Text.RegularExpressions.Regex.IsMatch(
+                            t.Title,
+                            $@"^\[Checkpoint\]\[[^\]]+\]\s*{System.Text.RegularExpressions.Regex.Escape(bareLabel)}",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase)));
+        }
+        else
+        {
+            existing = await _db.IntakeTasks
+                .FirstOrDefaultAsync(t => t.IntakeRecordId == intakeRecordId && t.Title == title);
+        }
         if (existing != null)
         {
             TempData["Info"] = $"A task for '{title}' already exists.";

@@ -491,8 +491,16 @@ public class RagProcessorService : BackgroundService
 
                 // Guard against duplicates — also check the legacy format (no sectionId)
                 // for checkpoints that were created before sectionId was introduced.
+                // Additionally guard by sectionId prefix so that re-runs where the AI
+                // produces a slightly different label wording do not create duplicate tasks.
+                var cpSectionIdForGuard = IsCheckPoint(item) ? (GetStringProp(item, "sectionId") ?? "") : "";
+                var cpSectionIdPrefix   = string.IsNullOrWhiteSpace(cpSectionIdForGuard)
+                    ? null
+                    : $"[Checkpoint][{cpSectionIdForGuard}]";
+
                 if (titleSet.Contains(fullTitle) ||
-                    (IsCheckPoint(item) && titleSet.Contains($"[Checkpoint] {title}")))
+                    (IsCheckPoint(item) && titleSet.Contains($"[Checkpoint] {title}")) ||
+                    (cpSectionIdPrefix != null && titleSet.Any(t => t.StartsWith(cpSectionIdPrefix, StringComparison.OrdinalIgnoreCase))))
                     continue;
                 titleSet.Add(fullTitle);
 

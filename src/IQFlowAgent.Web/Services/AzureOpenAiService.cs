@@ -185,7 +185,7 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 Rules for actionItems:
                 - Only create an action item for a section where information is genuinely missing or insufficient.
-                - IMPORTANT: If a section's document excerpts (shown above) clearly provide the required information, do NOT create an action item for that section.
+                - IMPORTANT: If a section's document excerpts (shown above) clearly provide the required information, do NOT create an action item for that section. Creating unnecessary action items produces duplicate tasks that frustrate users.
                 - Set priority=High for critical sections: Document Control, 2. Process Overview, 4. SOP Steps.
                 - Set priority=Medium for supporting sections: 3. RACI, 5. Work Instructions, 6. Escalation & Exceptions, 7. SLAs & Performance, 8. Volumetrics.
                 - Set priority=Low for sections that can be confirmed later: 9. Regulatory & Compliance, 10. Training, 11. OCC.
@@ -197,10 +197,11 @@ public class AzureOpenAiService : IAzureOpenAiService
                 - "sectionId": "DC" for Document Control, "1"–"11" for numbered sections.
                 - "label": section name without number prefix.
                 - CRITICAL: The uploaded document excerpts above show exactly what information is available per section. Base your status SOLELY on what is actually present in those excerpts, not on what might theoretically be missing.
-                - status=Pass: The excerpts contain sufficient information to write a meaningful, complete section in the BARTOK SOP output. If the document covers the section's core requirements, use Pass. Be generous — minor gaps do not warrant Warning.
+                - status=Pass: The excerpts contain sufficient information to write a meaningful, complete section in the BARTOK SOP output. If the document covers the section's core requirements, use Pass. Be generous — minor gaps do not warrant Warning. A task will NOT be created for Pass checkpoints, so default to Pass whenever the section has any meaningful content.
                 - status=Warning: ONLY use Warning when SPECIFIC, NAMED data items are demonstrably absent from the excerpts AND are genuinely required to complete the section. Name exactly what is missing in the "note" field.
                 - status=Fail: Use ONLY when a section has zero relevant content in the excerpts — it cannot be written at all without new information.
                 - When a comprehensive document is uploaded covering the process, expect the majority of checkpoints to be Pass. Having more than 3 Warning/Fail checkpoints for a well-documented intake would be unusual.
+                - IMPORTANT: Tasks are auto-created ONLY for Fail and Warning checkpoints. If you mark a checkpoint Fail or Warning when the document already contains that information, unnecessary duplicate tasks will be created. Be accurate — Pass = document covers it, Fail/Warning = genuinely missing.
 
                 actionItems: concrete steps to collect missing information required for the BARTOK S8 SOP output document.
                 checkPoints: section-level readiness checks for the BARTOK S8 SOP output document.

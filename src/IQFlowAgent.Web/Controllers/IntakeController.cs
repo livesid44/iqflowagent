@@ -1011,9 +1011,17 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
 
                     // Guard against duplicates using both the new title format and the legacy
                     // format (tasks created before sectionId was introduced).
+                    // Also check by sectionId prefix — the AI may produce slightly different
+                    // label wording on re-runs, so a sectionId-based match is more robust.
+                    var sectionIdPrefix = string.IsNullOrWhiteSpace(cpSectionId)
+                        ? null
+                        : $"[Checkpoint][{cpSectionId}]";
+
                     if (await db.IntakeTasks.AnyAsync(tk =>
                             tk.IntakeRecordId == record.Id &&
-                            (tk.Title == title || tk.Title == $"[Checkpoint] {cpLabel}")))
+                            (tk.Title == title
+                             || tk.Title == $"[Checkpoint] {cpLabel}"
+                             || (sectionIdPrefix != null && tk.Title.StartsWith(sectionIdPrefix)))))
                         continue;
 
                     // Map checkpoint task to the BARTOK output document section
