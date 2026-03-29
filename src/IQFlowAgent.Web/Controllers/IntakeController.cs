@@ -576,6 +576,9 @@ public class IntakeController : Controller
         // ── Optionally re-run analysis ────────────────────────────────
         if (model.RerunAnalysis)
         {
+            // Remove all existing tasks so the fresh analysis starts with a clean slate.
+            await DeleteAllTasksForIntakeAsync(_db, record.Id);
+
             record.Status         = "Submitted";
             record.AnalysisResult = null;
             record.AnalyzedAt     = null;
@@ -772,6 +775,9 @@ public class IntakeController : Controller
         var record = await _db.IntakeRecords.FindAsync(id);
         if (record == null) return NotFound();
 
+        // Remove all existing tasks so the fresh analysis starts with a clean slate.
+        await DeleteAllTasksForIntakeAsync(_db, id);
+
         record.Status = "Submitted";
         record.AnalysisResult = null;
         record.AnalyzedAt     = null;
@@ -912,6 +918,35 @@ public class IntakeController : Controller
                 _logger.LogError(innerEx, "Failed to update error status for intake id {IntakeId}", intakeId);
             }
         }
+    }
+
+    /// <summary>
+    /// Deletes all tasks for <paramref name="intakeId"/> before a re-analysis run,
+    /// so stale AI-generated tasks don't accumulate alongside fresh ones.
+    /// Documents that were linked to a task are detached (IntakeTaskId nulled) rather
+    /// than deleted, so user-uploaded artefacts are preserved.
+    /// TaskActionLogs cascade-delete automatically via the FK relationship.
+    /// </summary>
+    private static async Task DeleteAllTasksForIntakeAsync(ApplicationDbContext db, int intakeId)
+    {
+        // Detach any intake documents that point to a task so the task FK constraint
+        // doesn't block deletion (OnDelete(DeleteBehavior.NoAction) for that relationship).
+        var taskIds = await db.IntakeTasks
+            .Where(t => t.IntakeRecordId == intakeId)
+            .Select(t => t.Id)
+            .ToListAsync();
+
+        if (taskIds.Count == 0) return;
+
+        // Null out IntakeTaskId on documents linked to these tasks so artefacts are kept.
+        await db.IntakeDocuments
+            .Where(d => d.IntakeTaskId.HasValue && taskIds.Contains(d.IntakeTaskId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.IntakeTaskId, (int?)null));
+
+        // Delete all tasks; TaskActionLogs cascade-delete automatically.
+        await db.IntakeTasks
+            .Where(t => t.IntakeRecordId == intakeId)
+            .ExecuteDeleteAsync();
     }
 
     private async Task AutoCreateTasksAsync(ApplicationDbContext db, IntakeRecord record, string analysisJson)
