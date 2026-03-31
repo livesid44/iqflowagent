@@ -238,7 +238,7 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
     padding: 5px 8px;
     min-height: 42px;
     background: #fff;
-    cursor: text;
+    cursor: pointer;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -278,7 +278,10 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
     flex: 1;
     padding: 2px 4px;
     background: transparent;
+    cursor: pointer;
+    caret-color: transparent;
 }
+.ms-input:read-only { user-select: none; }
 .ms-dropdown {
     position: absolute;
     top: 100%;
@@ -302,6 +305,7 @@ body { margin: 0; background: #eeeeee; font-family: 'Segoe UI', sans-serif; }
 .ms-option:last-child { border-bottom: none; }
 .ms-option:hover, .ms-option.highlighted { background: #eff6ff; color: #1a2a5e; }
 .ms-option.selected { background: #dbeafe; color: #1e40af; font-weight: 600; }
+.ms-option.ms-select-all:hover { background: #dbeafe; }
 .ms-empty { padding: 10px 12px; color: #aaa; font-size: 0.85rem; }
 
 /* ── Utility ─────────────────────────────────────────── */

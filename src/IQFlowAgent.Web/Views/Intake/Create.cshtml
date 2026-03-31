@@ -276,8 +276,8 @@
                 {
                 <div class="form-group">
                     <label asp-for="SdcLots">Lots or SDC @Html.Raw(ReqStar(IntakeFieldConfig.FSdcLots)) <span style="font-size:0.78rem;font-weight:400;color:#888;">(multi-select)</span></label>
-                    <div class="ms-container" id="sdcLotsContainer" style="cursor:pointer;" onclick="document.getElementById('sdcLotsInput').focus()">
-                        <input type="text" id="sdcLotsInput" class="ms-input" placeholder="Select lots…" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" />
+                    <div class="ms-container" id="sdcLotsContainer">
+                        <input type="text" id="sdcLotsInput" class="ms-input" placeholder="Click to select lots…" autocomplete="off" />
                         <div class="ms-dropdown" id="sdcLotsDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;"></div>
                     </div>
                     <input type="hidden" asp-for="SdcLots" id="sdcLotsHidden" />
@@ -330,7 +330,7 @@
                 <div class="form-group">
                     <label>Country @Html.Raw(ReqStar(IntakeFieldConfig.FCountry))</label>
                     <div class="ms-container" id="countryContainer">
-                        <input type="text" id="countryInput" class="ms-input" placeholder="Search countries…" autocomplete="off" />
+                        <input type="text" id="countryInput" class="ms-input" placeholder="Click to select countries…" autocomplete="off" />
                         <div class="ms-dropdown" id="countryDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;"></div>
                     </div>
                     <input type="hidden" asp-for="Country" id="countryHidden" />
@@ -342,7 +342,7 @@
                 <div class="form-group">
                     <label>City @Html.Raw(ReqStar(IntakeFieldConfig.FCity))</label>
                     <div class="ms-container" id="cityContainer">
-                        <input type="text" id="cityInput" class="ms-input" placeholder="Search cities…" autocomplete="off" />
+                        <input type="text" id="cityInput" class="ms-input" placeholder="Click to select cities…" autocomplete="off" />
                         <div class="ms-dropdown" id="cityDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;"></div>
                     </div>
                     <input type="hidden" asp-for="City" id="cityHidden" />
@@ -554,12 +554,16 @@
     }
 
     // ── Multi-select component ───────────────────────────────
-    function buildMultiSelect(containerId, inputId, dropdownId, hiddenId, list, multi, onChangeCb) {
+    function buildMultiSelect(containerId, inputId, dropdownId, hiddenId, list, multi, onChangeCb, showSelectAll) {
         const container  = document.getElementById(containerId);
         const textInput  = document.getElementById(inputId);
         const dropdown   = document.getElementById(dropdownId);
         const hidden     = document.getElementById(hiddenId);
         let selected = hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+        // All multi-selects use click-to-open; no text filtering.
+        textInput.readOnly = true;
+        textInput.style.cursor = 'pointer';
 
         function render() {
             // Remove old tags from container (keep text input and dropdown)
@@ -587,17 +591,33 @@
             hidden.value = selected.join(', ');
         }
 
-        function showDropdown(filter) {
-            const lc = filter.toLowerCase();
-            const opts = list.filter(c => !selected.includes(c) && c.toLowerCase().includes(lc));
+        function showDropdown() {
+            const opts = list.filter(c => !selected.includes(c));
             dropdown.innerHTML = '';
+
+            // "Select All" row for fields that support it
+            if (showSelectAll && opts.length > 0) {
+                const selAll = document.createElement('div');
+                selAll.className = 'ms-option ms-select-all';
+                selAll.textContent = '✔ Select All';
+                selAll.style.cssText = 'font-weight:600;color:#1a2a5e;border-bottom:2px solid #e0e4f5;';
+                selAll.addEventListener('mousedown', e => {
+                    e.preventDefault();
+                    opts.forEach(c => { if (!selected.includes(c)) selected.push(c); });
+                    dropdown.style.display = 'none';
+                    render();
+                    if (onChangeCb) onChangeCb(selected);
+                });
+                dropdown.appendChild(selAll);
+            }
+
             if (!opts.length) {
                 const empty = document.createElement('div');
                 empty.className = 'ms-empty';
-                empty.textContent = 'No matches';
+                empty.textContent = showSelectAll ? 'All options selected' : 'No matches';
                 dropdown.appendChild(empty);
             } else {
-                opts.slice(0, 60).forEach(c => {
+                opts.forEach(c => {
                     const el = document.createElement('div');
                     el.className = 'ms-option';
                     el.textContent = c;
@@ -614,20 +634,16 @@
             } else {
                 selected = [val];
             }
-            textInput.value = '';
             dropdown.style.display = 'none';
             render();
             if (onChangeCb) onChangeCb(selected);
         }
 
-        textInput.addEventListener('input', () => showDropdown(textInput.value));
-        textInput.addEventListener('focus', () => showDropdown(textInput.value));
+        textInput.addEventListener('focus', () => showDropdown());
         textInput.addEventListener('blur', () => setTimeout(() => { dropdown.style.display = 'none'; }, 150));
-        textInput.addEventListener('keydown', e => {
-            if (e.key === 'Backspace' && !textInput.value && selected.length) {
-                selected.pop(); render();
-                if (onChangeCb) onChangeCb(selected);
-            }
+        // clicking the container (not a tag/button) also opens dropdown
+        container.addEventListener('click', e => {
+            if (!e.target.classList.contains('ms-tag-remove')) textInput.focus();
         });
         // textInput and dropdown are already inside container in the HTML — do not re-append
 
@@ -686,19 +702,19 @@
                 countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
                     newCountries, true, function(selCts) {
                         cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
-                            getCitiesForCountriesAndLots(selCts, lotsMs.getSelected()), true, null);
-                    });
+                            getCitiesForCountriesAndLots(selCts, lotsMs.getSelected()), true, null, true);
+                    }, true);
             });
 
         let countryMs = buildMultiSelect('countryContainer', 'countryInput', 'countryDropdown', 'countryHidden',
             getCountriesForLots(lotsMs.getSelected()), true,
             function(sel) {
                 cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
-                    getCitiesForCountriesAndLots(sel, lotsMs.getSelected()), true, null);
-            }
+                    getCitiesForCountriesAndLots(sel, lotsMs.getSelected()), true, null, true);
+            }, true
         );
         let cityMs = buildMultiSelect('cityContainer', 'cityInput', 'cityDropdown', 'cityHidden',
-            getCitiesForCountriesAndLots(countryMs.getSelected(), lotsMs.getSelected()), true, null
+            getCitiesForCountriesAndLots(countryMs.getSelected(), lotsMs.getSelected()), true, null, true
         );
     });
 </script>
