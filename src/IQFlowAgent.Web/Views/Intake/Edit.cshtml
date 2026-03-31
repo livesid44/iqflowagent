@@ -451,10 +451,10 @@
                     </div>
                     <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                         <p><strong>Click to upload</strong> or drag and drop</p>
-                        <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 250 MB</p>
+                        <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT, CSV, JSON, MD — max 250 MB</p>
                     </div>
                     <input type="file" id="fileInput" asp-for="NewDocument"
-                           accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
+                           accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml,.xlsx,.xls,.pptx,.ppt,.jpg,.jpeg,.png,.gif"
                            onchange="previewFile(this)" />
                     <div id="filePreview"></div>
                     <button type="button" class="btn-cancel" style="margin-top:10px;font-size:0.8rem;"
@@ -470,10 +470,10 @@
                 </p>
                 <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
                     <p><strong>Click to upload</strong> or drag and drop</p>
-                    <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, TXT, CSV, JSON, MD — max 250 MB</p>
+                    <p style="margin-top:4px;font-size:0.8rem;">PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT, CSV, JSON, MD — max 250 MB</p>
                 </div>
                 <input type="file" id="fileInput" asp-for="NewDocument"
-                       accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml"
+                       accept=".pdf,.doc,.docx,.txt,.csv,.json,.md,.xml,.xlsx,.xls,.pptx,.ppt,.jpg,.jpeg,.png,.gif"
                        onchange="previewFile(this)" />
                 <div id="filePreview"></div>
             }

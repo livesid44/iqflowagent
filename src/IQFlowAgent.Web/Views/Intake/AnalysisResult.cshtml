@@ -432,15 +432,11 @@
         <div class="status-cards">
             <div class="status-card">
                 <div class="s-num">@steps</div>
-                <div class="s-label">Steps Identified</div>
+                <div class="s-label">Stages</div>
             </div>
             <div class="status-card green">
                 <div class="s-num">@quality</div>
                 <div class="s-label">Quality Score</div>
-            </div>
-            <div class="status-card orange">
-                <div class="s-num">@handling<span style="font-size:1rem;">m</span></div>
-                <div class="s-label">Est. Handling Time</div>
             </div>
             <div class="status-card @(compliance == "Passed" ? "green" : "red")">
                 <div class="s-num" style="font-size:1.2rem;">@compliance</div>
@@ -818,7 +814,7 @@
                 </div>
                 <div class="val-card">
                     <h4>AI Scores</h4>
-                    <div class="val-row"><span>Steps Identified</span><span>@steps</span></div>
+                    <div class="val-row"><span>Stages</span><span>@steps</span></div>
                     <div class="val-row"><span>Quality Score</span><span>@quality / 100</span></div>
                     <div class="val-row"><span>Confidence</span><span>@confidence%</span></div>
                     <div class="val-row"><span>Compliance</span><span>@compliance</span></div>
