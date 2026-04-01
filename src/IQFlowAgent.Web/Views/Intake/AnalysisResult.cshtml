@@ -772,11 +772,12 @@
                                             <form asp-controller="Task" asp-action="CreateFromAction" method="post"
                                                   class="cp-task-form" style="margin:0;">
                                                 @Html.AntiForgeryToken()
-                                                <input type="hidden" name="intakeRecordId" value="@Model.Id" />
-                                                <input type="hidden" name="title"       value="@cpTaskTitle" />
-                                                <input type="hidden" name="description" value="@(string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote)" />
-                                                <input type="hidden" name="priority"    value="@cpPriority" />
-                                                <input type="hidden" name="owner"       value="@Model.ProcessOwnerEmail" />
+                                                <input type="hidden" name="intakeRecordId"    value="@Model.Id" />
+                                                <input type="hidden" name="title"             value="@cpTaskTitle" />
+                                                <input type="hidden" name="description"       value="@(string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote)" />
+                                                <input type="hidden" name="priority"          value="@cpPriority" />
+                                                <input type="hidden" name="owner"             value="@Model.ProcessOwnerEmail" />
+                                                <input type="hidden" name="bartokSectionName" value="@cpLabel" />
                                                 <button type="submit"
                                                     style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;font-weight:600;white-space:nowrap;">
                                                     <i class="bi bi-plus-circle me-1"></i>Create Task

@@ -120,7 +120,8 @@ public class TaskController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateFromAction(
-        int intakeRecordId, string title, string description, string priority, string owner)
+        int intakeRecordId, string title, string description, string priority, string owner,
+        string? bartokSectionName = null)
     {
         var intake = await _db.IntakeRecords.FindAsync(intakeRecordId);
         if (intake == null) return NotFound();
@@ -179,7 +180,8 @@ public class TaskController : Controller
             Status = "Open",
             CreatedAt = now,
             DueDate = now.AddHours(48),
-            CreatedByUserId = User.Identity?.Name
+            CreatedByUserId = User.Identity?.Name,
+            BartokSectionName = string.IsNullOrWhiteSpace(bartokSectionName) ? null : bartokSectionName
         };
 
         _db.IntakeTasks.Add(task);

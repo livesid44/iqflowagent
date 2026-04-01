@@ -13,42 +13,36 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<string>(
                 name: "AzureDocumentIntelligenceEndpoint",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "AzureDocumentIntelligenceApiKey",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "AzureOpenAIEmbeddingDeployment",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "text-embedding-3-small");
 
             migrationBuilder.AddColumn<string>(
                 name: "AzureSearchEndpoint",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "AzureSearchApiKey",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "");
 
             migrationBuilder.AddColumn<string>(
                 name: "AzureSearchIndexName",
                 table: "TenantAiSettings",
-                type: "TEXT",
                 nullable: false,
                 defaultValue: "iqflow-rag-chunks");
         }

@@ -13,7 +13,6 @@ namespace IQFlowAgent.Web.Migrations
             migrationBuilder.AddColumn<string>(
                 name: "BartokSectionName",
                 table: "IntakeTasks",
-                type: "TEXT",
                 nullable: true);
         }
 
