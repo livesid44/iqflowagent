@@ -15,7 +15,8 @@ Run these scripts if:
 |------|--------|
 | `Migration_20260303122929_AddRagJobsAndSpeech.sql` | Adds `AzureSpeechApiKey`, `AzureSpeechRegion` to `TenantAiSettings`; adds `SopDocumentPath`, `TranscriptStatus`, `TranscriptText` to `IntakeDocuments`; creates the `RagJobs` table |
 | `Migration_20260327000000_AddRagSearchSettingsToTenantAiSettings.sql` | Adds `AzureDocumentIntelligenceEndpoint`, `AzureDocumentIntelligenceApiKey`, `AzureOpenAIEmbeddingDeployment`, `AzureSearchEndpoint`, `AzureSearchApiKey`, `AzureSearchIndexName` to `TenantAiSettings` |
-| **`Migration_All_RAG_Changes_Combined.sql`** | **Recommended** — applies both migrations above in the correct order |
+| `Migration_20260329000000_AddBartokSectionNameToIntakeTask.sql` | Adds `BartokSectionName` (nullable) to `IntakeTasks` for Bartok document checkpoint task targeting |
+| **`Migration_All_RAG_Changes_Combined.sql`** | **Recommended** — applies all three migrations above in the correct order |
 
 ## How to run
 

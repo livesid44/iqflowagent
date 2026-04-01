@@ -75,7 +75,7 @@ IF NOT EXISTS (
 )
 BEGIN
     INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
-    VALUES (N'20260327000000_AddRagSearchSettingsToTenantAiSettings', N'8.0.0');
+    VALUES (N'20260327000000_AddRagSearchSettingsToTenantAiSettings', N'8.0.13');
     PRINT N'Recorded migration 20260327000000_AddRagSearchSettingsToTenantAiSettings in __EFMigrationsHistory';
 END
 ELSE

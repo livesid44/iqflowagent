@@ -5,6 +5,7 @@
 -- Covers:
 --   1. 20260303122929_AddRagJobsAndSpeech
 --   2. 20260327000000_AddRagSearchSettingsToTenantAiSettings
+--   3. 20260329000000_AddBartokSectionNameToIntakeTask
 --
 -- This script is IDEMPOTENT — safe to run multiple times on any environment.
 -- Run this against your SQL Server database if EF Core migrations fail.
@@ -115,7 +116,7 @@ IF NOT EXISTS (
 )
 BEGIN
     INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
-    VALUES (N'20260303122929_AddRagJobsAndSpeech', N'8.0.0');
+    VALUES (N'20260303122929_AddRagJobsAndSpeech', N'8.0.13');
     PRINT N'  + Recorded 20260303122929_AddRagJobsAndSpeech in __EFMigrationsHistory';
 END
 ELSE PRINT N'  = 20260303122929_AddRagJobsAndSpeech already in __EFMigrationsHistory';
@@ -192,10 +193,43 @@ IF NOT EXISTS (
 )
 BEGIN
     INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
-    VALUES (N'20260327000000_AddRagSearchSettingsToTenantAiSettings', N'8.0.0');
+    VALUES (N'20260327000000_AddRagSearchSettingsToTenantAiSettings', N'8.0.13');
     PRINT N'  + Recorded 20260327000000_AddRagSearchSettingsToTenantAiSettings in __EFMigrationsHistory';
 END
 ELSE PRINT N'  = 20260327000000_AddRagSearchSettingsToTenantAiSettings already in __EFMigrationsHistory';
+
+PRINT N'';
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- PART 3 of 3: 20260329000000_AddBartokSectionNameToIntakeTask
+-- Adds BartokSectionName column to IntakeTasks for checkpoint task targeting.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+PRINT N'--- Part 3: AddBartokSectionNameToIntakeTask ---';
+
+-- 3a. IntakeTasks: Bartok document section name (nullable)
+
+IF COL_LENGTH(N'IntakeTasks', N'BartokSectionName') IS NULL
+BEGIN
+    ALTER TABLE [IntakeTasks]
+        ADD [BartokSectionName] nvarchar(max) NULL;
+    PRINT N'  + Added IntakeTasks.BartokSectionName';
+END
+ELSE PRINT N'  = IntakeTasks.BartokSectionName already exists';
+
+-- 3b. EF migration history marker
+
+IF NOT EXISTS (
+    SELECT 1 FROM [__EFMigrationsHistory]
+    WHERE [MigrationId] = N'20260329000000_AddBartokSectionNameToIntakeTask'
+)
+BEGIN
+    INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'20260329000000_AddBartokSectionNameToIntakeTask', N'8.0.13');
+    PRINT N'  + Recorded 20260329000000_AddBartokSectionNameToIntakeTask in __EFMigrationsHistory';
+END
+ELSE PRINT N'  = 20260329000000_AddBartokSectionNameToIntakeTask already in __EFMigrationsHistory';
 
 PRINT N'';
 PRINT N'======================================================';
