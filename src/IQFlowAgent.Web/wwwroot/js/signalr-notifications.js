@@ -58,6 +58,17 @@
             );
         });
 
+        conn.on('ServiceWarning', function (data) {
+            const warningList = Array.isArray(data.warnings) ? data.warnings : [data.warnings];
+            showToast(
+                '⚠️ Service Degradation',
+                `Analysis for <strong>${data.intakeId}</strong> completed with reduced accuracy: ` +
+                warningList.join(' '),
+                'warning',
+                null
+            );
+        });
+
         conn.onclose(async () => {
             console.warn('[IQFlow] SignalR disconnected.');
         });
@@ -111,9 +122,9 @@
         }
 
         const toast = document.createElement('div');
-        const bg    = type === 'success' ? '#e8f5e9' : '#fdecea';
-        const border= type === 'success' ? '#43a047' : '#e53935';
-        const icon  = type === 'success' ? '✅' : '❌';
+        const bg    = type === 'success' ? '#e8f5e9' : type === 'warning' ? '#fff8e1' : '#fdecea';
+        const border= type === 'success' ? '#43a047' : type === 'warning' ? '#f9a825' : '#e53935';
+        const icon  = type === 'success' ? '✅'      : type === 'warning' ? '⚠️'      : '❌';
 
         toast.style.cssText =
             `background:${bg};border-left:4px solid ${border};border-radius:8px;` +

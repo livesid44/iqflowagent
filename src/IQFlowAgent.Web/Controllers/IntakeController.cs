@@ -17,13 +17,13 @@ public class IntakeController : Controller
     private readonly IBlobStorageService _blobService;
     private readonly ILogger<IntakeController> _logger;
     private readonly IWebHostEnvironment _env;
-    private readonly IServiceProvider _services;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITenantContextService _tenantContext;
     private readonly IBackgroundJobQueue _jobQueue;
 
     public IntakeController(ApplicationDbContext db, IAzureOpenAiService aiService,
         IBlobStorageService blobService, ILogger<IntakeController> logger,
-        IWebHostEnvironment env, IServiceProvider services, ITenantContextService tenantContext,
+        IWebHostEnvironment env, IServiceScopeFactory scopeFactory, ITenantContextService tenantContext,
         IBackgroundJobQueue jobQueue)
     {
         _db = db;
@@ -31,7 +31,7 @@ public class IntakeController : Controller
         _blobService = blobService;
         _logger = logger;
         _env = env;
-        _services = services;
+        _scopeFactory = scopeFactory;
         _tenantContext = tenantContext;
         _jobQueue = jobQueue;
     }
@@ -127,6 +127,12 @@ public class IntakeController : Controller
             ModelState.Remove(nameof(model.ProcessName));
         if (!IsFieldMandatory(Models.IntakeFieldConfig.FDescription))
             ModelState.Remove(nameof(model.Description));
+
+        // The [EmailAddress] data annotation fails for empty strings because it checks for '@'.
+        // Remove the format error when no email was provided — an empty email is only invalid
+        // when the field is marked as required (validated separately by ValidateMandatoryFields).
+        if (string.IsNullOrWhiteSpace(model.ProcessOwnerEmail))
+            ModelState.Remove(nameof(model.ProcessOwnerEmail));
 
         ValidateMandatoryFields(model, fieldConfig);
 
@@ -416,6 +422,7 @@ public class IntakeController : Controller
             .Select(l => new { l.DepartmentName, l.Name })
             .ToListAsync();
         await PopulateLotCountryViewBagAsync(tenantId);
+        ViewBag.FieldConfigs = await LoadFieldConfigDictAsync(tenantId);
 
         var vm = new IntakeEditViewModel
         {
@@ -469,6 +476,12 @@ public class IntakeController : Controller
                         .Select(e => e.ErrorMessage)
                         .ToList()
                 });
+            // Repopulate ViewBag data the view depends on
+            var tid = _tenantContext.GetCurrentTenantId();
+            ViewBag.Departments  = await _db.MasterDepartments.Where(d => d.IsActive && d.TenantId == tid).OrderBy(d => d.Name).Select(d => d.Name).ToListAsync();
+            ViewBag.LobsByDept   = await _db.MasterLobs.Where(l => l.IsActive && l.TenantId == tid).OrderBy(l => l.DepartmentName).ThenBy(l => l.Name).Select(l => new { l.DepartmentName, l.Name }).ToListAsync();
+            await PopulateLotCountryViewBagAsync(tid);
+            ViewBag.FieldConfigs = await LoadFieldConfigDictAsync(tid);
             return View(model);
         }
 
@@ -515,16 +528,32 @@ public class IntakeController : Controller
 
             if (model.NewDocument != null && model.NewDocument.Length > 0)
             {
-                // Always save to local disk — background job uploads to blob if configured.
-                var ext = Path.GetExtension(model.NewDocument.FileName);
-                var blobName = $"{record.IntakeId}-v{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
-                var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
-                Directory.CreateDirectory(uploadsDir);
-                var fullPath = Path.Combine(uploadsDir, blobName);
-                using var stream = new FileStream(fullPath, FileMode.Create);
-                await model.NewDocument.CopyToAsync(stream);
-                newFilePath = $"/uploads/{blobName}";
-                _logger.LogInformation("Saved replacement document for {IntakeId} to disk: {Path}", record.IntakeId, newFilePath);
+                var ext      = Path.GetExtension(model.NewDocument.FileName);
+                var safeFile = $"{record.IntakeId}-v{DateTime.UtcNow:yyyyMMddHHmmss}{ext}";
+
+                if (await _blobService.IsConfiguredAsync())
+                {
+                    // Upload directly to the per-intake blob folder.
+                    var tenantId   = _tenantContext.GetCurrentTenantId();
+                    var folderPath = $"{tenantId}/{record.IntakeId}/documents";
+                    await using var ms = new MemoryStream();
+                    await model.NewDocument.CopyToAsync(ms);
+                    ms.Position = 0;
+                    newFilePath = await _blobService.UploadToFolderAsync(
+                        ms, folderPath, model.NewDocument.FileName, model.NewDocument.ContentType ?? "application/octet-stream");
+                }
+                else
+                {
+                    // Blob not configured — save to local disk; RAG processor will upload later.
+                    var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
+                    Directory.CreateDirectory(uploadsDir);
+                    var fullPath = Path.Combine(uploadsDir, safeFile);
+                    using var stream = new FileStream(fullPath, FileMode.Create);
+                    await model.NewDocument.CopyToAsync(stream);
+                    newFilePath = $"/uploads/{safeFile}";
+                }
+
+                _logger.LogInformation("Saved replacement document for {IntakeId} to: {Path}", record.IntakeId, newFilePath);
 
                 record.UploadedFileName        = model.NewDocument.FileName;
                 record.UploadedFilePath        = newFilePath;
@@ -547,6 +576,9 @@ public class IntakeController : Controller
         // ── Optionally re-run analysis ────────────────────────────────
         if (model.RerunAnalysis)
         {
+            // Remove all existing tasks so the fresh analysis starts with a clean slate.
+            await DeleteAllTasksForIntakeAsync(_db, record.Id);
+
             record.Status         = "Submitted";
             record.AnalysisResult = null;
             record.AnalyzedAt     = null;
@@ -743,8 +775,12 @@ public class IntakeController : Controller
         var record = await _db.IntakeRecords.FindAsync(id);
         if (record == null) return NotFound();
 
+        // Remove all existing tasks so the fresh analysis starts with a clean slate.
+        await DeleteAllTasksForIntakeAsync(_db, id);
+
         record.Status = "Submitted";
         record.AnalysisResult = null;
+        record.AnalyzedAt     = null;
         await _db.SaveChangesAsync();
 
         var webRoot = _env.WebRootPath;
@@ -776,12 +812,19 @@ public class IntakeController : Controller
         return RedirectToAction(nameof(AnalysisResult), new { id });
     }
 
+    // Extensions handled by each extraction strategy in RunAnalysisInBackgroundAsync
+    private static readonly HashSet<string> _openXmlExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".docx", ".xlsx" };
+    private static readonly HashSet<string> _ocrExts =
+        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".pptx", ".jpg", ".jpeg", ".png", ".tiff", ".bmp" };
+
     private async Task RunAnalysisInBackgroundAsync(int intakeId, string? filePath, string webRoot)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var ai = scope.ServiceProvider.GetRequiredService<IAzureOpenAiService>();
-        var blob = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
+        using var scope = _scopeFactory.CreateScope();
+        var db       = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var ai       = scope.ServiceProvider.GetRequiredService<IAzureOpenAiService>();
+        var blob     = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
+        var docIntel = scope.ServiceProvider.GetRequiredService<IDocumentIntelligenceService>();
 
         try
         {
@@ -791,26 +834,40 @@ public class IntakeController : Controller
             record.Status = "Analyzing";
             await db.SaveChangesAsync();
 
-            // Try to read document text for AI analysis
+            // ── Load ALL intake documents and aggregate their text ─────────────
+            // Previously this method only read the single UploadedFilePath field,
+            // which caused additional documents uploaded to the intake to be
+            // silently ignored during re-analysis.  Now it reads every
+            // IntakeDocument record for this intake and combines them, matching
+            // exactly what RagProcessorService does for the initial analysis job.
+            var documents = await db.IntakeDocuments
+                .Where(d => d.IntakeRecordId == intakeId
+                         && d.DocumentType == "IntakeDocument"
+                         && d.IntakeTaskId == null)
+                .ToListAsync();
+
             string? docText = null;
-            if (!string.IsNullOrWhiteSpace(filePath))
+
+            if (documents.Count > 0)
             {
-                if (await blob.IsConfiguredAsync() && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                var aggregated = new System.Text.StringBuilder();
+                foreach (var doc in documents)
                 {
-                    // Download from Azure Blob Storage
-                    docText = await blob.DownloadTextAsync(filePath);
-                }
-                else
-                {
-                    // Read from local disk (fallback path)
-                    var fullPath = Path.Combine(webRoot, filePath.TrimStart('/'));
-                    if (System.IO.File.Exists(fullPath))
+                    var text = await ExtractSingleDocumentTextAsync(doc.FilePath, doc.FileName, blob, docIntel, webRoot);
+                    if (!string.IsNullOrWhiteSpace(text))
                     {
-                        var ext = Path.GetExtension(fullPath).ToLowerInvariant();
-                        if (ParseableExtensions.Contains(ext))
-                            docText = await System.IO.File.ReadAllTextAsync(fullPath);
+                        aggregated.AppendLine($"=== File: {doc.FileName} ===");
+                        aggregated.AppendLine(text);
+                        aggregated.AppendLine();
                     }
                 }
+                docText = aggregated.Length > 0 ? aggregated.ToString() : null;
+            }
+            else if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                // Legacy fallback: no IntakeDocument rows (e.g. very old intake records),
+                // so fall back to the single UploadedFilePath stored on the intake record.
+                docText = await ExtractSingleDocumentTextAsync(filePath, System.IO.Path.GetFileName(filePath), blob, docIntel, webRoot);
             }
 
             var result = await ai.AnalyzeIntakeAsync(record, docText);
@@ -833,7 +890,7 @@ public class IntakeController : Controller
             _logger.LogError(ex, "Background analysis failed for intake id {IntakeId}", intakeId);
             try
             {
-                using var scope2 = _services.CreateScope();
+                using var scope2 = _scopeFactory.CreateScope();
                 var db2 = scope2.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var rec = await db2.IntakeRecords.FindAsync(intakeId);
                 if (rec != null) { rec.Status = "Error"; await db2.SaveChangesAsync(); }
@@ -843,6 +900,89 @@ public class IntakeController : Controller
                 _logger.LogError(innerEx, "Failed to update error status for intake id {IntakeId}", intakeId);
             }
         }
+    }
+
+    /// <summary>
+    /// Extracts readable text from a single document file (blob URL or local /uploads/ path).
+    /// Handles OpenXML (.docx/.xlsx), OCR formats (.pdf etc. via Document Intelligence),
+    /// and plain-text formats (.txt, .csv, .json, .xml, .md).
+    /// </summary>
+    private async Task<string?> ExtractSingleDocumentTextAsync(
+        string? path, string? fileName, IBlobStorageService blob,
+        IDocumentIntelligenceService docIntel, string webRoot)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+
+        byte[]? docBytes = null;
+        string? docText  = null;
+
+        if (blob != null && await blob.IsConfiguredAsync()
+            && path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            docBytes = await blob.DownloadBytesAsync(path);
+        }
+        else
+        {
+            var uploadsRoot = Path.GetFullPath(Path.Combine(webRoot, "uploads"));
+            var localPath   = Path.GetFullPath(Path.Combine(webRoot, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+            if (localPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)
+                && System.IO.File.Exists(localPath))
+            {
+                if (ParseableExtensions.Contains(ext))
+                    docText = await System.IO.File.ReadAllTextAsync(localPath);
+                else
+                    docBytes = await System.IO.File.ReadAllBytesAsync(localPath);
+            }
+        }
+
+        if (docText == null && docBytes != null)
+        {
+            if (_openXmlExts.Contains(ext))
+            {
+                docText = DocumentTextExtractor.Extract(docBytes, ext);
+            }
+            else if (_ocrExts.Contains(ext) && docIntel.IsConfigured())
+            {
+                docText = await docIntel.ExtractTextAsync(docBytes, fileName ?? ("file" + ext));
+            }
+
+            // Fallback: try UTF-8 decoding for plain-text blobs
+            if (docText == null && ParseableExtensions.Contains(ext))
+                docText = System.Text.Encoding.UTF8.GetString(docBytes);
+        }
+
+        return docText;
+    }
+
+    /// <summary>
+    /// Deletes all tasks for <paramref name="intakeId"/> before a re-analysis run,
+    /// so stale AI-generated tasks don't accumulate alongside fresh ones.
+    /// Documents that were linked to a task are detached (IntakeTaskId nulled) rather
+    /// than deleted, so user-uploaded artefacts are preserved.
+    /// TaskActionLogs cascade-delete automatically via the FK relationship.
+    /// </summary>
+    private static async Task DeleteAllTasksForIntakeAsync(ApplicationDbContext db, int intakeId)
+    {
+        // Detach any intake documents that point to a task so the task FK constraint
+        // doesn't block deletion (OnDelete(DeleteBehavior.NoAction) for that relationship).
+        var taskIds = await db.IntakeTasks
+            .Where(t => t.IntakeRecordId == intakeId)
+            .Select(t => t.Id)
+            .ToListAsync();
+
+        if (taskIds.Count == 0) return;
+
+        // Null out IntakeTaskId on documents linked to these tasks so artefacts are kept.
+        await db.IntakeDocuments
+            .Where(d => d.IntakeTaskId.HasValue && taskIds.Contains(d.IntakeTaskId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.IntakeTaskId, (int?)null));
+
+        // Delete all tasks; TaskActionLogs cascade-delete automatically.
+        await db.IntakeTasks
+            .Where(t => t.IntakeRecordId == intakeId)
+            .ExecuteDeleteAsync();
     }
 
     private async Task AutoCreateTasksAsync(ApplicationDbContext db, IntakeRecord record, string analysisJson)
@@ -857,6 +997,22 @@ public class IntakeController : Controller
                 ? (record.CreatedByUserId ?? "Unassigned")
                 : record.ProcessOwnerEmail;
 
+            // Pre-build the set of BARTOK sections that already have a Fail/Warning checkpoint.
+            // Checkpoint tasks take priority: when a checkpoint covers a section the corresponding
+            // action item is skipped so only one task is created per section.
+            var checkpointSections = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("checkPoints", out var checkPointsEarly))
+            {
+                foreach (var cp in checkPointsEarly.EnumerateArray())
+                {
+                    var st = cp.TryGetProperty("status", out var sv) ? sv.GetString() ?? "" : "";
+                    if (st != "Fail" && st != "Warning") continue;
+                    var lbl = cp.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : "";
+                    if (!string.IsNullOrWhiteSpace(lbl))
+                        checkpointSections.Add(lbl);
+                }
+            }
+
             // ── Action Items ────────────────────────────────────────────────────
             if (root.TryGetProperty("actionItems", out var actionItems))
             {
@@ -867,6 +1023,18 @@ public class IntakeController : Controller
                     var priority    = item.TryGetProperty("priority",    out var p) ? p.GetString() ?? "Medium" : "Medium";
 
                     if (string.IsNullOrWhiteSpace(title)) continue;
+
+                    // If a Fail/Warning checkpoint already covers this BARTOK section, the checkpoint
+                    // task (created below) is the authoritative task — skip the duplicate action item.
+                    if (item.TryGetProperty("bartokSection", out var bsCheck))
+                    {
+                        var bsValue = bsCheck.GetString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(bsValue) &&
+                            checkpointSections.Any(lbl =>
+                                lbl.Contains(bsValue, StringComparison.OrdinalIgnoreCase) ||
+                                bsValue.Contains(lbl, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                    }
 
                     if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
                         continue;
@@ -895,28 +1063,62 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
                 }
             }
 
-            // ── Pending Check Points (Fail / Warning) ────────────────────────
+            // ── Pending Check Points (Fail only) ─────────────────────────────
+            // Checkpoint tasks are created only for Fail sections — sections where the
+            // document contains NO relevant content and information must be gathered.
+            // Warning checkpoints (content present but incomplete) are informational only
+            // and do NOT create tasks; the section can still be partially drafted.
             if (root.TryGetProperty("checkPoints", out var checkPoints))
             {
                 foreach (var cp in checkPoints.EnumerateArray())
                 {
-                    var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "" : "";
-                    if (cpStatus != "Fail" && cpStatus != "Warning") continue;
+                    var cpStatus    = cp.TryGetProperty("status",    out var cs)  ? cs.GetString()  ?? "" : "";
+                    if (cpStatus != "Fail") continue;
 
-                    var cpLabel = cp.TryGetProperty("label", out var cl) ? cl.GetString() ?? "" : "";
-                    var cpNote  = cp.TryGetProperty("note",  out var cn) ? cn.GetString() ?? "" : "";
+                    var cpLabel     = cp.TryGetProperty("label",     out var cl)  ? cl.GetString()  ?? "" : "";
+                    var cpNote      = cp.TryGetProperty("note",      out var cn)  ? cn.GetString()  ?? "" : "";
+                    var cpSectionId = cp.TryGetProperty("sectionId", out var csi) ? csi.GetString() ?? "" : "";
 
                     if (string.IsNullOrWhiteSpace(cpLabel)) continue;
 
-                    var title       = $"[Checkpoint] {cpLabel}";
+                    // Include the BARTOK section ID in the task title when available so
+                    // the task board immediately shows which section needs attention.
+                    var title = string.IsNullOrWhiteSpace(cpSectionId)
+                        ? $"[Checkpoint] {cpLabel}"
+                        : $"[Checkpoint][{cpSectionId}] {cpLabel}";
+
                     var description = string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote;
                     var priority    = cpStatus == "Fail" ? "High" : "Medium";
 
-                    if (await db.IntakeTasks.AnyAsync(tk => tk.IntakeRecordId == record.Id && tk.Title == title))
+                    // Guard against duplicates using both the new title format and the legacy
+                    // format (tasks created before sectionId was introduced).
+                    // Also check by sectionId prefix — the AI may produce slightly different
+                    // label wording on re-runs, so a sectionId-based match is more robust.
+                    var sectionIdPrefix = string.IsNullOrWhiteSpace(cpSectionId)
+                        ? null
+                        : $"[Checkpoint][{cpSectionId}]";
+
+                    if (await db.IntakeTasks.AnyAsync(tk =>
+                            tk.IntakeRecordId == record.Id &&
+                            (tk.Title == title
+                             || tk.Title == $"[Checkpoint] {cpLabel}"
+                             || (sectionIdPrefix != null && tk.Title.StartsWith(sectionIdPrefix)))))
                         continue;
 
+                    // Map checkpoint task to the BARTOK output document section
+                    description = description.TrimEnd();
+                    description += $"""
+
+
+📄 BARTOK S8 SOP — Output Document Section
+Section ID: {(string.IsNullOrWhiteSpace(cpSectionId) ? "—" : cpSectionId)}
+Section   : {cpLabel}
+Required  : {(string.IsNullOrWhiteSpace(cpNote) ? "See checkpoint status above." : cpNote)}
+""";
+
                     AddTask(db, record, title, description, priority, owner, now,
-                        $"Task automatically created from pending checkpoint '{cpLabel}' (status: {cpStatus}) for intake {record.IntakeId}.");
+                        $"Task automatically created from pending checkpoint '{cpLabel}' (status: {cpStatus}) for intake {record.IntakeId}.",
+                        bartokSectionName: cpLabel);
                 }
             }
 
@@ -931,20 +1133,21 @@ Required: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description abov
 
     private static void AddTask(ApplicationDbContext db, IntakeRecord record,
         string title, string description, string priority, string owner,
-        DateTime now, string logComment)
+        DateTime now, string logComment, string? bartokSectionName = null)
     {
         var task = new IntakeTask
         {
-            TaskId          = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
-            IntakeRecordId  = record.Id,
-            Title           = title,
-            Description     = description,
-            Priority        = priority,
-            Owner           = owner,
-            Status          = "Open",
-            CreatedAt       = now,
-            DueDate         = now.AddHours(48),
-            CreatedByUserId = record.CreatedByUserId
+            TaskId            = $"TSK-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}",
+            IntakeRecordId    = record.Id,
+            Title             = title,
+            Description       = description,
+            Priority          = priority,
+            Owner             = owner,
+            Status            = "Open",
+            CreatedAt         = now,
+            DueDate           = now.AddHours(48),
+            CreatedByUserId   = record.CreatedByUserId,
+            BartokSectionName = bartokSectionName
         };
         db.IntakeTasks.Add(task);
 

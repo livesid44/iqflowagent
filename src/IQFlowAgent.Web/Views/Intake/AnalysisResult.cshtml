@@ -259,6 +259,14 @@
                         🔓 Reopen Intake
                     </button>
                 </form>
+                <form action="/Report/RegenerateReport" method="post" style="margin:0;"
+                      onsubmit="return confirm('Regenerate the report from current field values? A new Word document will be created.');">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="intakeId" value="@Model.Id" />
+                    <button type="submit" class="btn-reanalyze" style="background:#1d4ed8;color:#fff;">
+                        🔄 Regenerate Report
+                    </button>
+                </form>
             }
         </div>
     </div>
@@ -432,15 +440,11 @@
         <div class="status-cards">
             <div class="status-card">
                 <div class="s-num">@steps</div>
-                <div class="s-label">Steps Identified</div>
+                <div class="s-label">Stages</div>
             </div>
             <div class="status-card green">
                 <div class="s-num">@quality</div>
                 <div class="s-label">Quality Score</div>
-            </div>
-            <div class="status-card orange">
-                <div class="s-num">@handling<span style="font-size:1rem;">m</span></div>
-                <div class="s-label">Est. Handling Time</div>
             </div>
             <div class="status-card @(compliance == "Passed" ? "green" : "red")">
                 <div class="s-num" style="font-size:1.2rem;">@compliance</div>
@@ -653,6 +657,25 @@
             var failCount    = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Fail");
             var warningCount = checkPoints.EnumerateArray().Count(c => c.TryGetProperty("status", out var s) && s.GetString() == "Warning");
             var pendingCount = failCount + warningCount;
+
+            @* Build set of BARTOK sections already covered by existing action item tasks.
+               A checkpoint for a section that has a matching action item task is considered
+               covered and should not prompt for a separate task to be created. *@
+            var sectionsCoveredByTasks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (analysis!.Value.TryGetProperty("actionItems", out var actionItemsForCoverage))
+            {
+                foreach (var ai in actionItemsForCoverage.EnumerateArray())
+                {
+                    var aiTitle = ai.TryGetProperty("title", out var at) ? at.GetString() ?? "" : "";
+                    if (existingTitles.Contains(aiTitle) && ai.TryGetProperty("bartokSection", out var bsEl))
+                    {
+                        var sect = bsEl.GetString() ?? "";
+                        if (!string.IsNullOrWhiteSpace(sect))
+                            sectionsCoveredByTasks.Add(sect);
+                    }
+                }
+            }
+
             <div class="analysis-card">
                 <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
                     <span><i class="bi bi-check2-square"></i> Check Points
@@ -666,10 +689,18 @@
                     </span>
                     @if (pendingCount > 0)
                     {
-                        @* Check whether all pending checkpoints already have tasks *@
+                        @* Check whether all pending checkpoints already have tasks (direct or via action item).
+                           Accept both the new [Checkpoint][sectionId] format and the legacy [Checkpoint] format. *@
                         var allCpTasksExist = checkPoints.EnumerateArray()
                             .Where(c => { var st = c.TryGetProperty("status", out var sv) ? sv.GetString() : ""; return st == "Fail" || st == "Warning"; })
-                            .All(c => { var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : ""; return existingTitles.Contains($"[Checkpoint] {lbl}"); });
+                            .All(c => {
+                                var lbl = c.TryGetProperty("label", out var lv) ? lv.GetString() ?? "" : "";
+                                var sid = c.TryGetProperty("sectionId", out var sv2) ? sv2.GetString() ?? "" : "";
+                                var newTitle = string.IsNullOrWhiteSpace(sid) ? $"[Checkpoint] {lbl}" : $"[Checkpoint][{sid}] {lbl}";
+                                return existingTitles.Contains(newTitle)
+                                    || existingTitles.Contains($"[Checkpoint] {lbl}")  // legacy format
+                                    || sectionsCoveredByTasks.Contains(lbl);
+                            });
                         if (allCpTasksExist)
                         {
                             <a asp-controller="Task" asp-action="Index" asp-route-intakeRecordId="@Model.Id"
@@ -706,15 +737,29 @@
                     <tbody>
                         @foreach (var cp in checkPoints.EnumerateArray())
                         {
-                            var cpLabel  = cp.TryGetProperty("label",  out var cl) ? cl.GetString() ?? "" : "";
-                            var cpStatus = cp.TryGetProperty("status", out var cs) ? cs.GetString() ?? "Warning" : "Warning";
-                            var cpNote   = cp.TryGetProperty("note",   out var cn) ? cn.GetString() ?? "" : "";
-                            var cpIcon   = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
-                            var cpTaskTitle = $"[Checkpoint] {cpLabel}";
+                            var cpLabel     = cp.TryGetProperty("label",     out var cl)  ? cl.GetString()  ?? "" : "";
+                            var cpStatus    = cp.TryGetProperty("status",    out var cs)  ? cs.GetString()  ?? "Warning" : "Warning";
+                            var cpNote      = cp.TryGetProperty("note",      out var cn)  ? cn.GetString()  ?? "" : "";
+                            var cpSectionId = cp.TryGetProperty("sectionId", out var csi) ? csi.GetString() ?? "" : "";
+                            var cpIcon      = cpStatus == "Pass" ? "check-circle-fill" : cpStatus == "Fail" ? "x-circle-fill" : "exclamation-circle-fill";
+                            // Build title: include sectionId when available so it appears on the task board.
+                            var cpTaskTitle = string.IsNullOrWhiteSpace(cpSectionId)
+                                ? $"[Checkpoint] {cpLabel}"
+                                : $"[Checkpoint][{cpSectionId}] {cpLabel}";
                             var cpPriority  = cpStatus == "Fail" ? "High" : "Medium";
                             var cpIsPending = cpStatus == "Fail" || cpStatus == "Warning";
+                            // Accept both new and legacy title formats when checking for existing tasks.
+                            var cpTaskExists = existingTitles.Contains(cpTaskTitle)
+                                || existingTitles.Contains($"[Checkpoint] {cpLabel}")  // legacy format
+                                || sectionsCoveredByTasks.Contains(cpLabel);
                             <tr>
-                                <td>@cpLabel</td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(cpSectionId))
+                                    {
+                                        <span style="color:#999;font-size:0.75em;margin-right:4px;">[@cpSectionId]</span>
+                                    }
+                                    @cpLabel
+                                </td>
                                 <td>
                                     <span class="cp-status cp-@cpStatus">
                                         <i class="bi bi-@cpIcon"></i> @cpStatus
@@ -724,7 +769,7 @@
                                 <td>
                                     @if (cpIsPending)
                                     {
-                                        @if (existingTitles.Contains(cpTaskTitle))
+                                        @if (cpTaskExists)
                                         {
                                             <span class="task-created-badge">
                                                 <i class="bi bi-check-circle-fill me-1"></i>Task Created
@@ -735,11 +780,12 @@
                                             <form asp-controller="Task" asp-action="CreateFromAction" method="post"
                                                   class="cp-task-form" style="margin:0;">
                                                 @Html.AntiForgeryToken()
-                                                <input type="hidden" name="intakeRecordId" value="@Model.Id" />
-                                                <input type="hidden" name="title"       value="@cpTaskTitle" />
-                                                <input type="hidden" name="description" value="@(string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote)" />
-                                                <input type="hidden" name="priority"    value="@cpPriority" />
-                                                <input type="hidden" name="owner"       value="@Model.ProcessOwnerEmail" />
+                                                <input type="hidden" name="intakeRecordId"    value="@Model.Id" />
+                                                <input type="hidden" name="title"             value="@cpTaskTitle" />
+                                                <input type="hidden" name="description"       value="@(string.IsNullOrWhiteSpace(cpNote) ? cpLabel : cpNote)" />
+                                                <input type="hidden" name="priority"          value="@cpPriority" />
+                                                <input type="hidden" name="owner"             value="@Model.ProcessOwnerEmail" />
+                                                <input type="hidden" name="bartokSectionName" value="@cpLabel" />
                                                 <button type="submit"
                                                     style="background:#e31837;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;font-weight:600;white-space:nowrap;">
                                                     <i class="bi bi-plus-circle me-1"></i>Create Task
@@ -777,7 +823,7 @@
                 </div>
                 <div class="val-card">
                     <h4>AI Scores</h4>
-                    <div class="val-row"><span>Steps Identified</span><span>@steps</span></div>
+                    <div class="val-row"><span>Stages</span><span>@steps</span></div>
                     <div class="val-row"><span>Quality Score</span><span>@quality / 100</span></div>
                     <div class="val-row"><span>Confidence</span><span>@confidence%</span></div>
                     <div class="val-row"><span>Compliance</span><span>@compliance</span></div>

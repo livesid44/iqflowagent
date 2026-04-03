@@ -602,7 +602,7 @@ const steps = [
     },
     {
         key: 'Document',
-        ask: () => `📎 Do you have any supporting documents to upload? (optional)\nSupported: PDF, DOCX, TXT, CSV, JSON, MD`,
+        ask: () => `📎 Do you have any supporting documents to upload? (optional)\nSupported: PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT, CSV, JSON, MD`,
         type: 'file',
         get required() { return fieldMandatory('Document'); },
         get skippable() { return !fieldMandatory('Document'); }
@@ -759,7 +759,7 @@ function renderInput(step, index) {
             <div class="upload-zone-chat" id="uploadZoneChat" onclick="document.getElementById('chatFileInput').click()">
                 <i class="bi bi-cloud-arrow-up"></i>
                 <p><strong>Click to upload</strong> or drag &amp; drop</p>
-                <p>PDF, DOCX, TXT, CSV, JSON, MD — max 20 MB</p>
+                <p>PDF, DOCX, XLSX, PPTX, JPEG, PNG, TXT, CSV, JSON, MD — max 20 MB</p>
             </div>
             <div id="filePreviewChat"></div>
             <div style="margin-top:8px;display:flex;gap:10px;align-items:center;">
@@ -774,7 +774,7 @@ function renderInput(step, index) {
         const chatFileInput = document.createElement('input');
         chatFileInput.type = 'file';
         chatFileInput.id = 'chatFileInput';
-        chatFileInput.accept = '.pdf,.doc,.docx,.txt,.csv,.json,.md,.xml';
+        chatFileInput.accept = '.pdf,.doc,.docx,.txt,.csv,.json,.md,.xml,.xlsx,.xls,.pptx,.ppt,.jpg,.jpeg,.png,.gif';
         chatFileInput.style.display = 'none';
         chatFileInput.onchange = e => {
             const f = e.target.files[0];
@@ -1214,7 +1214,40 @@ function submitIntake() {
             '<style>@@keyframes iqSpin{to{transform:rotate(360deg)}}</style>';
         document.body.appendChild(overlay);
 
-        document.getElementById('hiddenForm').submit();
+        function showRetryButtons() {
+            inputEl.innerHTML = `
+                <div style="text-align:center;padding:8px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button type="button" class="btn-submit-chat" onclick="submitIntake()">
+                        <i class="bi bi-send me-2"></i>Try Again
+                    </button>
+                    <button type="button" class="btn-skip" onclick="location.href='/Intake/Chat'">Start Over</button>
+                </div>`;
+        }
+
+        // Submit via XHR so validation errors are returned as JSON and shown in the chat,
+        // rather than causing a silent redirect back to an empty chat session.
+        const form = document.getElementById('hiddenForm');
+        fetch(form.action, {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: new FormData(form)
+        })
+        .then(r => r.json())
+        .then(json => {
+            if (json.success) {
+                window.location.href = json.redirectUrl;
+            } else {
+                overlay.remove();
+                const errors = json.errors || ['Submission failed — please check your inputs.'];
+                addBotMessage('❌ <strong>Submission failed:</strong><br>' + errors.map(e => '• ' + escHtml(e)).join('<br>'));
+                showRetryButtons();
+            }
+        })
+        .catch(() => {
+            overlay.remove();
+            addBotMessage('❌ Network error — please check your connection and try again.');
+            showRetryButtons();
+        });
     }, 800);
 }
 

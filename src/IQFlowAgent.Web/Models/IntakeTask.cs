@@ -26,6 +26,14 @@ public class IntakeTask
     public bool IsNotApplicable { get; set; } = false;
     public string? NaReason { get; set; }
 
+    /// <summary>
+    /// The BARTOK S8 SOP section this task targets (e.g. "Work Instructions", "Training").
+    /// Populated for auto-created checkpoint tasks so that per-task document re-analysis
+    /// can target the correct section keywords without relying on the title pattern.
+    /// Null for action-item tasks that span multiple sections.
+    /// </summary>
+    public string? BartokSectionName { get; set; }
+
     // Navigation
     public ICollection<TaskActionLog> ActionLogs { get; set; } = [];
     public ICollection<IntakeDocument> Documents { get; set; } = [];

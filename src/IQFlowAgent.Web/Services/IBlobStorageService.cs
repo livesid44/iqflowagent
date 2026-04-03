@@ -16,6 +16,12 @@ public interface IBlobStorageService
     /// </summary>
     Task<string?> DownloadTextAsync(string blobUrl);
 
+    /// <summary>
+    /// Downloads the blob at <paramref name="blobUrl"/> as raw bytes,
+    /// or <c>null</c> if the download fails.
+    /// </summary>
+    Task<byte[]?> DownloadBytesAsync(string blobUrl);
+
     /// <summary>Deletes the blob at <paramref name="blobUrl"/> if it exists.</summary>
     Task DeleteAsync(string blobUrl);
 
@@ -25,4 +31,15 @@ public interface IBlobStorageService
     /// connection string does not contain a shared key (e.g. SAS-only connections).
     /// </summary>
     Task<string> GenerateSasDownloadUrlAsync(string blobUrl, TimeSpan? expiry = null);
+
+    /// <summary>Uploads content using a structured folder path. Returns blob URL.
+    /// <paramref name="folderPath"/> format: {tenantId}/{intakeId}/documents (no trailing slash).
+    /// </summary>
+    Task<string> UploadToFolderAsync(Stream content, string folderPath, string fileName, string contentType);
+
+    /// <summary>
+    /// Verifies that the configured Azure Blob Storage connection string and container
+    /// are reachable. Returns a success flag, HTTP status code, and a human-readable message.
+    /// </summary>
+    Task<(bool success, int statusCode, string message)> TestConnectionAsync();
 }

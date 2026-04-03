@@ -28,7 +28,13 @@ public class RagProcessorService : BackgroundService
         new(StringComparer.OrdinalIgnoreCase)
         { ".txt", ".csv", ".json", ".xml", ".md", ".log" };
 
-    private const int MaxTextCharsPerFile = 8_000;
+    private static readonly HashSet<string> OpenXmlExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        { ".docx", ".xlsx" };
+
+    private static readonly HashSet<string> OcrExtensions =
+        new(StringComparer.OrdinalIgnoreCase)
+        { ".pdf", ".pptx", ".jpg", ".jpeg", ".png", ".tiff", ".bmp" };
 
     public RagProcessorService(
         IBackgroundJobQueue queue,
@@ -109,6 +115,13 @@ public class RagProcessorService : BackgroundService
         var speechSvc   = scope.ServiceProvider.GetRequiredService<IAzureSpeechService>();
         var blobSvc     = scope.ServiceProvider.GetRequiredService<IBlobStorageService>();
 
+        var docIntel  = scope.ServiceProvider.GetRequiredService<IDocumentIntelligenceService>();
+        var embedSvc  = scope.ServiceProvider.GetRequiredService<IAzureEmbeddingService>();
+        var searchSvc = scope.ServiceProvider.GetRequiredService<IAzureSearchService>();
+
+        if (searchSvc.IsConfigured())
+            await searchSvc.EnsureIndexExistsAsync(ct);
+
         var job = await db.RagJobs
             .Include(j => j.IntakeRecord)
             .FirstOrDefaultAsync(j => j.Id == ragJobId, ct);
@@ -156,13 +169,43 @@ public class RagProcessorService : BackgroundService
                 }
                 else
                 {
+                    // ── Upload local file to per-intake blob folder ────────
+                    // When Blob Storage is configured and the document is still on
+                    // local disk, migrate it to blob now (deferred from the HTTP POST
+                    // that originally saved it locally to keep the response fast).
+                    await EnsureDocumentInBlobAsync(doc, intake, db, blobSvc, ct);
+
                     // ── Read text content for RAG ──────────────────────────
-                    var text = await ReadDocumentTextAsync(doc, blobSvc, ct);
+                    var text = await ReadDocumentTextAsync(doc, blobSvc, docIntel, ct);
                     if (!string.IsNullOrWhiteSpace(text))
                     {
                         aggregatedText.AppendLine($"=== File: {doc.FileName} ===");
                         aggregatedText.AppendLine(text);
                         aggregatedText.AppendLine();
+
+                        // ── Chunk + Embed + Index into Azure AI Search ─────
+                        if (searchSvc.IsConfigured() && embedSvc.IsConfigured())
+                        {
+                            var chunks = RagDocumentChunker.Chunk(text);
+                            var chunkRecords = new List<DocumentChunkRecord>();
+                            for (int i = 0; i < chunks.Count; i++)
+                            {
+                                var embedding = await embedSvc.GetEmbeddingAsync(chunks[i], ct) ?? Array.Empty<float>();
+                                chunkRecords.Add(new DocumentChunkRecord(
+                                    Id            : $"{intake.Id}-{doc.Id}-{i}",
+                                    IntakeDbId    : intake.Id,
+                                    IntakePublicId: intake.IntakeId,
+                                    TenantId      : intake.TenantId,
+                                    FolderPath    : $"{intake.TenantId}/{intake.IntakeId}/documents",
+                                    DocumentName  : doc.FileName,
+                                    Content       : chunks[i],
+                                    ChunkIndex    : i,
+                                    Embedding     : embedding
+                                ));
+                            }
+                            await searchSvc.IndexChunksAsync(chunkRecords, ct);
+                            _logger.LogInformation("Indexed {Count} chunks from {FileName} into Azure AI Search.", chunks.Count, doc.FileName);
+                        }
                     }
                 }
 
@@ -208,6 +251,21 @@ public class RagProcessorService : BackgroundService
                         filesProcessed = job.ProcessedFiles
                     },
                     ct);
+
+                // Send a separate warning notification for any Azure service degradations
+                // that occurred during analysis (e.g. embedding returned null, search threw).
+                var serviceWarnings = aiService.GetLastServiceWarnings();
+                if (serviceWarnings.Count > 0)
+                {
+                    await _hub.Clients.Group($"user-{job.NotifyUserId}").SendAsync(
+                        "ServiceWarning",
+                        new
+                        {
+                            intakeId = intake.IntakeId,
+                            warnings = serviceWarnings
+                        },
+                        ct);
+                }
             }
         }
         catch (Exception ex)
@@ -264,8 +322,10 @@ public class RagProcessorService : BackgroundService
             string sopPath;
             if (await blobSvc.IsConfiguredAsync())
             {
-                sopPath = await blobSvc.UploadAsync(
+                var sopFolderPath = $"{intake.TenantId}/{intake.IntakeId}/sop";
+                sopPath = await blobSvc.UploadToFolderAsync(
                     new MemoryStream(sopBytes),
+                    sopFolderPath,
                     sopFileName,
                     "application/pdf");
             }
@@ -311,27 +371,23 @@ public class RagProcessorService : BackgroundService
     // ─── Read text from document ──────────────────────────────────────────────
 
     private async Task<string?> ReadDocumentTextAsync(
-        IntakeDocument doc, IBlobStorageService blobSvc, CancellationToken ct)
+        IntakeDocument doc, IBlobStorageService blobSvc,
+        IDocumentIntelligenceService docIntel, CancellationToken ct)
     {
         var ext = Path.GetExtension(doc.FileName).ToLowerInvariant();
-        if (!TextExtensions.Contains(ext)) return null;
 
         try
         {
-            string? text = null;
+            if (TextExtensions.Contains(ext))
+            {
+                // Plain text: read directly
+                if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    return await blobSvc.DownloadTextAsync(doc.FilePath);
 
-            if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            {
-                text = await blobSvc.DownloadTextAsync(doc.FilePath);
-            }
-            else
-            {
-                // Local path: map /uploads/... to physical path
                 var localPath = doc.FilePath.StartsWith('/')
                     ? Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))
                     : doc.FilePath;
 
-                // Boundary check: must be inside wwwroot
                 var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
                 var fullPath    = Path.GetFullPath(localPath);
                 if (!fullPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase))
@@ -339,20 +395,52 @@ public class RagProcessorService : BackgroundService
                     _logger.LogWarning("Document path '{Path}' is outside uploads root — skipping.", doc.FilePath);
                     return null;
                 }
-
-                if (File.Exists(fullPath))
-                    text = await File.ReadAllTextAsync(fullPath, ct);
+                return File.Exists(fullPath) ? await File.ReadAllTextAsync(fullPath, ct) : null;
             }
 
-            return string.IsNullOrWhiteSpace(text) ? null
-                : text.Length > MaxTextCharsPerFile ? text[..MaxTextCharsPerFile] + "...[truncated]"
-                : text;
+            if (OpenXmlExtensions.Contains(ext))
+            {
+                var bytes = await DownloadBytesAsync(doc, blobSvc, ct);
+                if (bytes == null) return null;
+                return DocumentTextExtractor.Extract(bytes, ext);
+            }
+
+            if (OcrExtensions.Contains(ext))
+            {
+                var bytes = await DownloadBytesAsync(doc, blobSvc, ct);
+                if (bytes == null) return null;
+                return await docIntel.ExtractTextAsync(bytes, doc.FileName);
+            }
+
+            _logger.LogDebug("Skipping unsupported extension '{Ext}' for {FileName}.", ext, doc.FileName);
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to read text from document {DocId} ({FileName}).", doc.Id, doc.FileName);
             return null;
         }
+    }
+
+    /// <summary>Downloads document bytes either from blob URL or local disk.</summary>
+    private async Task<byte[]?> DownloadBytesAsync(
+        IntakeDocument doc, IBlobStorageService blobSvc, CancellationToken ct)
+    {
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return await blobSvc.DownloadBytesAsync(doc.FilePath);
+
+        var localPath = doc.FilePath.StartsWith('/')
+            ? Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))
+            : doc.FilePath;
+
+        var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+        var fullPath    = Path.GetFullPath(localPath);
+        if (!fullPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Document path '{Path}' is outside uploads root — skipping.", doc.FilePath);
+            return null;
+        }
+        return File.Exists(fullPath) ? await File.ReadAllBytesAsync(fullPath, ct) : null;
     }
 
     // ─── Auto-create tasks from analysis ─────────────────────────────────────
@@ -370,32 +458,110 @@ public class RagProcessorService : BackgroundService
                 .ToListAsync(ct);
             var titleSet = existingTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var items = GetJsonArraySafe(doc.RootElement, "actionItems")
-                .Concat(GetJsonArraySafe(doc.RootElement, "checkPoints").Where(IsFailOrWarn))
+            // Build the set of BARTOK sections already covered by a Fail/Warning checkpoint.
+            // Checkpoint tasks take priority — action items for the same section are skipped
+            // so that exactly one task is created per section.
+            var checkpointSections = GetJsonArraySafe(doc.RootElement, "checkPoints")
+                .Where(IsFailOrWarn)
+                .Select(cp => GetStringProp(cp, "label") ?? "")
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // Combine checkpoints (Fail only — Warning is informational, creates no task) with
+            // action items that are NOT covered by a Fail/Warning checkpoint, so that the
+            // checkpoint version is the single authoritative task when a section truly has no content.
+            var items = GetJsonArraySafe(doc.RootElement, "checkPoints")
+                .Where(IsFailStatus)
+                .Concat(GetJsonArraySafe(doc.RootElement, "actionItems")
+                    .Where(item =>
+                    {
+                        var bs = item.TryGetProperty("bartokSection", out var bsEl) ? bsEl.GetString() ?? "" : "";
+                        if (string.IsNullOrWhiteSpace(bs)) return true;
+                        // Skip if any checkpoint label contains (or is contained by) the bartokSection value
+                        return !checkpointSections.Any(lbl =>
+                            lbl.Contains(bs, StringComparison.OrdinalIgnoreCase) ||
+                            bs.Contains(lbl, StringComparison.OrdinalIgnoreCase));
+                    }))
                 .ToList();
 
             foreach (var item in items)
             {
-                var title    = GetStringProp(item, "title", "label") ?? "Task";
-                var priority = GetStringProp(item, "priority") ?? (IsCheckPoint(item) ? "High" : "Medium");
-                var desc     = GetStringProp(item, "description", "note") ?? string.Empty;
-                var prefix   = IsCheckPoint(item) ? "[Checkpoint] " : string.Empty;
-                var fullTitle = prefix + title;
+                var title     = GetStringProp(item, "title", "label") ?? "Task";
+                var priority  = GetStringProp(item, "priority") ?? (IsCheckPoint(item) ? "High" : "Medium");
+                var desc      = GetStringProp(item, "description", "note") ?? string.Empty;
 
-                if (titleSet.Contains(fullTitle)) continue;
+                // For checkpoint tasks include the sectionId (e.g. "5") in the title so the
+                // task board immediately shows which BARTOK section needs attention.
+                string fullTitle;
+                if (IsCheckPoint(item))
+                {
+                    var sectionId = GetStringProp(item, "sectionId") ?? string.Empty;
+                    fullTitle = string.IsNullOrWhiteSpace(sectionId)
+                        ? $"[Checkpoint] {title}"
+                        : $"[Checkpoint][{sectionId}] {title}";
+                }
+                else
+                {
+                    fullTitle = title;
+                }
+
+                // Guard against duplicates — also check the legacy format (no sectionId)
+                // for checkpoints that were created before sectionId was introduced.
+                // Additionally guard by sectionId prefix so that re-runs where the AI
+                // produces a slightly different label wording do not create duplicate tasks.
+                var cpSectionIdForGuard = IsCheckPoint(item) ? (GetStringProp(item, "sectionId") ?? "") : "";
+                var cpSectionIdPrefix   = string.IsNullOrWhiteSpace(cpSectionIdForGuard)
+                    ? null
+                    : $"[Checkpoint][{cpSectionIdForGuard}]";
+
+                if (titleSet.Contains(fullTitle) ||
+                    (IsCheckPoint(item) && titleSet.Contains($"[Checkpoint] {title}")) ||
+                    (cpSectionIdPrefix != null && titleSet.Any(t => t.StartsWith(cpSectionIdPrefix, StringComparison.OrdinalIgnoreCase))))
+                    continue;
                 titleSet.Add(fullTitle);
+
+                // Map each task to its BARTOK output-document section for traceability.
+                // Checkpoint items use their "label" as the section name.
+                // Action items use "bartokSection" when present.
+                if (IsCheckPoint(item))
+                {
+                    var sectionName  = GetStringProp(item, "label") ?? "";
+                    var sectionId    = GetStringProp(item, "sectionId") ?? "";
+                    var requiredInfo = GetStringProp(item, "note") ?? "";
+                    if (!string.IsNullOrWhiteSpace(sectionName))
+                    {
+                        desc = desc.TrimEnd();
+                        desc += $"\n\n📄 BARTOK S8 SOP — Output Document Section"
+                              + $"\nSection ID: {(string.IsNullOrWhiteSpace(sectionId) ? "—" : sectionId)}"
+                              + $"\nSection   : {sectionName}"
+                              + $"\nRequired  : {(string.IsNullOrWhiteSpace(requiredInfo) ? "See checkpoint status above." : requiredInfo)}";
+                    }
+                }
+                else if (item.TryGetProperty("bartokSection", out var bsSec))
+                {
+                    var sectionName  = bsSec.GetString() ?? "";
+                    var requiredInfo = item.TryGetProperty("requiredInfo", out var riEl) ? riEl.GetString() ?? "" : "";
+                    if (!string.IsNullOrWhiteSpace(sectionName))
+                    {
+                        desc = desc.TrimEnd();
+                        desc += $"\n\n📄 BARTOK S8 SOP — Output Document Section\nSection : {sectionName}\nRequired: {(string.IsNullOrWhiteSpace(requiredInfo) ? "See task description above." : requiredInfo)}";
+                    }
+                }
 
                 var task = new IntakeTask
                 {
-                    TaskId         = "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper(),
-                    IntakeRecordId = intake.Id,
-                    Title          = fullTitle,
-                    Description    = desc,
-                    Status         = "Open",
-                    Priority       = NormalisePriority(priority),
-                    Owner          = intake.ProcessOwnerEmail,
-                    DueDate        = DateTime.UtcNow.AddHours(48),
-                    CreatedAt      = DateTime.UtcNow
+                    TaskId            = "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper(),
+                    IntakeRecordId    = intake.Id,
+                    Title             = fullTitle,
+                    Description       = desc,
+                    Status            = "Open",
+                    Priority          = NormalisePriority(priority),
+                    Owner             = intake.ProcessOwnerEmail,
+                    DueDate           = DateTime.UtcNow.AddHours(48),
+                    CreatedAt         = DateTime.UtcNow,
+                    // Store the BARTOK section so per-task document re-analysis can target
+                    // the correct section keywords without relying on the title pattern.
+                    BartokSectionName = IsCheckPoint(item) ? (GetStringProp(item, "label") ?? string.Empty) : null
                 };
                 db.IntakeTasks.Add(task);
                 await db.SaveChangesAsync(ct);
@@ -435,6 +601,17 @@ public class RagProcessorService : BackgroundService
             || status.Equals("Warning", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Returns true only for "Fail" checkpoints — the only status that auto-creates a task.
+    /// "Warning" checkpoints (content present but incomplete) are informational badges in the
+    /// UI and do not require a task; the section can still be partially drafted.
+    /// </summary>
+    private static bool IsFailStatus(System.Text.Json.JsonElement el)
+    {
+        var status = GetStringProp(el, "status") ?? string.Empty;
+        return status.Equals("Fail", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsCheckPoint(System.Text.Json.JsonElement el) =>
         el.TryGetProperty("status", out _); // checkpoints have a "status" field
 
@@ -455,6 +632,57 @@ public class RagProcessorService : BackgroundService
         };
 
     // ─── Blob upload helpers ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// If the document is stored at a local disk path and Azure Blob Storage is
+    /// configured, upload it to the per-intake folder (<c>{tenantId}/{intakeId}/documents/</c>)
+    /// and update <see cref="IntakeDocument.FilePath"/> to the blob URL so that
+    /// all intake files are co-located under one folder in the storage account.
+    /// </summary>
+    private async Task EnsureDocumentInBlobAsync(
+        IntakeDocument doc,
+        IntakeRecord   intake,
+        ApplicationDbContext db,
+        IBlobStorageService blobSvc,
+        CancellationToken ct)
+    {
+        // Already in blob storage — nothing to do.
+        if (doc.FilePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return;
+
+        if (!await blobSvc.IsConfiguredAsync()) return;
+
+        try
+        {
+            var localPath = doc.FilePath.StartsWith('/')
+                ? Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar))
+                : doc.FilePath;
+
+            var uploadsRoot = Path.GetFullPath(Path.Combine(_env.WebRootPath, "uploads"));
+            var fullPath    = Path.GetFullPath(localPath);
+            if (!fullPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)
+                || !File.Exists(fullPath))
+                return;
+
+            var folderPath  = $"{intake.TenantId}/{intake.IntakeId}/documents";
+            var contentType = doc.ContentType ?? "application/octet-stream";
+
+            await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var blobUrl = await blobSvc.UploadToFolderAsync(stream, folderPath, doc.FileName, contentType);
+
+            doc.FilePath = blobUrl;
+            await db.SaveChangesAsync(ct);
+
+            _logger.LogInformation(
+                "Uploaded {FileName} to blob folder {Folder} for intake {IntakeId}.",
+                doc.FileName, folderPath, intake.IntakeId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not upload {FileName} to blob for intake {IntakeId} — keeping local path.",
+                doc.FileName, intake.IntakeId);
+        }
+    }
 
     /// <summary>
     /// If the audio/video document is stored at a local disk path and blob storage is
@@ -487,9 +715,11 @@ public class RagProcessorService : BackgroundService
         try
         {
             using var fs = File.OpenRead(physicalPath);
-            var blobUrl = await blobSvc.UploadAsync(
+            var folderPath = $"{intake.TenantId}/{intake.IntakeId}/audio";
+            var blobUrl = await blobSvc.UploadToFolderAsync(
                 fs,
-                Path.GetFileName(doc.FilePath),
+                folderPath,
+                doc.FileName,
                 doc.ContentType ?? "application/octet-stream");
 
             _logger.LogInformation("Uploaded audio/video {FileName} to blob: {Url}", doc.FileName, blobUrl);

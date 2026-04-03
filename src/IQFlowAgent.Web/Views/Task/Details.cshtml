@@ -391,21 +391,40 @@
                 </form>
             </div>
 
+            @* ── Analyse for this task (only for BARTOK checkpoint tasks) ──────── *@
+            @if (!string.IsNullOrWhiteSpace(Model.BartokSectionName))
+            {
+                <div class="action-panel" style="border-left:3px solid #7c3aed;">
+                    <h5 style="color:#7c3aed;"><i class="bi bi-robot"></i> Analyse for this task</h5>
+                    <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">
+                        Re-run document analysis for the <strong>@Model.BartokSectionName</strong> section
+                        using your uploaded artifact. If the document does not contain relevant content
+                        for this section, the task will be immediately reopened.
+                    </p>
+                    <form asp-action="AnalyzeForTask" asp-route-id="@Model.Id" method="post">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn-action" style="background:#7c3aed;">
+                            <i class="bi bi-search me-1"></i> Analyse for this task
+                        </button>
+                    </form>
+                </div>
+            }
+
             <!-- Mark as Not Applicable -->
             @if (!Model.IsNotApplicable)
             {
                 <div class="action-panel">
                     <h5 style="color:#15803d;">⊘ Mark as Not Applicable</h5>
                     <p style="font-size:0.8rem;color:#666;margin-bottom:10px;">
-                        NA tasks are bypassed from AI closure verification and treated as closed.
+                        NA tasks are auto-closed and bypassed from AI closure verification. A reason is <strong>required</strong>.
                     </p>
                     <form asp-action="MarkNotApplicable" asp-route-id="@Model.Id" method="post">
                         @Html.AntiForgeryToken()
-                        <textarea name="naReason" placeholder="Reason (optional)…"
-                                  style="margin-bottom:0;"></textarea>
+                        <textarea name="naReason" placeholder="Reason why this task is not applicable (required)…"
+                                  required style="margin-bottom:0;"></textarea>
                         <button type="submit" class="btn-action"
                                 style="background:#15803d;"
-                                onclick="return confirm('Mark this task as Not Applicable? It will be excluded from AI closure verification.')">
+                                onclick="return confirm('Mark this task as Not Applicable and close it? A reason is required.')">
                             ⊘ Mark as N/A
                         </button>
                     </form>

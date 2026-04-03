@@ -3,6 +3,7 @@ using System;
 using IQFlowAgent.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace IQFlowAgent.Web.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260329000000_AddBartokSectionNameToIntakeTask")]
+    partial class AddBartokSectionNameToIntakeTask
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.13");
@@ -829,22 +832,28 @@ namespace IQFlowAgent.Web.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("AzureOpenAIEmbeddingDeployment")
-                        .IsRequired();
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AzureDocumentIntelligenceEndpoint")
-                        .IsRequired();
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AzureDocumentIntelligenceApiKey")
-                        .IsRequired();
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AzureSearchEndpoint")
-                        .IsRequired();
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AzureSearchApiKey")
-                        .IsRequired();
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AzureSearchIndexName")
-                        .IsRequired();
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AzureSpeechApiKey")
                         .IsRequired()

@@ -189,65 +189,102 @@
         @if (allReady)
         {
             <div class="report-ready-box">
-                <h3>🎉 All fields are ready! You can now generate the final report.</h3>
-                <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated, uploaded to storage, and the intake will be marked as <strong>Closed</strong>.</p>
-                <p style="font-size:0.82rem;color:#047857;">Click the <strong>"Generate Final Report &amp; Close Intake"</strong> button below.</p>
+                @if (existingReport != null)
+                {
+                    <h3>✅ All fields are ready! Click below to generate an updated report.</h3>
+                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). Running the analysis again will produce a refreshed Word document automatically.</p>
+                }
+                else
+                {
+                    <h3>🎉 All fields are ready! Click below to generate the final report.</h3>
+                    <p>All @totalFields template fields have been resolved (@availableFields available, @naFields marked N/A). The BARTOK DD document will be generated and the intake will be marked as <strong>Closed</strong>.</p>
+                }
             </div>
         }
     }
 
-    <!-- Toolbar: contextual — show ONE primary action based on state -->
+    <!-- Toolbar: single unified action — always "Run AI Field Analysis".
+         If all fields resolve, the server auto-generates the report and redirects
+         to the download page. If open points remain, this page is shown with the
+         outstanding fields highlighted. -->
     <div class="toolbar">
-        @if (!hasFields)
-        {
-            @* No analysis run yet — only show the analysis button *@
-            <form method="post" action="/Report/AnalyzeFields">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-analyze">🤖 Run AI Field Analysis</button>
-            </form>
-        }
-        else if (existingReport != null)
-        {
-            @* Document already generated — primary is Download, secondary is Re-run *@
-            @if (existingReport.FilePath.StartsWith("http"))
-            {
-                <a href="@existingReport.FilePath" target="_blank" class="btn-generate">⬇️ Download Report (Word)</a>
-            }
-            else
-            {
-                <a href="/Report/Download?intakeId=@intakeId" class="btn-generate">⬇️ Download Report (Word)</a>
-            }
-            <form method="post" action="/Report/AnalyzeFields">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
-            </form>
-        }
-        else
-        {
-            @* Analysis done but no document yet — primary is Generate, secondary is Re-run *@
-            @if (allReady)
-            {
-                <form method="post" action="/Report/Generate" onsubmit="return confirm('Generate final BARTOK DD report and close this intake? This action cannot be undone.');">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="intakeId" value="@intakeId" />
-                    <button type="submit" class="btn-generate">📄 Generate Final Report &amp; Close Intake</button>
-                </form>
-            }
-            else
-            {
-                <button class="btn-generate" disabled title="@missingFields missing field(s) must be resolved first">
-                    📄 Generate Final Report
-                </button>
-            }
-            <form method="post" action="/Report/AnalyzeFields">
-                @Html.AntiForgeryToken()
-                <input type="hidden" name="intakeId" value="@intakeId" />
-                <button type="submit" class="btn-analyze">🔄 Re-run AI Field Analysis</button>
-            </form>
-        }
+        <form method="post" action="/Report/AnalyzeFields" onsubmit="return startAnalysis()">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="intakeId" value="@intakeId" />
+            <button type="submit" class="btn-analyze">
+                @(hasFields ? "🔄 Re-run AI Field Analysis" : "🤖 Run AI Field Analysis")
+            </button>
+        </form>
     </div>
+
+    <!-- Analysis loading overlay — shown while AI analysis (and optional auto-generation) runs -->
+    <div id="analysisOverlay"
+         style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;
+                align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:16px;padding:40px 48px;text-align:center;
+                    max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+            <div style="font-size:2.5rem;margin-bottom:16px;">🔬</div>
+            <div style="font-weight:700;font-size:1.15rem;color:#1e293b;margin-bottom:10px;">
+                Running AI Field Analysis
+            </div>
+            <div style="color:#64748b;font-size:0.88rem;line-height:1.6;margin-bottom:20px;">
+                Each BARTOK section is analyzed with a focused AI call. If all fields resolve,
+                the final Word document is generated automatically — no extra click needed.
+                This takes <strong>1–3 minutes</strong>; please do not close this page.
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;
+                        color:#2563eb;font-size:0.9rem;font-weight:600;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5"
+                     style="animation:spin 1s linear infinite;">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83
+                             M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+                Analyzing…
+            </div>
+        </div>
+    </div>
+
+    <!-- Generate loading overlay — no longer used from the toolbar; kept for the
+         legacy /Report/Generate endpoint if accessed directly. -->
+    <div id="generateOverlay"
+         style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;
+                align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:16px;padding:40px 48px;text-align:center;
+                    max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+            <div style="font-size:2.5rem;margin-bottom:16px;">📄</div>
+            <div style="font-weight:700;font-size:1.15rem;color:#1e293b;margin-bottom:10px;">
+                Generating Final Report
+            </div>
+            <div style="color:#64748b;font-size:0.88rem;line-height:1.6;margin-bottom:20px;">
+                Running the complete AI pipeline for all BARTOK sections — RACI, SOP, Volume,
+                OSS and more — then producing the final Word document. This takes
+                <strong>2–3 minutes</strong> for typical intakes; large documents or high
+                system load may take longer. Please do not close this page.
+            </div>
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;
+                        color:#059669;font-size:0.9rem;font-weight:600;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.5"
+                     style="animation:spin 1s linear infinite;">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83
+                             M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+                Processing…
+            </div>
+        </div>
+    </div>
+    <style>
+        @@keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script>
+        function startAnalysis() {
+            var overlay = document.getElementById('analysisOverlay');
+            if (overlay) overlay.style.display = 'flex';
+            document.querySelectorAll('.btn-analyze').forEach(function(b) { b.disabled = true; });
+            return true;
+        }
+    </script>
 
     @if (hasFields)
     {

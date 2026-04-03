@@ -92,7 +92,26 @@ dotnet user-secrets set "AzureStorage:ContainerName"    "intakes"
 | Azure Blob Storage | Empty `ConnectionString` | Files stored in `wwwroot/uploads/` |
 | SQL Server | Empty `SqlServer` connection string | SQLite (`iqflowagent.db` auto-created) |
 
-## Publishing
+---
+
+## Recommended Azure OpenAI Models
+
+The following models are recommended for BARTOK SOP / Due Diligence analysis.
+Create a deployment in [Azure AI Foundry](https://ai.azure.com) and set the **Deployment Name** in
+`appsettings.Development.json` (or in the AI Settings page inside the app).
+
+| Model | Recommendation | Why |
+|-------|----------------|-----|
+| **gpt-4o** ⭐ | **Best choice** | 128 k-token context window — handles large uploaded Word/Excel/PDF documents in a single pass. Best structured-output quality for RACI matrices, SOP tables and escalation blocks. |
+| gpt-4o-mini | Cost-efficient alternative | 3–4× cheaper per token; suitable for smaller intakes or high-volume processing where budget matters. Quality is slightly lower. |
+| o3-mini | Advanced reasoning | Strong at multi-step compliance/regulatory logic. Slower than gpt-4o; use only when complex reasoning is the bottleneck. |
+
+> **API Version:** Use `2025-01-01-preview` or later. Both `gpt-4o` and `o3-mini` require a
+> preview API version for full structured-output support.
+
+---
+
+
 
 ### Recommended: use `publish.cmd` (avoids all VS Publish issues)
 

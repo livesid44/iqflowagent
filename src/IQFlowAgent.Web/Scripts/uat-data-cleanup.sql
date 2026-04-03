@@ -57,7 +57,7 @@ GO
 -- =============================================================================
 PRINT '=== PRE-FLIGHT ROW COUNTS ===';
 
-SELECT 'TaskActionLogs'     AS TableName, COUNT(*) AS RowCount FROM [TaskActionLogs]
+SELECT 'TaskActionLogs'     AS TableName, COUNT(*) AS [RowCount] FROM [TaskActionLogs]
 UNION ALL
 SELECT 'IntakeDocuments',                  COUNT(*)            FROM [IntakeDocuments]
 UNION ALL
@@ -190,7 +190,7 @@ GO
 PRINT '';
 PRINT '=== POST-CLEANUP ROW COUNTS (all should be 0) ===';
 
-SELECT 'TaskActionLogs'     AS TableName, COUNT(*) AS RowCount FROM [TaskActionLogs]
+SELECT 'TaskActionLogs'     AS TableName, COUNT(*) AS [RowCount] FROM [TaskActionLogs]
 UNION ALL
 SELECT 'IntakeDocuments',                  COUNT(*)            FROM [IntakeDocuments]
 UNION ALL
@@ -210,7 +210,7 @@ ORDER BY TableName;
 PRINT '';
 PRINT '=== MASTER / CONFIG ROW COUNTS (should be unchanged) ===';
 
-SELECT 'Tenants'            AS TableName, COUNT(*) AS RowCount FROM [Tenants]
+SELECT 'Tenants'            AS TableName, COUNT(*) AS [RowCount] FROM [Tenants]
 UNION ALL
 SELECT 'TenantAiSettings',                COUNT(*)             FROM [TenantAiSettings]
 UNION ALL

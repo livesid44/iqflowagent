@@ -6,7 +6,7 @@
 @await Html.PartialAsync("_AppShell", new ViewDataDictionary(ViewData) { { "ActivePage", "tenantaisettings" } })
 <main class="app-main">
     <div class="page-title">AI &amp; Storage Settings</div>
-    <div class="page-subtitle">Configure Azure OpenAI, Blob Storage and Speech-to-Text for <strong>@tenant?.Name</strong></div>
+    <div class="page-subtitle">Configure Azure OpenAI, Blob Storage, Speech-to-Text, Document Intelligence, AI Search and Embeddings for <strong>@tenant?.Name</strong></div>
     @if (TempData["Success"] != null) { <div class="alert-success-bar" id="save-success">@TempData["Success"]</div> }
     <div class="alert-error-bar" id="save-error" style="display:none"></div>
     <div class="alert-success-bar" id="save-ok" style="display:none"></div>
@@ -17,8 +17,26 @@
         <input type="hidden" asp-for="TenantId" />
 
         <div class="data-card" style="margin-bottom:24px;">
-            <div class="card-header">Azure OpenAI Settings</div>
+            <div class="card-header">
+                Azure OpenAI Settings
+                <button type="button" class="btn-test-inline" onclick="testService('TestConnection','openai-test-result')">Test Connection</button>
+            </div>
             <div class="card-body">
+                <div id="openai-test-result" class="inline-test-result" style="display:none;"></div>
+                <div class="info-box" style="margin-bottom:18px;">
+                    <strong>Recommended models for BARTOK SOP analysis:</strong>
+                    <ul style="margin:8px 0 0 0;padding-left:20px;line-height:1.7;">
+                        <li><strong>gpt-4o</strong> — <em>Best choice.</em> 128k-token context window handles large uploaded documents (Word, Excel, PDF) in a single pass. Excellent structured-output quality for RACI, SOP and escalation tables.</li>
+                        <li><strong>gpt-4o-mini</strong> — Faster and lower cost; suitable for smaller documents or high-volume intake processing where budget matters.</li>
+                        <li><strong>o3-mini</strong> — Strong multi-step reasoning; useful when analysis involves complex regulatory or compliance logic. Slower than gpt-4o.</li>
+                    </ul>
+                    <div style="margin-top:8px;font-size:12px;color:#666;">
+                        The <strong>Deployment Name</strong> must exactly match the deployment you created in
+                        <a href="https://ai.azure.com" target="_blank" rel="noopener">Azure AI Foundry</a>.
+                        The <strong>Model Version</strong> dropdown updates the <code>model</code> field sent in every API request
+                        and should match your deployment's underlying model.
+                    </div>
+                </div>
                 <div class="form-grid-2">
                     <div class="full-width">
                         <label class="form-label">Endpoint URL</label>
@@ -30,13 +48,15 @@
                     </div>
                     <div>
                         <label class="form-label">Deployment Name</label>
-                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="gpt-4o or gpt-5.2" id="deploymentNameInput" />
+                        <input asp-for="AzureOpenAIDeploymentName" class="form-input" placeholder="e.g. gpt-4o" id="deploymentNameInput" />
                     </div>
                     <div>
                         <label class="form-label">Model Version</label>
                         <select asp-for="AzureOpenAIModelVersion" class="form-input" id="modelVersionSelect" onchange="onModelVersionChange(this.value)">
-                            <option value="gpt-5.2">GPT-5.2 (Recommended — higher quality)</option>
-                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4o">gpt-4o ⭐ Recommended — best quality &amp; context window</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini — faster &amp; lower cost</option>
+                            <option value="o3-mini">o3-mini — advanced reasoning</option>
+                            <option value="gpt-5.2">gpt-5.2 — custom / future deployment</option>
                         </select>
                         <div style="font-size:11px;color:#888;margin-top:4px;">
                             Changing this will also update the Deployment Name field to match the selected model.
@@ -55,8 +75,12 @@
         </div>
 
         <div class="data-card" style="margin-bottom:24px;">
-            <div class="card-header">Azure Blob Storage Settings</div>
+            <div class="card-header">
+                Azure Blob Storage Settings
+                <button type="button" class="btn-test-inline" onclick="testService('TestBlobConnection','blob-test-result')">Test Connection</button>
+            </div>
             <div class="card-body">
+                <div id="blob-test-result" class="inline-test-result" style="display:none;"></div>
                 <div class="form-grid-2">
                     <div class="full-width">
                         <label class="form-label">Connection String</label>
@@ -74,8 +98,10 @@
             <div class="card-header">
                 Azure Speech-to-Text Settings
                 <span style="font-size:12px;font-weight:400;color:#888;margin-left:8px;">Required for audio/video transcription (Teams recordings, MP4, WAV, MP3)</span>
+                <button type="button" class="btn-test-inline" onclick="testService('TestSpeechConnection','speech-test-result')">Test Connection</button>
             </div>
             <div class="card-body">
+                <div id="speech-test-result" class="inline-test-result" style="display:none;"></div>
                 <div class="form-grid-2">
                     <div>
                         <label class="form-label">Speech Region</label>
@@ -95,19 +121,107 @@
             </div>
         </div>
 
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">
+                Azure Document Intelligence Settings
+                <span style="font-size:12px;font-weight:400;color:#888;margin-left:8px;">Required for PDF, image, and PPTX text extraction</span>
+                <button type="button" class="btn-test-inline" onclick="testService('TestDocIntelConnection','docintel-test-result')">Test Connection</button>
+            </div>
+            <div class="card-body">
+                <div id="docintel-test-result" class="inline-test-result" style="display:none;"></div>
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Endpoint URL</label>
+                        <input asp-for="AzureDocumentIntelligenceEndpoint" class="form-input" placeholder="https://your-di-resource.cognitiveservices.azure.com/" />
+                    </div>
+                    <div>
+                        <label class="form-label">API Key</label>
+                        <input asp-for="AzureDocumentIntelligenceApiKey" class="form-input" type="password" placeholder="Your Document Intelligence API key" autocomplete="off" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>Required for PDF, image, and PPTX text extraction.</strong> Go to <em>Azure Portal &rarr; Document Intelligence resource &rarr; Keys and Endpoint</em> to get your credentials. When configured, the RAG pipeline will extract text from all uploaded document formats including PDFs and scanned images, enabling full BARTOK section analysis.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="data-card" style="margin-bottom:24px;">
+            <div class="card-header">
+                Azure AI Search &amp; Embeddings Settings
+                <button type="button" class="btn-test-inline" onclick="testService('TestSearchConnection','search-test-result')">Test Search</button>
+                <button type="button" class="btn-test-inline" onclick="testService('TestEmbeddingsConnection','embeddings-test-result')" style="margin-left:4px;">Test Embeddings</button>
+            </div>
+            <div class="card-body">
+                <div id="search-test-result" class="inline-test-result" style="display:none;"></div>
+                <div id="embeddings-test-result" class="inline-test-result" style="display:none;"></div>
+                <div style="font-weight:600;margin-bottom:12px;color:#374151;">AI Search</div>
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Search Endpoint URL</label>
+                        <input asp-for="AzureSearchEndpoint" class="form-input" placeholder="https://your-search.search.windows.net" />
+                    </div>
+                    <div>
+                        <label class="form-label">Search API Key</label>
+                        <input asp-for="AzureSearchApiKey" class="form-input" type="password" placeholder="Your Azure AI Search API key" autocomplete="off" />
+                    </div>
+                    <div>
+                        <label class="form-label">Index Name</label>
+                        <input asp-for="AzureSearchIndexName" class="form-input" placeholder="iqflow-rag-chunks" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>Used for semantic chunk retrieval.</strong> Create an Azure AI Search resource (Basic tier or above) in the Azure Portal. The index will be auto-created on first use. Hybrid search (vector + keyword) is used to find the most relevant document sections for each BARTOK SOP section.
+                        </div>
+                    </div>
+                </div>
+                <div style="font-weight:600;margin-top:20px;margin-bottom:12px;color:#374151;">Embeddings</div>
+                <div class="form-grid-2">
+                    <div>
+                        <label class="form-label">Embedding Deployment Name</label>
+                        <input asp-for="AzureOpenAIEmbeddingDeployment" class="form-input" placeholder="text-embedding-3-small" />
+                    </div>
+                    <div class="full-width">
+                        <div class="info-box">
+                            <strong>Deploy text-embedding-3-small in Azure AI Foundry</strong> and enter the deployment name here. This generates 1536-dimension vectors for semantic search. If not configured, the system falls back to keyword-based chunk retrieval.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         @if (Model.UpdatedAt != default) {
             <p style="color:#888;font-size:12px;margin-bottom:16px;">Last updated: @Model.UpdatedAt.ToString("dd MMM yyyy HH:mm") by @Model.UpdatedByUserId</p>
         }
 
         <button type="submit" class="btn-primary" id="save-btn">Save Settings</button>
-        &nbsp;<button type="button" class="btn-secondary" id="test-btn" onclick="testConnection()">Test Connection</button>
         &nbsp;<a href="/TenantAiSettings/Diagnose" target="_blank" class="btn-secondary" style="font-size:12px;">Run Diagnostics</a>
     </form>
 
-    <div id="test-result" style="display:none;margin-top:16px;padding:14px 18px;border-radius:8px;font-size:.87rem;"></div>
 </main>
 </div>
 </div>
+<style>
+.btn-test-inline {
+    float: right;
+    padding: 3px 10px;
+    font-size: 12px;
+    border: 1px solid #6b7280;
+    border-radius: 5px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+    margin-left: 6px;
+}
+.btn-test-inline:disabled { opacity:.5; cursor:default; }
+.inline-test-result {
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: .85rem;
+    margin-bottom: 14px;
+}
+</style>
 <script>
 function onModelVersionChange(version) {
     const depInput = document.getElementById('deploymentNameInput');
@@ -116,55 +230,54 @@ function onModelVersionChange(version) {
     }
 }
 
-async function testConnection() {
-    const btn    = document.getElementById('test-btn');
-    const result = document.getElementById('test-result');
-    btn.disabled = true;
-    btn.textContent = 'Testing…';
-    result.style.display = 'none';
+// Generic per-service test helper
+async function testService(action, resultId) {
+    const resultEl = document.getElementById(resultId);
+    // Find the button that triggered the call by looking for the onclick attribute
+    const btn = document.querySelector(`button[onclick*="${action}"]`);
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+    if (resultEl) resultEl.style.display = 'none';
+
     try {
-        const form = document.getElementById('ai-settings-form');
+        const form  = document.getElementById('ai-settings-form');
         const token = form.querySelector('input[name="__RequestVerificationToken"]').value;
-        const resp = await fetch('/TenantAiSettings/TestConnection', {
+        const resp  = await fetch('/TenantAiSettings/' + action, {
             method: 'POST',
             headers: {
-                'X-Requested-With': 'XMLHttpRequest',
-                'RequestVerificationToken': token,
-                'Content-Type': 'application/x-www-form-urlencoded'
+                'X-Requested-With'         : 'XMLHttpRequest',
+                'RequestVerificationToken' : token,
+                'Content-Type'             : 'application/x-www-form-urlencoded'
             },
             body: '__RequestVerificationToken=' + encodeURIComponent(token)
         });
         const data = await resp.json();
-        result.style.display = 'block';
-        if (data.success) {
-            result.style.background = '#d1fae5';
-            result.style.color = '#065f46';
-            result.style.border = '1px solid #6ee7b7';
-            const strong = document.createElement('strong');
-            strong.textContent = '✓ Connection successful';
-            result.innerHTML = '';
-            result.appendChild(strong);
-            result.appendChild(document.createTextNode(' — ' + (data.message || '')));
-        } else {
-            result.style.background = '#fde8ec';
-            result.style.color = '#c01530';
-            result.style.border = '1px solid #fca5a5';
-            const strong = document.createElement('strong');
-            strong.textContent = '✗ Connection failed';
-            result.innerHTML = '';
-            result.appendChild(strong);
-            result.appendChild(document.createTextNode(' — ' + (data.message || 'Unknown error')));
+        if (resultEl) {
+            resultEl.style.display = 'block';
+            if (data.success) {
+                resultEl.style.cssText = 'display:block;background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;padding:10px 14px;border-radius:6px;font-size:.85rem;margin-bottom:14px;';
+                resultEl.innerHTML = '<strong>✓ Connected</strong> — ' + (data.message || '');
+            } else {
+                resultEl.style.cssText = 'display:block;background:#fde8ec;color:#c01530;border:1px solid #fca5a5;padding:10px 14px;border-radius:6px;font-size:.85rem;margin-bottom:14px;';
+                resultEl.innerHTML = '<strong>✗ Failed</strong> — ' + (data.message || 'Unknown error');
+            }
         }
     } catch (ex) {
-        result.style.display = 'block';
-        result.style.background = '#fde8ec';
-        result.style.color = '#c01530';
-        result.style.border = '1px solid #fca5a5';
-        result.innerHTML = '<strong>Network error:</strong> ' + ex.message;
+        if (resultEl) {
+            resultEl.style.cssText = 'display:block;background:#fde8ec;color:#c01530;border:1px solid #fca5a5;padding:10px 14px;border-radius:6px;font-size:.85rem;margin-bottom:14px;';
+            resultEl.innerHTML = '<strong>Network error:</strong> ' + ex.message;
+        }
     }
-    btn.disabled = false;
-    btn.textContent = 'Test Connection';
+
+    if (btn) {
+        btn.disabled = false;
+        // Restore original label based on action
+        btn.textContent = action.startsWith('TestSearch') ? 'Test Search'
+            : action.startsWith('TestEmbeddings') ? 'Test Embeddings'
+            : 'Test Connection';
+    }
 }
+
 async function saveSettings(e) {
     e.preventDefault();
     const btn = document.getElementById('save-btn');

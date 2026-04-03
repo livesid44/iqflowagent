@@ -146,6 +146,56 @@ public class BlobStorageService : IBlobStorageService
         }
     }
 
+    public async Task<byte[]?> DownloadBytesAsync(string blobUrl)
+    {
+        var tenantId      = _tenantContext.GetCurrentTenantId();
+        var correlationId = Guid.NewGuid().ToString("N")[..12];
+        var sw            = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var (conn, containerName) = await GetStorageConfigAsync();
+            var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
+            var credentialedClient = new BlobClient(conn!, containerName, blobName);
+
+            var response = await credentialedClient.DownloadContentAsync();
+            sw.Stop();
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDownloadBytes",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : 200,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Success");
+
+            return response.Value.Content.ToArray();
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogWarning(ex, "Could not download binary content from blob {BlobUrl}", blobUrl);
+
+            await _auditLog.LogExternalCallAsync(
+                correlationId  : correlationId,
+                callSite       : "BlobDownloadBytes",
+                eventType      : "BlobStorage",
+                tenantId       : tenantId,
+                intakeRecordId : null,
+                requestUrl     : blobUrl,
+                httpStatusCode : null,
+                durationMs     : sw.ElapsedMilliseconds,
+                isMocked       : false,
+                outcome        : "Error",
+                errorMessage   : ex.Message);
+
+            return null;
+        }
+    }
+
     public async Task DeleteAsync(string blobUrl)
     {
         var correlationId = Guid.NewGuid().ToString("N")[..12];
@@ -249,6 +299,13 @@ public class BlobStorageService : IBlobStorageService
         }
     }
 
+    public Task<string> UploadToFolderAsync(Stream content, string folderPath, string fileName, string contentType)
+    {
+        // Combine folder path and file name: {folderPath}/{fileName}
+        var blobName = $"{folderPath.TrimEnd('/')}/{fileName}";
+        return UploadAsync(content, blobName, contentType);
+    }
+
     // -------------------------------------------------------------------------
 
     private async Task<BlobContainerClient> GetContainerClientAsync()
@@ -274,5 +331,47 @@ public class BlobStorageService : IBlobStorageService
         var conn = _config["AzureStorage:ConnectionString"];
         var container = _config["AzureStorage:ContainerName"] ?? "intakes";
         return (conn, container);
+    }
+
+    public async Task<(bool success, int statusCode, string message)> TestConnectionAsync()
+    {
+        var (conn, containerName) = await GetStorageConfigAsync();
+
+        if (string.IsNullOrWhiteSpace(conn)
+            || conn.Equals(PlaceholderConnection, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, 0, "Azure Blob Storage is not configured. Please provide a Connection String.");
+        }
+
+        try
+        {
+            var serviceClient = new BlobServiceClient(conn);
+            var containerClient = serviceClient.GetBlobContainerClient(containerName);
+            // GetProperties validates auth without listing blobs
+            await containerClient.GetPropertiesAsync();
+            return (true, 200, $"Connected successfully to Azure Blob Storage container '{containerName}'.");
+        }
+        catch (Azure.RequestFailedException ex)
+        {
+            var code = ex.Status;
+            if (code == 404)
+            {
+                // Container doesn't exist yet but credentials are valid
+                return (true, 200,
+                    $"Authentication successful. Container '{containerName}' does not exist yet — it will be created on first use.");
+            }
+            var hint = code switch
+            {
+                403 => " Check that the connection string has the correct permissions.",
+                401 => " The connection string or account key appears to be invalid.",
+                _   => string.Empty
+            };
+            return (false, code, $"Azure Storage error ({ex.ErrorCode}): {ex.Message}.{hint}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Blob Storage connection test failed");
+            return (false, 0, $"Connection failed: {ex.Message}");
+        }
     }
 }

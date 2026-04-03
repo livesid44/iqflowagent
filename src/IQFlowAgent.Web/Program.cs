@@ -3,6 +3,7 @@ using IQFlowAgent.Web.Data;
 using IQFlowAgent.Web.Hubs;
 using IQFlowAgent.Web.Models;
 using IQFlowAgent.Web.Services;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -70,6 +71,9 @@ builder.Services.AddScoped<IDocxReportService, DocxReportService>();
 builder.Services.AddScoped<IAzureSpeechService, AzureSpeechService>();
 builder.Services.AddScoped<IPiiScanService, PiiScanService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+builder.Services.AddScoped<IDocumentIntelligenceService, DocumentIntelligenceService>();
+builder.Services.AddScoped<IAzureEmbeddingService, AzureEmbeddingService>();
+builder.Services.AddScoped<IAzureSearchService, AzureSearchService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 
@@ -99,6 +103,25 @@ builder.Services.AddSession(options =>
 });
 
 builder.Services.AddControllersWithViews();
+
+// ── Data Protection ──────────────────────────────────────────────────────────
+// Persist keys to a stable directory so antiforgery tokens (used by every form,
+// including the login form) survive app-pool recycles and redeployments.
+// Without this, out-of-process IIS hosting generates fresh in-memory keys on
+// every Kestrel restart; any token issued before the restart cannot be decrypted
+// and throws AntiforgeryValidationException → the generic "Something went wrong"
+// error page on login.  The App_Data/DataProtection-Keys directory is created
+// automatically below alongside the SQLite directory creation.
+//
+// Security note: ensure the App_Data/DataProtection-Keys directory on the IIS
+// server is readable/writable only by the app-pool identity (e.g. IIS APPPOOL\<name>).
+// The directory is created with default OS ACLs here; tighten via IIS Manager or
+// a deployment script in production to prevent other local users from reading the keys.
+var dpKeysPath = Path.Combine(builder.Environment.ContentRootPath, "App_Data", "DataProtection-Keys");
+Directory.CreateDirectory(dpKeysPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath))
+    .SetApplicationName("IQFlowAgent");
 
 // Allow file uploads up to 250 MB (intake documents, audio/video recordings).
 // Must be set on both Kestrel and the MVC form-options layer.
@@ -149,7 +172,30 @@ catch (Exception ex)
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Home/Error");
+    // Custom exception handler: redirect antiforgery failures back to the login
+    // page (with ?expired=1) so users get a clear "session expired" message
+    // instead of the generic error page.  All other exceptions fall through to
+    // the standard /Home/Error handler.
+    app.UseExceptionHandler(errorApp =>
+    {
+        errorApp.Run(async context =>
+        {
+            var ex = context.Features
+                .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+
+            if (ex is Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException)
+            {
+                // Stale / invalid antiforgery token — most commonly triggered when
+                // the app was restarted or redeployed while the login page was open.
+                // Redirect to login so a fresh token is issued.
+                context.Response.Redirect("/Account/Login?expired=1");
+                return;
+            }
+
+            // For everything else, delegate to the standard MVC error page.
+            context.Response.Redirect("/Home/Error");
+        });
+    });
     app.UseHsts();
 }
 

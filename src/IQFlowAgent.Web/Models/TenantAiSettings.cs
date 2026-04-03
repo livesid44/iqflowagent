@@ -13,8 +13,8 @@ public class TenantAiSettings
     public string AzureOpenAIDeploymentName { get; set; } = string.Empty;
     public string AzureOpenAIApiVersion { get; set; } = "2025-01-01-preview";
     public int AzureOpenAIMaxTokens { get; set; } = 2000;
-    /// <summary>Active model version used in API calls: "gpt-4o" or "gpt-5.2".</summary>
-    public string AzureOpenAIModelVersion { get; set; } = "gpt-5.2";
+    /// <summary>Active model version used in API calls: "gpt-4o", "gpt-4o-mini", "o3-mini", etc.</summary>
+    public string AzureOpenAIModelVersion { get; set; } = "gpt-4o";
     public string AzureStorageConnectionString { get; set; } = string.Empty;
     public string AzureStorageContainerName { get; set; } = "intakes";
 
@@ -27,6 +27,18 @@ public class TenantAiSettings
     /// using the LotCountryMapping table.  When false, the full global list is shown.
     /// </summary>
     public bool UseCountryFilterByLot { get; set; } = false;
+
+    // Azure Document Intelligence (OCR for PDF, images, PPTX)
+    public string AzureDocumentIntelligenceEndpoint { get; set; } = string.Empty;
+    public string AzureDocumentIntelligenceApiKey { get; set; } = string.Empty;
+
+    // Azure OpenAI Embeddings
+    public string AzureOpenAIEmbeddingDeployment { get; set; } = "text-embedding-3-small";
+
+    // Azure AI Search
+    public string AzureSearchEndpoint { get; set; } = string.Empty;
+    public string AzureSearchApiKey { get; set; } = string.Empty;
+    public string AzureSearchIndexName { get; set; } = "iqflow-rag-chunks";
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public string? UpdatedByUserId { get; set; }

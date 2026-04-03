@@ -20,6 +20,8 @@
     .report-card-val { font-weight: 600; color: #1a1a2e; }
     .btn-download { background: linear-gradient(90deg,#10b981,#059669); color: #fff; padding: 14px 32px; border-radius: 10px; border: none; font-weight: 700; font-size: 1rem; text-decoration: none; display: inline-block; margin-bottom: 12px; }
     .btn-intakes  { background: #f3f4f6; color: #374151; padding: 12px 24px; border-radius: 10px; border: 1px solid #e5e7eb; font-weight: 600; font-size: 0.9rem; text-decoration: none; display: inline-block; }
+    .btn-regen    { background: #eff6ff; color: #1d4ed8; padding: 12px 24px; border-radius: 10px; border: 1px solid #bfdbfe; font-weight: 600; font-size: 0.9rem; cursor: pointer; display: inline-block; }
+    .btn-regen:hover { background: #dbeafe; }
     .closed-badge { display: inline-block; background: #d1fae5; color: #065f46; padding: 4px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; margin-top: 8px; }
 </style>
 
@@ -63,6 +65,16 @@
         <a href="/Report/Download?intakeId=@intake.Id" class="btn-download">⬇️ Download Report (Word)</a>
     }
     <br/>
+    @if (intake != null)
+    {
+        <form method="post" action="/Report/RegenerateReport" style="display:inline;"
+              onsubmit="return confirm('Regenerate the report from current field values? A new Word document will be created.');">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="intakeId" value="@intake.Id" />
+            <button type="submit" class="btn-regen">🔄 Regenerate Report</button>
+        </form>
+        <span style="display:inline-block;width:8px;"></span>
+    }
     <a href="/Intake/Index" class="btn-intakes">← Back to Intakes</a>
 </div>
 </main>
