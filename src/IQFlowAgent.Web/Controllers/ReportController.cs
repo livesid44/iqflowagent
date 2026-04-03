@@ -20,7 +20,7 @@ public class ReportController : Controller
     private readonly IWebHostEnvironment _env;
     private readonly ITenantContextService _tenantContext;
 
-    private const string TemplateName = "BARTOK_S8_SOP_Template_v2.docx";
+    private const string TemplateName = "BARTOK_DD_Template.docx";
     private const int MaxArtifactCharsPerFile = 8_000;  // per-file cap when aggregating task artifacts
 
     private static string GenerateTaskId() =>
@@ -735,75 +735,45 @@ public class ReportController : Controller
             sectionsAnalyzed++;
         }
 
-        // ── Dedicated RACI matrix generation (post-section-loop) ────────────────
-        // After all sections are analyzed, generate raci_content using a focused
-        // GenerateSingleFieldAsync call with document text + any already-filled sibling fields.
-        // Runs unconditionally so that RACI is always generated (not gated on sibling fields
-        // already being present, which skipped it on first analysis).
+        // ── Dedicated per-section generation (post-section-loop) ────────────────
+        // Each key section (RACI, SOP, Volumetrics, Work Instructions, Escalation,
+        // Exception Handling, SLAs, Performance, Training, Process Flow) gets a
+        // dedicated GenerateSingleFieldAsync call. The field label (which mirrors the
+        // template's [..] instruction) drives the prompt so the LLM knows exactly what
+        // format and content is required for that section.
+        var dedicatedSections = new[]
         {
-            var raciSiblings = existingStatuses
-                .Where(s => s.FieldKey != "raci_content"
-                         && s.FieldKey.StartsWith("raci_", StringComparison.OrdinalIgnoreCase)
-                         && !string.IsNullOrWhiteSpace(s.FillValue))
-                .OrderBy(s => s.FieldKey)
-                .ToList();
+            ("raci_content",  "RACI Assignments"),
+            ("sop_content",   "SOP Steps"),
+            ("wi_content",    "Work Instructions"),
+            ("esc_content",   "Escalation Matrix"),
+            ("exc_content",   "Exception Handling"),
+            ("sla_content",   "Service Level Agreements"),
+            ("perf_content",  "Actual vs Target Performance"),
+            ("vol_content",   "Monthly Volume Data"),
+            ("reg_content",   "Regulatory Mapping"),
+            ("train_content", "Training Materials"),
+            ("occ_content",   "OCC Obligations"),
+            ("flow_content",  "Process Flow Description"),
+        };
 
-            // Combine: document content (primary) + sibling role/task context (if available)
-            var raciCtx = raciSiblings.Count > 0 ? BuildRaciContext(raciSiblings) : null;
-            var raciDocContext = string.Join("\n\n",
-                new[] { allTaskArtifactText, globalDocText, raciCtx }
-                .Where(t => !string.IsNullOrWhiteSpace(t)));
+        var combinedDocContext = string.Join("\n\n",
+            new[] { allTaskArtifactText, globalDocText }
+            .Where(t => !string.IsNullOrWhiteSpace(t)));
+        var combinedDocContextOrNull = string.IsNullOrWhiteSpace(combinedDocContext)
+            ? null : combinedDocContext;
 
-            var raciGenerated = await _aiService.GenerateSingleFieldAsync(
-                intake, "raci_content", "RACI Assignments (LLM Response)",
-                null, intake.AnalysisResult,
-                string.IsNullOrWhiteSpace(raciDocContext) ? null : raciDocContext);
-            if (!string.IsNullOrWhiteSpace(raciGenerated))
-            {
-                aiValues["raci_content"] = raciGenerated;
-                _logger.LogInformation(
-                    "Dedicated RACI generation completed for intake {IntakeId} using {Count} sibling fields.",
-                    intake.IntakeId, raciSiblings.Count);
-            }
-        }
-
-        // ── Dedicated SOP generation (post-section-loop) ─────────────────────────
-        // GenerateSingleFieldAsync has an explicit "Step N: … Role: … Automation: …"
-        // format prompt that the general AnalyzeSectionFieldsAsync lacks. Run a
-        // targeted pass so the SOP content is always in the parseable structured format.
+        foreach (var (fieldKey, fieldLabel) in dedicatedSections)
         {
-            var combinedArtifact = string.Join("\n\n", new[] { allTaskArtifactText, globalDocText }
-                .Where(t => !string.IsNullOrWhiteSpace(t)));
-            var sopGenerated = await _aiService.GenerateSingleFieldAsync(
-                intake, "sop_content", "SOP Steps (LLM Response)",
-                null, intake.AnalysisResult,
-                string.IsNullOrWhiteSpace(combinedArtifact) ? null : combinedArtifact);
-            if (!string.IsNullOrWhiteSpace(sopGenerated))
+            var generated = await _aiService.GenerateSingleFieldAsync(
+                intake, fieldKey, fieldLabel,
+                null, intake.AnalysisResult, combinedDocContextOrNull);
+            if (!string.IsNullOrWhiteSpace(generated))
             {
-                aiValues["sop_content"] = sopGenerated;
+                aiValues[fieldKey] = generated;
                 _logger.LogInformation(
-                    "Dedicated SOP generation completed for intake {IntakeId}.", intake.IntakeId);
-            }
-        }
-
-        // ── Dedicated Volumetrics generation (post-section-loop) ─────────────────
-        // GenerateSingleFieldAsync has an explicit month-by-month tabular format prompt.
-        // Run a targeted pass so vol_content is always structured for the Volumetrics table.
-        // Include both task artifacts AND global intake documents so that volume data
-        // uploaded directly on the intake (not via tasks) is always considered.
-        {
-            var volDocContext = string.Join("\n\n",
-                new[] { allTaskArtifactText, globalDocText }
-                .Where(t => !string.IsNullOrWhiteSpace(t)));
-            var volGenerated = await _aiService.GenerateSingleFieldAsync(
-                intake, "vol_content", "Monthly Volume Data (LLM Response)",
-                null, intake.AnalysisResult,
-                string.IsNullOrWhiteSpace(volDocContext) ? null : volDocContext);
-            if (!string.IsNullOrWhiteSpace(volGenerated))
-            {
-                aiValues["vol_content"] = volGenerated;
-                _logger.LogInformation(
-                    "Dedicated Volumetrics generation completed for intake {IntakeId}.", intake.IntakeId);
+                    "Dedicated section generation completed: '{FieldKey}' for intake {IntakeId}.",
+                    fieldKey, intake.IntakeId);
             }
         }
 

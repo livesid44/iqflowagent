@@ -1156,7 +1156,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                 "workInstructions" =>
                     Placeholder(label, extra: $"Document step-by-step system navigation, field entries, decision rules, and validation checks for each step of {procName}. Request existing SOPs or runbooks from {owner}."),
 
-                // ── New S8 SOP template keys ─────────────────────────────────
+                // ── New BARTOK DD template keys ──────────────────────────────────
                 "approver" =>
                     string.IsNullOrWhiteSpace(owner)
                         ? Placeholder(label, extra: "Provide approver name and email.")
@@ -1168,180 +1168,105 @@ public class AzureOpenAiService : IAzureOpenAiService
                      $"{desc} The process handles approximately {vol} transactions per day under the oversight of {owner}.",
                      "Synthesised from intake metadata."),
 
-                "monthlyVolumes" =>
-                    ("Available",
-                     vol > 0
-                         ? $"Volume data to be confirmed with process owner — upload Excel/volume file and regenerate.\n" +
-                           $"(Estimated baseline from intake: ~{vol * 22} transactions/month at {vol}/day.)"
-                         : "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate.",
-                     "Prompt — upload volume Excel against this task and use AI Generate to extract month-by-month bullet pointers."),
-
-                "hoursWeekday" =>
-                    tz?.Contains("IST", StringComparison.OrdinalIgnoreCase) == true
-                        ? ("Available", "09:00–18:00 IST", "Inferred from IST time zone.")
-                        : tz?.Contains("GMT", StringComparison.OrdinalIgnoreCase) == true
-                            ? ("Available", "09:00–17:30 GMT", "Inferred from GMT time zone.")
-                            : ("Available", "09:00–18:00 local time", "Inferred from intake time zone."),
-
-                "hoursWeekend" =>
-                    ("Available", "Not Operational", "Standard business hours assumption — confirm with process owner."),
-
-                "hoursHoliday" =>
-                    ("Available", "On-call cover only — escalate to manager", "Standard holiday cover assumption — confirm with process owner."),
-
                 "raciContent" =>
                     ("Available",
-                     $"Task: Receive and log incoming {procName} request\n" +
-                     $"  Responsible (R): {bu} Analyst\n" +
-                     $"  Accountable (A): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}\n" +
-                     $"  Consulted (C): {bu} Team Lead\n" +
-                     $"  Informed (I): Service Delivery Manager\n" +
-                     $"\n" +
-                     $"Task: Process and validate {procName} transaction\n" +
-                     $"  Responsible (R): {bu} Analyst\n" +
-                     $"  Accountable (A): {bu} Team Lead\n" +
-                     $"  Consulted (C): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}\n" +
-                     $"  Informed (I): Service Delivery Manager\n" +
-                     $"\n" +
-                     $"Task: Approve or escalate {procName} outcome\n" +
-                     $"  Responsible (R): {bu} Team Lead\n" +
-                     $"  Accountable (A): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}\n" +
-                     $"  Consulted (C): Service Delivery Manager\n" +
-                     $"  Informed (I): {bu} Analyst\n" +
-                     $"\n" +
-                     $"Task: Close and report {procName} completion\n" +
-                     $"  Responsible (R): {bu} Analyst\n" +
-                     $"  Accountable (A): {bu} Team Lead\n" +
-                     $"  Consulted (C): Service Delivery Manager\n" +
-                     $"  Informed (I): {(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}",
+                     $"TASKS: Receive Request ; Process Transaction ; Quality Check ; Close & Report\n" +
+                     $"{bu} Analyst: R | R | - | R\n" +
+                     $"{bu} Team Lead: A | A | R | A\n" +
+                     $"Service Delivery Manager: - | C | A | I\n" +
+                     $"{(string.IsNullOrWhiteSpace(owner) ? "Process Manager" : owner)}: I | I | C | -",
                      "Synthesised from intake metadata — regenerate with AI after uploading intake documents."),
 
                 "sopContent" =>
                     ("Available",
                      $"Step 1: Receive and log the incoming {procName} request\n" +
-                     $"  Role: {bu} Analyst | System: Ticketing system | Output: Logged request ticket\n" +
-                     $"  Automation: Manual | Rating: Low | Type: N/A\n" +
-                     $"\n" +
+                     $"Role: {bu} Analyst | System: Ticketing system | Output: Logged request ticket\n" +
+                     $"Automation: Manual | Rating: Low | Type: N/A\n" +
                      $"Step 2: Validate and review request details for completeness\n" +
-                     $"  Role: {bu} Analyst | System: Ticketing system / ERP | Output: Validation checklist completed\n" +
-                     $"  Automation: Manual | Rating: Medium | Type: RPA\n" +
-                     $"\n" +
+                     $"Role: {bu} Analyst | System: Ticketing system / ERP | Output: Validation checklist completed\n" +
+                     $"Automation: Manual | Rating: Medium | Type: RPA\n" +
                      $"Step 3: Process {procName} transaction per standard procedure\n" +
-                     $"  Role: {bu} Analyst | System: ERP / {(string.IsNullOrWhiteSpace(intake.SiteLocation) ? "Core system" : intake.SiteLocation)} | Output: Processed transaction record\n" +
-                     $"  Automation: {(ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ? "Partially Automated" : "Manual")} | Rating: Medium | Type: {(ptype?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ? "Workflow" : "RPA")}\n" +
-                     $"\n" +
+                     $"Role: {bu} Analyst | System: ERP | Output: Processed transaction record\n" +
+                     $"Automation: Manual | Rating: Medium | Type: N/A\n" +
                      $"Step 4: Quality check — verify output against SLA criteria\n" +
-                     $"  Role: {bu} Team Lead | System: Ticketing system | Output: QC sign-off or escalation raised\n" +
-                     $"  Automation: Manual | Rating: Low | Type: N/A\n" +
-                     $"\n" +
-                     $"Step 5: Close request and notify stakeholders of completion\n" +
-                     $"  Role: {bu} Analyst | System: Ticketing system | Output: Closed ticket with completion notification\n" +
-                     $"  Automation: Manual | Rating: Low | Type: N/A",
+                     $"Role: {bu} Team Lead | System: Ticketing system | Output: QC sign-off or escalation raised\n" +
+                     $"Automation: Manual | Rating: Low | Type: N/A\n" +
+                     $"Step 5: Close request and notify stakeholders\n" +
+                     $"Role: {bu} Analyst | System: Ticketing system | Output: Closed ticket with notification\n" +
+                     $"Automation: Manual | Rating: Low | Type: N/A",
                      "Synthesised from intake metadata — regenerate with AI after uploading intake documents."),
 
-                "wiStepName" =>
-                    ("Available", $"{procName} Processing", "Synthesised from process name."),
-
-                "wiInstruction1a" =>
+                "wiContent" =>
                     ("Available",
-                     $"Log in to the ticketing system and navigate to the {procName} queue. Select the new request and open the intake form.",
-                     "Synthesised from process name."),
+                     $"Step 1: Receive and Log Request\n" +
+                     $"1. Log in to the ticketing system and navigate to the {procName} queue.\n" +
+                     $"2. Select the new request and open the intake form.\n" +
+                     $"3. Validate all mandatory fields. Return to originator with error note if incomplete.\n" +
+                     $"4. Error Handling: If system unavailable, log manually and raise IT incident.\n" +
+                     $"\n" +
+                     $"Step 2: Process Transaction\n" +
+                     $"1. Open the {procName} processing screen.\n" +
+                     $"2. Enter all required data fields. Cross-reference against the source document before saving.\n" +
+                     $"3. Submit for quality review.\n" +
+                     $"4. Error Handling: If validation fails, annotate and return to step 1.",
+                     "Synthesised from intake metadata — regenerate with AI after uploading intake documents."),
 
-                "wiInstruction1b" =>
+                "escalationContent" =>
                     ("Available",
-                     $"Validate all mandatory fields in the request. If any field is blank or incorrect, return the request to the originator with a clear error note.",
-                     "Standard validation instruction."),
+                     $"SLA breach risk: {procName} approaching agreed SLA threshold | " +
+                     $"Notify {bu} Team Lead by email and phone. Raise priority ticket. CC Service Delivery Manager. | " +
+                     $"Within 2 hours of breach detection | Resolve within 4 hours of escalation.",
+                     "Synthesised from intake metadata."),
 
-                "wiErrorInstruction" =>
+                "exceptionContent" =>
                     ("Available",
-                     $"If a system error occurs, take a screenshot and raise an incident ticket immediately. Notify the Team Lead and log the error in the exception register. Do not proceed until the system is confirmed stable.",
-                     "Standard error handling instruction."),
+                     $"Incomplete or invalid input data | Return to originator with guidance. Log in exception register. Re-enter queue once corrected. | Yes — Team Lead approval required.",
+                     "Synthesised from intake metadata."),
 
-                "wiInstruction2a" =>
+                "slaContent" =>
                     ("Available",
-                     $"Open the {procName} processing screen and enter all required data fields. Cross-reference against the source document before saving.",
-                     "Synthesised from process name."),
+                     $"{procName} Processing Time | As per contract | Time from receipt to completion (ticketing system) | {(vol > 100 ? "Daily" : "Weekly")} | Ticketing system / Service management platform",
+                     "Synthesised from intake metadata — confirm SLAs with process owner."),
 
-                "escalationTrigger" =>
-                    ("Available", $"SLA breach risk — {procName} request approaching {(vol > 0 ? (vol / 10) + "-hour" : "agreed")} SLA threshold", "Inferred from process volume."),
-
-                "escalationPath" =>
-                    ("Available", $"Notify {bu} Team Lead via email and phone. Raise priority ticket in the ticketing system. CC Service Delivery Manager.", "Standard escalation path."),
-
-                "escalationTimeframe" =>
-                    ("Available", "Within 2 hours of breach detection", "Standard escalation SLA."),
-
-                "escalationTarget" =>
-                    ("Available", $"Resolve within 4 hours of escalation; confirm outcome with {bu} Team Lead", "Standard resolution target."),
-
-                "exceptionType" =>
-                    ("Available", $"Incomplete or invalid input data for {procName} request", "Most common exception type."),
-
-                "exceptionHandling" =>
-                    ("Available", "Return to originator with clear guidance. Log in exception register. Re-enter queue once corrected.", "Standard exception procedure."),
-
-                "exceptionApproval" =>
-                    ("Available", $"Yes — Team Lead approval required for any exceptions beyond standard handling", "Standard governance control."),
-
-                "slaMetric" =>
-                    ("Available", $"{procName} Processing Time", "Synthesised from process name."),
-
-                "slaMeasurement" =>
-                    ("Available", "Time from receipt of request to confirmed completion, measured in the ticketing system", "Standard SLA measurement."),
-
-                "slaFrequency" =>
-                    ("Available", vol > 100 ? "Daily" : "Weekly", "Inferred from transaction volume."),
-
-                "slaTool" =>
-                    ("Available", "Ticketing system / Service management platform — confirm with process owner", "Standard tooling."),
-
-                "perfMetric" =>
-                    ("Available", $"{procName} SLA Adherence (%)", "Synthesised from process name."),
-
-                "perfActual" =>
-                    ("Available", "Actual performance data to be confirmed with process owner — provide figures for the past 6 months", "Placeholder — confirm actuals."),
+                "perfContent" =>
+                    ("Available",
+                     "Performance data to be confirmed with process owner — provide figures for the past 6 months.",
+                     "Placeholder — confirm actuals with process owner."),
 
                 "volContent" =>
                     ("Available",
                      vol > 0
-                         ? $"Month             | Volume / Transaction Type                          | Notes\n" +
-                           $"Estimated baseline| ~{vol * 22} transactions/month ({vol}/day estimated) | Upload volume Excel and use AI Generate to replace with actual monthly data.\n" +
-                           $"Forecast Avg      | ~{vol * 22} transactions/month                      |"
+                         ? $"Month | Volume / Transaction Type | Notes\n" +
+                           $"Estimated baseline | ~{vol * 22} transactions/month ({vol}/day) | Upload volume Excel and use AI Generate to replace with actual monthly data.\n" +
+                           $"Forecast Avg | ~{vol * 22} transactions/month |"
                          : "Volume data to be confirmed with process owner. Upload an Excel volume file and use AI Generate to extract month-by-month actuals.",
                      "Prompt — upload volume Excel against this task and use AI Generate to get actual monthly data."),
 
-                "regulation" =>
-                    ("Available", "GDPR / Data Protection Act 2018 — applicable to any personal data processed in this workflow", "Standard regulatory framework."),
+                "regulatoryContent" =>
+                    ("Available",
+                     "GDPR / Data Protection Act 2018 | Data minimisation, purpose limitation and accuracy obligations | " +
+                     $"Access controls, data retention policy, and audit logging implemented within {procName} | " +
+                     "DPIA / Access control log / Retention schedule | TechM Data Protection Lead",
+                     "Standard regulatory framework — confirm with compliance team."),
 
-                "regObligation" =>
-                    ("Available", $"Data minimisation, purpose limitation, and accuracy obligations apply to all {procName} records", "Standard GDPR obligation."),
+                "trainingContent" =>
+                    ("Available",
+                     $"{procName} Process Induction and Refresher | On-the-job shadowing + e-learning | All {bu} analysts | 2 weeks | Competency sign-off by Team Lead",
+                     "Synthesised from process name — regenerate with AI after uploading training documents."),
 
-                "regControl" =>
-                    ("Available", $"Access controls, data retention policy, and audit logging implemented within the {procName} workflow", "Standard control description."),
-
-                "regEvidence" =>
-                    ("Available", "Data Protection Impact Assessment (DPIA) / Access control log / Retention schedule", "Standard evidence artefacts."),
-
-                "techMFramework" =>
-                    ("Available", "BARTOK-TCF-v1 (TechM BARTOK Control Framework — available on SharePoint)", "Standard TechM reference."),
-
-                "trainingModule" =>
-                    ("Available", $"{procName} Process Induction and Refresher", "Synthesised from process name."),
-
-                "trainingDelivery" =>
-                    ("Available", "On-the-job shadowing + e-learning module", "Standard TechM delivery method."),
-
-                "trainingVerification" =>
-                    ("Available", "Competency sign-off by Team Lead after 2-week shadowing period", "Standard verification approach."),
-
-                "occRef" =>
+                "occContent" =>
                     Placeholder(label, "the OBI commercial team", "OCC references must be provided by OBI (Orange Business International) before this section can be completed."),
 
-                "occObligation" =>
-                    Placeholder(label, "the OBI commercial team", $"Orange Customer Contract obligations relevant to {procName} to be confirmed with OBI (Orange Business International)."),
-
-                "occControl" =>
-                    ("Available", $"{procName} includes controls aligned to standard TechM service delivery obligations. Specific OCC controls to be mapped once OCC schedules are received from OBI.", "Standard OCC control placeholder."),
+                "processFlow" =>
+                    ("Available",
+                     $"1. Request Receipt: {bu} team receives {procName} request via ticketing system.\n" +
+                     $"2. Initial Validation: Analyst validates completeness; incomplete requests returned to originator.\n" +
+                     $"3. Processing: Analyst processes transaction in ERP/core system per standard procedure.\n" +
+                     $"4. Quality Review: Team Lead reviews output against SLA criteria and approves or escalates.\n" +
+                     $"5. Closure and Notification: Analyst closes the request and notifies stakeholders.\n" +
+                     $"Decision point at step 4: if quality check fails, escalation path triggered.\n" +
+                     $"All steps logged in ticketing system with timestamps for audit trail.",
+                     "Synthesised from intake metadata — regenerate with AI after uploading process documents."),
 
                 _ =>
                     Placeholder(label, extra: $"(Field key: {aiProp})")
@@ -2047,68 +1972,81 @@ public class AzureOpenAiService : IAzureOpenAiService
         var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
 
         const string systemPrompt = """
-            You are a BARTOK / Schedule 8 SOP documentation specialist at TechM.
+            You are a BARTOK / Schedule 8 Due Diligence documentation specialist at TechM.
             IMPORTANT: You MUST base ALL content exclusively on the information provided in this prompt —
             the intake metadata, any prior AI analysis, task artifact text, and the user's context notes.
             Do NOT use any external knowledge from the internet, Wikipedia, or outside sources. Only
             rephrase, elaborate, and structure information that is explicitly present in the provided data.
-            Your task is to generate professional, document-ready content for a single SOP field.
-            Return ONLY the field value as plain text — no JSON, no markdown headers, no extra commentary.
+            Your task is to generate professional, document-ready content for a single section of the
+            BARTOK DD document. Return ONLY the section value as plain text — no JSON, no markdown
+            headers, no extra commentary.
             For simple text fields, keep the value concise and suitable for direct insertion into a document cell.
-            For multi-line structured fields (sopContent, raciContent, volContent, monthlyVolumes) produce
-            the COMPLETE structured output as specified in the field-specific rules below — do NOT truncate.
+            For multi-line structured sections produce the COMPLETE structured output as specified below — do NOT truncate.
             NEVER echo back template placeholder text such as "[Describe action]", "[Role]", "[Process Name]",
-            "[Expected output]" etc. as field values. If a document you receive contains [bracketed instructions],
-            those are template instructions — fill them with actual content from the source documents instead.
+            "[Expected output]", "[From Intake]" etc. as field values. If a document you receive contains
+            [bracketed instructions], those are template instructions — fill them with actual content from
+            the source documents instead.
 
-            Special rules for multi-line block fields (use actual newlines \n in your response):
+            Special rules for structured block sections (use actual newlines in your response):
 
-            raciContent — produce a compact RACI matrix using EXACTLY this structure:
-              Line 1:  TASKS: [short task 1] ; [short task 2] ; [short task 3] ; [short task 4]
-              Line 2+: [Role name]: [a] | [b] | [c] | [d]
-            Where each assignment is R, A, C, I, or a hyphen (-) for no assignment.
-            CRITICAL — TASKS: line separator: use a SEMICOLON (;) between task names, NOT a pipe.
-            Pipe (|) is RESERVED for separating R/A/C/I assignments on each role line.
-            IMPORTANT — source data structure: the source RACI table has column headers that contain
-            long pipe-separated responsibility bullet lists, e.g.:
-              "Compiles & describes change request | Outlines schedule requirements | Indicates priority | ..."
-            These bullet lists describe WHAT the role does for that task — they are NOT the task name.
-            You MUST derive a concise 2–5 word task name from the OVERALL PURPOSE of the column, e.g.:
-              Source column header: "Compiles & describes change request | Outlines schedule requirements | ..."
-              Correct task name: "Submit Change Request"
-            FORBIDDEN on the TASKS: line: copying bullet list content or using pipe characters in task names.
-            Role names: copy the short role title from the source (e.g. "Change Requester").
-            Derive real task names and role titles from the intake data and artifact text.
-            If no RACI source data is available, infer a plausible 4-role × 4-task matrix from
-            the process description and document content.
+            raci_content — RACI Assignments. Produce a compact RACI matrix using EXACTLY this format:
+              TASKS: [short task 1] ; [short task 2] ; [short task 3] ; [short task 4]
+              [Role name]: [a] | [b] | [c] | [d]
+            Where each [a]-[d] is R, A, C, I, or hyphen (-). Use semicolons to separate task names.
+            Derive real task names and role titles from the intake data and document content.
+            If no RACI data is available, infer a plausible 4-role x 4-task matrix from the process.
 
-            sopContent — produce all SOP steps, one step per block:
+            sop_content — SOP Steps. Produce all steps in this format, one block per step:
               Step N: [Action description]
-                Role: [Role] | System: [System] | Output: [Expected output]
-                Automation: [Manual/Partially Automated/Fully Automated] | Rating: [Low/Medium/High/Prime] | Type: [RPA/AI/Workflow/N/A]
-            Extract distinct real steps from the document. Do NOT repeat the same action across steps.
+              Role: [Role] | System: [System] | Output: [Expected output]
+              Automation: [Manual/Partially Automated/Fully Automated] | Rating: [Low/Medium/High/Prime] | Type: [RPA/AI/Workflow/N/A]
+            Extract distinct real steps from the document. Do NOT repeat the same action.
 
-            volContent — produce month-by-month volume data:
-              Month             | Volume / Transaction Type           | Notes
-              Mar-25            | [volume]                            | [notes or "None"]
-              ...
-              Forecast Avg      | [forecast]                          |
-            If volume data is in the artifact text, extract it. Otherwise: "Volume data to be confirmed with process owner."
+            wi_content — Work Instructions. Provide step-by-step instructions for each SOP step.
+            For each step write: step heading, then numbered sub-instructions covering system navigation,
+            field entries, validation checks, and error handling. A new operative must be able to perform
+            the entire process from these instructions alone.
 
-            monthlyVolumes (placed in "Volumes (Monthly)" row of the Process Overview table) —
-            IMPORTANT: This is the primary field users read for volume trend. Use the following approach:
-            "month-by-month volumetric trend — give monthly pointers not table"
-            If the artifact text contains tabular volume data (e.g. spreadsheet columns: Month, Received, Handled),
-            produce exactly ONE bullet point per calendar month in the data:
-              - [MMM-YY]: Received [X] | Handled [Y]  (or "not available" for missing months)
-              - ...
-              - Forecast average: [forecast figure] per month (if forecast row present)
-            Rules for monthlyVolumes:
-            • ONE bullet per month — never aggregate or omit months
-            • Never paste raw table rows or repeat identical figures across months
-            • "not available" entries in source data → preserve as "not available"
-            • If NO volume data exists anywhere in the artifact: write exactly:
-              "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate."
+            esc_content — Escalation Matrix. Format as a structured table-style list:
+              Trigger | Escalation Path | Timeframe | Resolution Target
+            Include all escalation levels described in the source documents.
+
+            exc_content — Exception Handling. Format as a bulleted list:
+              - Exception Type: [type] | Handling: [approach] | Approval: [Yes/No - who approves]
+            Include all exception types described in the source documents.
+
+            sla_content — Service Level Agreements. Format as a structured table-style list:
+              Metric | Target | Measurement Method | Reporting Frequency | Tool
+            Use only SLA/KPI data explicitly stated in the intake or documents.
+            If no SLA data is present: "SLAs to be confirmed with process owner."
+
+            perf_content — Actual vs Target Performance (last 6 months). Format:
+              Metric | Month | Actual | Target | Status (Met/Missed)
+            Use only performance data from the source documents.
+            If no data is present: "Performance data to be confirmed with process owner."
+
+            vol_content — Monthly Volume Data. Produce month-by-month data:
+              Month | Volume / Transaction Type | Notes
+              Mar-25 | [volume] | [notes or "None"]
+              Forecast Avg | [forecast] |
+            If volume data is in the artifact text extract it. Otherwise: "Volume data to be confirmed with process owner."
+
+            reg_content — Regulatory and Compliance Mapping. Format:
+              Regulation / Standard | Obligation | Control in this Process | Evidence Artefact | Owner
+            Use only regulatory references explicitly stated in the source documents.
+            If none stated: "Regulatory mapping to be confirmed with the compliance team."
+
+            train_content — Training Materials. Design training based on all uploaded documents.
+            Format: Module Name | Delivery Method | Target Audience | Duration | Competency Verification
+            Derive real training topics directly from the process documents.
+
+            occ_content — Orange Customer Contract Obligations. Format:
+              OCC Reference | Obligation Description | Policy Control in this Process | Sign-Off Status
+            If OCC data is not available: "OCC references to be provided by OBI before this section can be completed."
+
+            flow_content — Process Flow Description. Describe the end-to-end process as a structured
+            narrative with numbered stages covering all roles, decision points, inputs, and outputs.
+            This text description will be used to support process flow diagram creation.
             """;
 
         var sb = new System.Text.StringBuilder();
@@ -2940,9 +2878,19 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         // ── System prompt ─────────────────────────────────────────────────────
         var fieldKeys = string.Join(", ", sectionFields.Select(f => $"\"{f.Key}\""));
-        bool hasVolumeField = sectionFields.Any(f => f.Key == "po_volumes");
+        bool hasVolumeField = sectionFields.Any(f => f.Key == "vol_content");
         bool hasRaciField   = sectionFields.Any(f => f.Key == "raci_content");
         bool hasSopField    = sectionFields.Any(f => f.Key == "sop_content");
+        // Section-level instruction from the template placeholder (the [..] text)
+        var sectionInstruction = sectionFields.FirstOrDefault(f =>
+            !string.IsNullOrWhiteSpace(f.TemplatePlaceholder))?.TemplatePlaceholder ?? "";
+
+        // When a section has a template instruction (the [..] placeholder text), prepend it
+        // to the system prompt so the LLM knows exactly what the template expects for this section.
+        var sectionInstructionClause = string.IsNullOrWhiteSpace(sectionInstruction)
+            ? ""
+            : $"\nThe template instruction for this section is:\n  \"{sectionInstruction}\"\n" +
+              "Use this instruction to guide the content format and focus for every field in this section.";
 
         var systemPrompt =
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
@@ -3065,7 +3013,8 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  Automation: Manual | Rating: Low | Type: N/A\n\n" +
             "  Step 2: Assess risk and complexity of the requested change\n" +
             "  Role: Change Approver | System: CAB Review Board | Output: Risk assessment record\n" +
-            "  Automation: Manual | Rating: Medium | Type: N/A" : "");
+            "  Automation: Manual | Rating: Medium | Type: N/A" : "")
+            + sectionInstructionClause;
 
         // ── User message ──────────────────────────────────────────────────────
         var sb = new System.Text.StringBuilder();

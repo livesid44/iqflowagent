@@ -17,233 +17,126 @@ public class DocxReportService : IDocxReportService
 
     private static readonly List<FieldDefinition> FieldDefs =
     [
-        // ── Document Control (Table 0 / Table 1) ──────────────────────────────
-        // TemplatePlaceholder must exactly match text inside BARTOK_S8_SOP_Template_v2.docx.
+        // ── Document Control (Table 0) ─────────────────────────────────────────
+        // TemplatePlaceholder must exactly match text inside BARTOK_DD_Template.docx.
+        // Author and Approver share the same placeholder text in the template, so they
+        // are handled via row-label lookup in GenerateReportAsync (empty placeholder here).
         new("dc_process_name",    "Document Control",            "Process Name",
-            "[Process Name]",
+            "[Process Name as per Intake]",
             "ProcessName"),
 
-        new("dc_lot",             "Document Control",            "Lot Number and Name",
-            "[Lot Number and Name]",
-            "SdcLots"),
-
         new("dc_date",            "Document Control",            "Document Date",
-            "[Add date in dd-mmm-yyyy format e.g. 01-May-2026]",
+            "[Intake date]",
             "TODAY"),
 
         new("dc_author",          "Document Control",            "Process Author",
-            "[Process Author Name | Email]",
+            "",                    // duplicate placeholder — updated via row-label lookup
             "ProcessOwnerContact"),
 
         new("dc_approver",        "Document Control",            "Approver",
-            "[Approver Name | Email]",
+            "",                    // duplicate placeholder — updated via row-label lookup
             "AI:approver"),
 
-        // ── 1.2 Scope ─────────────────────────────────────────────────────────
-        new("dc_countries",       "1.2 Scope",                   "Countries in Scope",
-            "[List all countries where this process operates]",
-            "Country"),
+        new("dc_contributors",    "Document Control",            "Contributors",
+            "[Person who has closed the tasks]",
+            ""),
 
-        // ── 1.2 Inputs & Artefacts ────────────────────────────────────────────
-        new("artefact_doc1",      "1.2 Inputs & Artefacts",      "Document / Artefact #1",
-            "Enter document name...",
-            "UploadedFileName"),
+        // ── Version History (Table 1) ──────────────────────────────────────────
+        new("dc_version_date",    "Document Control",            "Version Date",
+            "[Date of This document creation]",
+            "TODAY"),
 
-        // ── 2. Process Overview ────────────────────────────────────────────────
+        // ── 2. Process Overview (Table 3) ─────────────────────────────────────
         new("po_description",     "2. Process Overview",         "Process Description",
-            "Detailed description",
+            "[From Intake]",
             "AI:processDescription"),
 
         new("po_owner",           "2. Process Overview",         "Process Owner",
-            "[Name, Role, OB]",
+            "[From Intake and all document]",
             "ProcessOwnerContact"),
 
-        new("po_volumes",         "2. Process Overview",         "Monthly Volumes",
-            "Enter actual transaction volume for each of the past 12 months:",
-            "AI:monthlyVolumes"),
+        // ── 1.2 Inputs & Artefacts (paragraph) ────────────────────────────────
+        // The LLM / artefact aggregation produces a formatted text list of all
+        // uploaded documents; GenerateReportAsync replaces the paragraph placeholder.
+        new("artefact_content",   "1.2 Artefacts",               "Documents & Artefacts Received",
+            "[All Document uploaded in task or Name of document, date when uploaded in a table]",
+            "UploadedFileName"),
 
-        new("po_peak_volume",     "2. Process Overview",         "Peak Volume",
-            "[Peak volume and period \u2014 e.g. month-end, quarter-end]",
-            "AI:peakVolume"),
-
-        new("po_hours_weekday",   "2. Process Overview",         "Weekday Hours",
-            "[Hours, e.g. 08:00\u201318:00 local time]",
-            "AI:hoursWeekday"),
-
-        new("po_hours_weekend",   "2. Process Overview",         "Weekend Hours",
-            "[Hours \u2014 or \u2014 Not Operational]",
-            "AI:hoursWeekend"),
-
-        new("po_hours_holiday",   "2. Process Overview",         "Public Holiday Cover",
-            "[Cover arrangements]",
-            "AI:hoursHoliday"),
-
-        new("po_systems",         "2. Process Overview",         "Systems Used",
-            "[Primary systems \u2014 ERP, ticketing, reporting tools]",
-            "AI:systemsUsed"),
-
-        // ── 3. RACI ───────────────────────────────────────────────────────────
-        // Single consolidated field — the LLM returns the complete RACI table as
-        // structured text; GenerateReportAsync inserts it into the RACI table via
-        // table-manipulation (data rows cleared, merged-cell LLM block inserted).
-        new("raci_content",       "3. RACI",                     "RACI Assignments (LLM Response)",
-            "",                    // no find-and-replace placeholder; handled via table manipulation
+        // ── 3. RACI (paragraph placeholder) ───────────────────────────────────
+        // The LLM generates the complete RACI block; inserted as formatted paragraph text.
+        new("raci_content",       "3. RACI",                     "RACI Assignments",
+            "[Roles and Responsibilities to be updated in a table here]",
             "AI:raciContent"),
 
-        // ── 4. Standard Operating Procedure ───────────────────────────────────
-        // Single consolidated field — the LLM returns all SOP steps as structured
-        // text; GenerateReportAsync inserts it into the SOP table after clearing
-        // all template data rows (keeping the header + instruction rows).
-        new("sop_content",        "4. SOP",                      "SOP Steps (LLM Response)",
-            "",                    // no find-and-replace placeholder; handled via table manipulation
+        // ── 4. Standard Operating Procedure (paragraph placeholder) ───────────
+        // Note: the template uses a mixed bracket "{Detailed SOP should come here]"
+        // (curly-open, square-close). GenerateReportAsync handles this variant.
+        new("sop_content",        "4. SOP",                      "SOP Steps",
+            "{Detailed SOP should come here]",
             "AI:sopContent"),
 
-        // ── 5. Work Instructions ──────────────────────────────────────────────
-        new("wi_step_name",       "5. Work Instructions",         "Step Name",
-            "[Step Name]",
-            "AI:wiStepName"),
+        // ── 5. Work Instructions (heading placeholder) ─────────────────────────
+        new("wi_content",         "5. Work Instructions",        "Work Instructions",
+            "[Details Work Instructions to come here]",
+            "AI:wiContent"),
 
-        new("wi_instr1a",         "5. Work Instructions",         "Step 1 — Instruction 1",
-            "[Instruction 1 \u2014 system navigation, field entries, validation checks]",
-            "AI:wiInstruction1a"),
+        // ── 6.1 Escalation Matrix (paragraph) ─────────────────────────────────
+        new("esc_content",        "6.1 Escalation",              "Escalation Matrix",
+            "[Escalation matrix should come here]",
+            "AI:escalationContent"),
 
-        new("wi_instr1b",         "5. Work Instructions",         "Step 1 — Instruction 2",
-            "[Instruction 2]",
-            "AI:wiInstruction1b"),
+        // ── 6.2 Exception Handling (paragraph) ────────────────────────────────
+        new("exc_content",        "6.2 Exceptions",              "Exception Handling",
+            "[Exception handling to come here in pointer or table]",
+            "AI:exceptionContent"),
 
-        new("wi_instr1c",         "5. Work Instructions",         "Step 1 — Error Handling",
-            "[Instruction 3 \u2014 what to do if an error occurs]",
-            "AI:wiErrorInstruction"),
+        // ── 7.1 Service Level Agreements (paragraph) ──────────────────────────
+        new("sla_content",        "7.1 SLAs",                    "Service Level Agreements",
+            "[SLA to come here in table]",
+            "AI:slaContent"),
 
-        new("wi_instr2a",         "5. Work Instructions",         "Step 2 — Instruction 1",
-            "[Instruction 1]",
-            "AI:wiInstruction2a"),
+        // ── 7.2 Actual vs Target Performance (paragraph) ──────────────────────
+        new("perf_content",       "7.2 Performance",             "Actual vs Target Performance",
+            "[Actual vs Target performance to come here]",
+            "AI:perfContent"),
 
-        // ── 6.1 Escalation Matrix ─────────────────────────────────────────────
-        new("esc_trigger",        "6.1 Escalation",               "Escalation Trigger",
-            "[Trigger]",
-            "AI:escalationTrigger"),
-
-        new("esc_path",           "6.1 Escalation",               "Escalation Path",
-            "[Who to notify and how]",
-            "AI:escalationPath"),
-
-        new("esc_timeframe",      "6.1 Escalation",               "Escalation Timeframe",
-            "[Within X hours]",
-            "AI:escalationTimeframe"),
-
-        new("esc_target",         "6.1 Escalation",               "Resolution Target",
-            "[Target]",
-            "AI:escalationTarget"),
-
-        // ── 6.2 Exception Handling ────────────────────────────────────────────
-        new("exc_type",           "6.2 Exceptions",               "Exception Type",
-            "[Exception type]",
-            "AI:exceptionType"),
-
-        new("exc_handling",       "6.2 Exceptions",               "Handling Approach",
-            "[How to handle]",
-            "AI:exceptionHandling"),
-
-        new("exc_approval",       "6.2 Exceptions",               "Approval Required",
-            "[Yes/No \u2014 who approves]",
-            "AI:exceptionApproval"),
-
-        // ── 7.1 Service Level Agreements ──────────────────────────────────────
-        new("sla_metric",         "7.1 SLAs",                     "SLA Metric",
-            "[Metric name]",
-            "AI:slaMetric"),
-
-        new("sla_measurement",    "7.1 SLAs",                     "Measurement Method",
-            "[How measured]",
-            "AI:slaMeasurement"),
-
-        new("sla_frequency",      "7.1 SLAs",                     "Reporting Frequency",
-            "[Frequency]",
-            "AI:slaFrequency"),
-
-        new("sla_tool",           "7.1 SLAs",                     "Measurement Tool",
-            "[Tool name]",
-            "AI:slaTool"),
-
-        // ── 7.2 Actual vs Target Performance ──────────────────────────────────
-        new("sla_metric_perf",    "7.2 Performance",              "Performance Metric",
-            "[Metric]",
-            "AI:perfMetric"),
-
-        new("sla_actual_perf",    "7.2 Performance",              "Actual Performance",
-            "[Actual]",
-            "AI:perfActual"),
-
-        // ── 8. Volumetrics ────────────────────────────────────────────────────
-        // Single consolidated field — the LLM returns month-by-month volume data as
-        // structured text; GenerateReportAsync inserts it into the Volumetrics table
-        // after clearing all template data rows (keeping only the header row).
-        new("vol_content",        "8. Volumetrics",               "Monthly Volume Data (LLM Response)",
-            "",                    // no find-and-replace placeholder; handled via table manipulation
+        // ── 8. Volumetrics (paragraph placeholder) ────────────────────────────
+        // The LLM generates month-by-month volume data; inserted as paragraph text.
+        new("vol_content",        "8. Volumetrics",              "Monthly Volume Data",
+            "[Month on month volumetrics should come here from intake and tasks files.]",
             "AI:volContent"),
 
-        // ── 9. Regulatory and Compliance ──────────────────────────────────────
-        new("reg_regulation",     "9. Regulatory",                "Regulation / Standard",
-            "[Regulation]",
-            "AI:regulation"),
+        // ── 9. Regulatory and Compliance (Table 4) ────────────────────────────
+        // Handled via ReplaceTableDataWithLlmContent — no find-and-replace placeholder.
+        new("reg_content",        "9. Regulatory",               "Regulatory Mapping",
+            "",
+            "AI:regulatoryContent"),
 
-        new("reg_obligation",     "9. Regulatory",                "Obligation",
-            "[Obligation]",
-            "AI:regObligation"),
+        // ── 10. Training Materials (paragraph) ────────────────────────────────
+        new("train_content",      "10. Training",                "Training Materials",
+            "[LLM To design training materials based on all document uploaded]",
+            "AI:trainingContent"),
 
-        new("reg_control",        "9. Regulatory",                "Control in Process",
-            "[How process meets it]",
-            "AI:regControl"),
+        // ── 11. Orange Customer Contract Obligations (Table 5) ────────────────
+        // Handled via ReplaceTableDataWithLlmContent — no find-and-replace placeholder.
+        new("occ_content",        "11. OCC",                     "OCC Obligations",
+            "",
+            "AI:occContent"),
 
-        new("reg_evidence",       "9. Regulatory",                "Evidence Artefact",
-            "[Document / log / report]",
-            "AI:regEvidence"),
-
-        new("techm_framework",    "9. Regulatory",                "TechM Framework Reference",
-            "[TechM Control Framework Document Reference]",
-            "AI:techMFramework"),
-
-        // ── 10. Training Materials ────────────────────────────────────────────
-        new("train_module",       "10. Training",                 "Training Module",
-            "[Module name]",
-            "AI:trainingModule"),
-
-        new("train_delivery",     "10. Training",                 "Delivery Method",
-            "[Classroom / e-learning / on-the-job]",
-            "AI:trainingDelivery"),
-
-        new("train_verification", "10. Training",                 "Competency Verification",
-            "[Assessment / sign-off / observation]",
-            "AI:trainingVerification"),
-
-        // ── 11. Orange Customer Contract Obligations ───────────────────────────
-        new("occ_ref",            "11. OCC",                      "OCC Reference",
-            "[OCC Ref \u2014 provided by OBI]",
-            "AI:occRef"),
-
-        new("occ_obligation",     "11. OCC",                      "OCC Obligation",
-            "[Obligation from Orange Customer Contract]",
-            "AI:occObligation"),
-
-        new("occ_control",        "11. OCC",                      "OCC Control",
-            "[How this process addresses the obligation]",
-            "AI:occControl"),
+        // ── A. Process Flow Diagram (paragraph) ───────────────────────────────
+        new("flow_content",       "A. Process Flow",             "Process Flow Description",
+            "[LLM to design end to end process map based on all documents uploaded]",
+            "AI:processFlow"),
     ];
 
     // Matches any remaining [placeholder] style text left over in the template.
     private static readonly Regex RemainingPlaceholderRegex =
         new(@"\[.*?\]", RegexOptions.Compiled | RegexOptions.Singleline);
 
-    // Matches genuine month-pointer output (e.g. "- Jan-25:" or "- Feb-2025:").
-    private static readonly Regex MonthBulletRegex =
-        new(@"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2,4}\b",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    // Matches any ASCII digit — used to detect whether real numeric volume data
-    // remains after stripping month-year tokens from a volume field value.
-    private static readonly Regex AnyDigitRegex =
-        new(@"\d", RegexOptions.Compiled);
+    // Matches the mixed-bracket SOP placeholder "{Detailed SOP should come here]"
+    // which has a curly-open and square-close — a typo in the template source.
+    private static readonly Regex CurlyBracketPlaceholderRegex =
+        new(@"\{[^}]*\]", RegexOptions.Compiled | RegexOptions.Singleline);
 
     // Matches the opening line of a SOP step block: "Step N: text" or "Step N- text"
     private static readonly Regex SopStepLineRegex =
@@ -275,14 +168,6 @@ public class DocxReportService : IDocxReportService
         {
             var value = fs.IsNA ? "N/A" : (fs.FillValue ?? string.Empty);
 
-            // ── Guard: strip known template-instruction text from po_volumes ──────
-            // The LLM can mistakenly extract Word-template guidance text (e.g.
-            // "Enter actual transaction volume for each of the past 12 months:
-            //  | 3. Roles and Responsibilities (RACI)") verbatim from uploaded docs.
-            // Catch that here so the Word report always gets clean output.
-            if (fs.FieldKey == "po_volumes" && !fs.IsNA)
-                value = SanitizeMonthlyVolumes(value);
-
             // Prefer the current FieldDefs placeholder; fall back to the DB-stored one for
             // any field whose key is no longer in FieldDefs (orphaned legacy record).
             var placeholder = fieldDefLookup.TryGetValue(fs.FieldKey, out var fp)
@@ -300,10 +185,24 @@ public class DocxReportService : IDocxReportService
                 replacements[fd.TemplatePlaceholder] = string.Empty;
         }
 
-        using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);
+        // ── Artefact list: build formatted text for the artefact_content placeholder ──
+        // If uploaded file names are provided, build a numbered list and add it to
+        // replacements so the paragraph placeholder is replaced with real file names.
+        if (artefactFileNames != null && artefactFileNames.Count > 0)
+        {
+            const string artefactPlaceholder =
+                "[All Document uploaded in task or Name of document, date when uploaded in a table]";
+            var artefactLines = artefactFileNames
+                .Select((f, i) => $"{i + 1}. {f}")
+                .ToList();
+            replacements[artefactPlaceholder] = string.Join("\n", artefactLines);
+        }
 
-        // Process main body
-        ApplyReplacements(wordDoc.MainDocumentPart!.Document.Body!, replacements);
+        using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);
+        var body = wordDoc.MainDocumentPart!.Document.Body!;
+
+        // ── Apply standard find-and-replace (covers all paragraph/table placeholders) ──
+        ApplyReplacements(body, replacements);
 
         // Process headers and footers
         foreach (var headerPart in wordDoc.MainDocumentPart.HeaderParts)
@@ -311,133 +210,55 @@ public class DocxReportService : IDocxReportService
         foreach (var footerPart in wordDoc.MainDocumentPart.FooterParts)
             ApplyReplacements(footerPart.Footer, replacements);
 
-        // Final cleanup: erase any remaining [placeholder] text that was not covered
-        // by a known field definition (e.g. template sections not yet mapped).
-        ClearRemainingPlaceholders(wordDoc.MainDocumentPart!.Document.Body!);
+        // ── Handle the mixed-bracket SOP placeholder "{Detailed SOP should come here]" ──
+        // The template source has a curly-open + square-close typo. We replace it with
+        // the sop_content value (or empty) after the main replacements pass.
+        var sopValue = GetFieldFillValue(fieldStatuses, "sop_content") ?? string.Empty;
+        ApplyCurlyBracketReplacement(body, sopValue);
+
+        // ── Update Document Control table rows for Author and Approver ──────────
+        // Both rows have the same placeholder text in the template, so we must use
+        // row-label lookup to set them independently.
+        var authorValue      = GetFieldFillValue(fieldStatuses, "dc_author")      ?? string.Empty;
+        var approverValue    = GetFieldFillValue(fieldStatuses, "dc_approver")    ?? string.Empty;
+        UpdateDocControlRowsByLabel(body, authorValue, approverValue);
+
+        // ── Regulatory table (Table 4): replace N/A rows with LLM content ──────
+        var regValue = GetFieldFillValue(fieldStatuses, "reg_content");
+        if (!string.IsNullOrWhiteSpace(regValue))
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Regulation", "Standard"],
+                keepHeaderRows : 1,
+                content        : regValue);
+
+        // ── OCC table (Table 5): replace N/A rows with LLM content ──────────────
+        var occValue = GetFieldFillValue(fieldStatuses, "occ_content");
+        if (!string.IsNullOrWhiteSpace(occValue))
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["OCC Reference"],
+                keepHeaderRows : 1,
+                content        : occValue);
+
+        // ── Deduplication pass ─────────────────────────────────────────────────
+        RemoveDuplicateDataRows(body);
+
+        // ── Final cleanup: erase any remaining [placeholder] text ──────────────
+        ClearRemainingPlaceholders(body);
         foreach (var headerPart in wordDoc.MainDocumentPart.HeaderParts)
             ClearRemainingPlaceholders(headerPart.Header);
         foreach (var footerPart in wordDoc.MainDocumentPart.FooterParts)
             ClearRemainingPlaceholders(footerPart.Footer);
 
-        // ── Structured section insertion ───────────────────────────────────────
-        // For RACI, SOP, Volumetrics, and Work Instructions the template has
-        // multiple rows/paragraphs with identical placeholder text, causing
-        // duplicate content when using simple find-and-replace. Instead we
-        // clear all data rows/paragraphs and paste the LLM's checkpoint response
-        // as a single merged-cell block (or paragraph block) per section.
-        var body = wordDoc.MainDocumentPart!.Document.Body!;
-
-        var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
-        if (!string.IsNullOrWhiteSpace(raciValue))
-            ReplaceRaciTable(body, raciValue);
-
-        var sopValue = GetFieldFillValue(fieldStatuses, "sop_content");
-        if (!string.IsNullOrWhiteSpace(sopValue))
-            ReplaceSopTableRows(body, sopValue);
-
-        // ── Work Instructions 5 paragraph-block insertion ──────────────────────
-        // Section 5 is structured as paragraphs (not a table): a "5. Work
-        // Instructions" heading followed by step sub-headings "5.1 Step 1 —
-        // [Step Name]" and instruction paragraphs. The same placeholder [Step Name]
-        // appears in BOTH 5.1 and 5.2, so find-and-replace fills both sub-headings
-        // with the same value. We remove all step paragraphs and insert a single
-        // formatted block from the existing wi_* field values — same principle as
-        // the Volumetrics merged-cell approach.
-        var wiStepName = GetFieldFillValue(fieldStatuses, "wi_step_name") ?? string.Empty;
-        var wiInstr1a  = GetFieldFillValue(fieldStatuses, "wi_instr1a")   ?? string.Empty;
-        var wiInstr1b  = GetFieldFillValue(fieldStatuses, "wi_instr1b")   ?? string.Empty;
-        var wiInstr1c  = GetFieldFillValue(fieldStatuses, "wi_instr1c")   ?? string.Empty;
-        var wiInstr2a  = GetFieldFillValue(fieldStatuses, "wi_instr2a")   ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(wiStepName) || !string.IsNullOrWhiteSpace(wiInstr1a))
-        {
-            var wiContent = string.Empty;
-            if (!string.IsNullOrWhiteSpace(wiStepName))
-                wiContent += $"Step 1 — {wiStepName}";
-            if (!string.IsNullOrWhiteSpace(wiInstr1a))
-                wiContent += (wiContent.Length > 0 ? "\n" : "") + $"Instruction 1: {wiInstr1a}";
-            if (!string.IsNullOrWhiteSpace(wiInstr1b))
-                wiContent += $"\nInstruction 2: {wiInstr1b}";
-            if (!string.IsNullOrWhiteSpace(wiInstr1c))
-                wiContent += $"\nError Handling: {wiInstr1c}";
-            if (!string.IsNullOrWhiteSpace(wiInstr2a))
-                wiContent += $"\n\nStep 2 — Instruction 1: {wiInstr2a}";
-            ReplaceWorkInstructionParagraphs(body, wiContent);
-        }
-
-        var volValue = GetFieldFillValue(fieldStatuses, "vol_content");
-        if (!string.IsNullOrWhiteSpace(volValue))
-            ReplaceTableDataWithLlmContent(
-                body,
-                headerKeywords : ["Month", "Transaction"],  // Volumetrics header keywords
-                keepHeaderRows : 1,
-                content        : volValue);
-
-        // ── SLA 7.1 merged-cell insertion ──────────────────────────────────────
-        // The individual sla_* fields store all metric values as a single
-        // pipe-separated string (e.g. "Metric 1 | Metric 2 | ..."). Simple
-        // find-and-replace packs every metric into one cell, making the table
-        // unreadable.  Clear all data rows and insert the combined content as a
-        // single merged-cell block — identical to the Volumetrics approach.
-        var slaMetric = GetFieldFillValue(fieldStatuses, "sla_metric") ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(slaMetric))
-        {
-            var slaMeasurement = GetFieldFillValue(fieldStatuses, "sla_measurement") ?? string.Empty;
-            var slaFrequency   = GetFieldFillValue(fieldStatuses, "sla_frequency")   ?? string.Empty;
-            var slaTool        = GetFieldFillValue(fieldStatuses, "sla_tool")        ?? string.Empty;
-            var slaContent = $"Metric: {slaMetric}"
-                + (string.IsNullOrWhiteSpace(slaMeasurement) ? "" : $"\nMeasurement Method: {slaMeasurement}")
-                + (string.IsNullOrWhiteSpace(slaFrequency)   ? "" : $"\nReporting Frequency: {slaFrequency}")
-                + (string.IsNullOrWhiteSpace(slaTool)        ? "" : $"\nMeasurement Tool: {slaTool}");
-            ReplaceTableDataWithLlmContent(
-                body,
-                headerKeywords : ["Metric", "Measurement"],  // SLA 7.1 header keywords
-                keepHeaderRows : 1,
-                content        : slaContent);
-        }
-
-        // ── Actual vs Target Performance 7.2 merged-cell insertion ─────────────
-        // Same issue as SLA 7.1: perf fields pack all metric data into one cell.
-        // Use month-name keywords (Sep, Oct) to identify this table uniquely since
-        // both the SLA and Performance tables contain "Metric" and "Target".
-        var perfMetric = GetFieldFillValue(fieldStatuses, "sla_metric_perf") ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(perfMetric))
-        {
-            var perfActual = GetFieldFillValue(fieldStatuses, "sla_actual_perf") ?? string.Empty;
-            var perfContent = $"Metric: {perfMetric}"
-                + (string.IsNullOrWhiteSpace(perfActual) ? "" : $"\nActual Performance: {perfActual}");
-            ReplaceTableDataWithLlmContent(
-                body,
-                headerKeywords : ["Sep", "Oct"],  // month-name headers unique to Performance 7.2
-                keepHeaderRows : 1,
-                content        : perfContent);
-        }
-
-        // ── Deduplication pass ─────────────────────────────────────────────────
-        // Several template tables (Escalation Matrix, Exception Handling, SLA 7.1,
-        // Performance 7.2) have multiple data rows with identical placeholder text.
-        // After find-and-replace every such row carries the same value, producing
-        // visually doubled rows. Remove any consecutive duplicate data rows across
-        // all tables — the structured sections above (RACI, SOP, Vol) have already
-        // been rebuilt with clean, unique rows so they are unaffected.
-        RemoveDuplicateDataRows(body);
+        // ── Strip mixed-bracket leftovers not already replaced ──────────────────
+        ClearCurlyBracketPlaceholders(body);
 
         // ── Strip all Word reviewer comments ──────────────────────────────────
-        // The source template contains reviewer comments that must not appear in
-        // delivered documents. Remove the comments part, all in-text comment
-        // reference anchors, and any comment-mark runs.
         RemoveAllComments(wordDoc);
 
         // ── Strip italic instruction paragraphs ────────────────────────────────
-        // The template contains author-guidance paragraphs styled entirely in
-        // italic (e.g. "Log all documents, data files…"). These must not appear
-        // in delivered reports.
-        RemoveInstructionParagraphs(wordDoc.MainDocumentPart!.Document.Body!);
-
-        // ── 1.2 Artefacts table — populate all uploaded documents ──────────────
-        // The template has a fixed-row artefacts table. Rebuild it with one row
-        // per uploaded intake document rather than just the single UploadedFileName.
-        if (artefactFileNames != null && artefactFileNames.Count > 0)
-            ReplaceArtefactsTable(body, artefactFileNames);
+        RemoveInstructionParagraphs(body);
 
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
@@ -472,41 +293,87 @@ public class DocxReportService : IDocxReportService
         "Volume data to be confirmed with process owner — upload Excel/volume file and regenerate.";
 
     /// <summary>
-    /// Detects when the AI-extracted value for <c>po_volumes</c> is actually
-    /// template instruction text (e.g. from an old BARTOK Word template uploaded
-    /// as a task artifact) and replaces it with the proper fallback message.
-    /// Genuine bullet-pointer output (lines starting with "- ") is passed through unchanged.
+    /// Handles the mixed-bracket SOP placeholder <c>{Detailed SOP should come here]</c>
+    /// (curly-open, square-close — a typo in the template). Replaces the entire
+    /// paragraph text with <paramref name="content"/> if present, or erases it if empty.
     /// </summary>
-    private static string SanitizeMonthlyVolumes(string value)
+    private static void ApplyCurlyBracketReplacement(Body body, string content)
     {
-        if (string.IsNullOrWhiteSpace(value)) return value;
-
-        // Genuine output: any value that contains month abbreviations (e.g. "Jan-25", "Feb-25")
-        // AND at least one actual numeric volume figure passes through.
-        // Strip all month tokens first so that year digits ("2025", "25") in those tokens
-        // don't count as volume figures — then check whether any digit remains.
-        // This catches the common failure mode where the LLM outputs the bullet format with
-        // empty values ("- Jan-2025: Received  | Handled") because the Excel cell values
-        // were blank during extraction.
-        if (MonthBulletRegex.IsMatch(value))
+        const string sopMarker = "{Detailed SOP should come here]";
+        foreach (var text in body.Descendants<Text>().ToList())
         {
-            var withoutMonthTokens = MonthBulletRegex.Replace(value, "");
-            if (AnyDigitRegex.IsMatch(withoutMonthTokens))
-                return value;  // real numeric volume data is present — pass through
-
-            // Month tokens present but no actual numbers → LLM produced the format
-            // template with empty Received/Handled slots.  Use the fallback.
-            return VolumeFallback;
+            if (text.Text.Contains(sopMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                text.Text = text.Text.Replace(sopMarker, content, StringComparison.OrdinalIgnoreCase);
+                return;
+            }
         }
 
-        // If the value matches any known instruction/template pattern, discard it.
-        foreach (var pattern in VolumeInstructionPatterns)
+        // Handle case where the marker is split across runs in a paragraph
+        foreach (var para in body.Descendants<Paragraph>().ToList())
         {
-            if (value.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                return VolumeFallback;
+            var allTexts = para.Descendants<Run>()
+                               .SelectMany(r => r.Descendants<Text>())
+                               .ToList();
+            if (allTexts.Count <= 1) continue;
+            var merged = string.Concat(allTexts.Select(t => t.Text));
+            if (!merged.Contains(sopMarker, StringComparison.OrdinalIgnoreCase)) continue;
+            var replaced = merged.Replace(sopMarker, content, StringComparison.OrdinalIgnoreCase);
+            allTexts[0].Text = replaced;
+            for (int i = 1; i < allTexts.Count; i++) allTexts[i].Text = string.Empty;
+            return;
         }
+    }
 
-        return value;
+    /// <summary>
+    /// Clears any remaining mixed-bracket <c>{...}</c> or <c>{...[</c> placeholders
+    /// that were not filled (e.g. because no sop_content was generated).
+    /// </summary>
+    private static void ClearCurlyBracketPlaceholders(Body body)
+    {
+        foreach (var text in body.Descendants<Text>())
+        {
+            if (CurlyBracketPlaceholderRegex.IsMatch(text.Text))
+                text.Text = CurlyBracketPlaceholderRegex.Replace(text.Text, string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Updates the Document Control table (Table 0) by finding each row whose first
+    /// cell label matches "Process Author" or "Approver" and writing the corresponding
+    /// value into the second cell. This is required because both rows share the same
+    /// placeholder text in the template, making standard find-and-replace ambiguous.
+    /// </summary>
+    private static void UpdateDocControlRowsByLabel(Body body, string authorValue, string approverValue)
+    {
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var rows = t.Elements<TableRow>().ToList();
+            if (rows.Count < 2) return false;
+            var firstRowText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
+            return firstRowText.Contains("BARTOK", StringComparison.OrdinalIgnoreCase)
+                || firstRowText.Contains("Process Name", StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (table == null) return;
+
+        foreach (var row in table.Elements<TableRow>())
+        {
+            var cells = row.Elements<TableCell>().ToList();
+            if (cells.Count < 2) continue;
+            var label = string.Concat(cells[0].Descendants<Text>().Select(t => t.Text)).Trim();
+
+            if (label.Equals("Process Author", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(authorValue))
+            {
+                SetCellText(cells[1], authorValue);
+            }
+            else if (label.Equals("Approver", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(approverValue))
+            {
+                SetCellText(cells[1], approverValue);
+            }
+        }
     }
 
     /// <summary>
