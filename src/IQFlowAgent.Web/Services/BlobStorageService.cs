@@ -104,7 +104,7 @@ public class BlobStorageService : IBlobStorageService
         try
         {
             var (conn, containerName) = await GetStorageConfigAsync();
-            var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
+            var blobName = ExtractBlobName(blobUrl, containerName);
             var credentialedClient = new BlobClient(conn!, containerName, blobName);
 
             var response = await credentialedClient.DownloadContentAsync();
@@ -154,7 +154,7 @@ public class BlobStorageService : IBlobStorageService
         try
         {
             var (conn, containerName) = await GetStorageConfigAsync();
-            var blobName = Path.GetFileName(new Uri(blobUrl).LocalPath);
+            var blobName = ExtractBlobName(blobUrl, containerName);
             var credentialedClient = new BlobClient(conn!, containerName, blobName);
 
             var response = await credentialedClient.DownloadContentAsync();
@@ -304,6 +304,37 @@ public class BlobStorageService : IBlobStorageService
         // Combine folder path and file name: {folderPath}/{fileName}
         var blobName = $"{folderPath.TrimEnd('/')}/{fileName}";
         return UploadAsync(content, blobName, contentType);
+    }
+
+    /// <summary>
+    /// Extracts the full blob name (path within container) from an Azure Blob Storage URL.
+    /// Azure Blob URLs have the form:
+    ///   https://{account}.blob.core.windows.net/{container}/{folder1}/{folder2}/{file}
+    /// This method returns "{folder1}/{folder2}/{file}" — the complete path needed
+    /// when constructing a <see cref="BlobClient"/> via connection string.
+    /// Falls back to <see cref="Path.GetFileName"/> for unexpected URL structures.
+    /// </summary>
+    private static string ExtractBlobName(string blobUrl, string containerName)
+    {
+        try
+        {
+            var uri = new Uri(blobUrl);
+            // uri.Segments: ["/", "{container}/", "{part1}/", ..., "{file}"]
+            // Segments[0] = "/"
+            // Segments[1] = "{container}/"
+            // Segments[2..] = the blob path parts
+            if (uri.Segments.Length >= 3)
+            {
+                return Uri.UnescapeDataString(
+                    string.Concat(uri.Segments[2..]).TrimStart('/'));
+            }
+        }
+        catch
+        {
+            // Ignore — fall through to filename-only fallback
+        }
+        // Fallback: works for flat containers (no folder structure)
+        return Path.GetFileName(new Uri(blobUrl).LocalPath);
     }
 
     // -------------------------------------------------------------------------
