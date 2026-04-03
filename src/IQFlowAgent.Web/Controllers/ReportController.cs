@@ -795,9 +795,17 @@ public class ReportController : Controller
             if (!string.IsNullOrWhiteSpace(aiVal) && IsPlaceholderText(aiVal))
                 aiVal = null;
 
+            // Resolve intake-property auto-sources (e.g. ProcessName, TODAY).
+            // These take precedence over an AI-derived value for the same field.
+            var autoVal = ResolveAutoSource(intake, fd.AutoSource);
+            if (!string.IsNullOrWhiteSpace(autoVal))
+                aiVal = autoVal;
+
             var fillValue = !string.IsNullOrWhiteSpace(aiVal) ? aiVal : null;
             var notes     = !string.IsNullOrWhiteSpace(aiVal)
-                ? "Extracted by AI analysis of task artifacts and documents."
+                ? (!string.IsNullOrWhiteSpace(autoVal)
+                    ? "Resolved directly from intake record."
+                    : "Extracted by AI analysis of task artifacts and documents.")
                 : null;
 
             if (!string.IsNullOrWhiteSpace(aiVal)) aiFilledCount++;
@@ -830,9 +838,16 @@ public class ReportController : Controller
                 {
                     if (!string.IsNullOrWhiteSpace(fillValue))
                     {
-                        existing.Status    = "Available";
-                        existing.FillValue = fillValue;
-                        existing.Notes     = notes;
+                        // Auto-sourced values (intake properties) always win — they are
+                        // definitively correct.  AI-derived values only update when the
+                        // existing cell is still empty.
+                        if (!string.IsNullOrWhiteSpace(autoVal)
+                            || string.IsNullOrWhiteSpace(existing.FillValue))
+                        {
+                            existing.Status    = "Available";
+                            existing.FillValue = fillValue;
+                            existing.Notes     = notes;
+                        }
                     }
                     else if (string.IsNullOrWhiteSpace(existing.FillValue))
                     {
@@ -1042,6 +1057,41 @@ public class ReportController : Controller
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Resolves the <paramref name="autoSource"/> token to an actual string value from the
+    /// <paramref name="intake"/> record.  Returns <c>null</c> when the token is null/empty,
+    /// is prefixed with "AI:" (handled by the AI pipeline), or maps to an empty intake field.
+    /// </summary>
+    private static string? ResolveAutoSource(IntakeRecord intake, string? autoSource)
+    {
+        if (string.IsNullOrWhiteSpace(autoSource) ||
+            autoSource.StartsWith("AI:", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var value = autoSource switch
+        {
+            "ProcessName"         => intake.ProcessName,
+            "SdcLots"             => intake.SdcLots,
+            "Country"             => intake.Country,
+            "UploadedFileName"    => intake.UploadedFileName,
+            "TODAY"               => DateTime.UtcNow.ToString("dd-MMM-yyyy"),
+            "ProcessOwnerContact" => BuildOwnerContact(intake),
+            _                     => null
+        };
+
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static string? BuildOwnerContact(IntakeRecord intake)
+    {
+        var name  = intake.ProcessOwnerName?.Trim();
+        var email = intake.ProcessOwnerEmail?.Trim();
+        if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(email)) return null;
+        if (string.IsNullOrEmpty(email)) return name;
+        if (string.IsNullOrEmpty(name))  return email;
+        return $"{name} | {email}";
     }
 
     /// <summary>

@@ -420,6 +420,12 @@ public class DocxReportService : IDocxReportService
         // been rebuilt with clean, unique rows so they are unaffected.
         RemoveDuplicateDataRows(body);
 
+        // ── Strip all Word reviewer comments ──────────────────────────────────
+        // The source template contains reviewer comments that must not appear in
+        // delivered documents. Remove the comments part, all in-text comment
+        // reference anchors, and any comment-mark runs.
+        RemoveAllComments(wordDoc);
+
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
 
@@ -1166,5 +1172,51 @@ public class DocxReportService : IDocxReportService
             for (int i = 1; i < allTexts.Count; i++)
                 allTexts[i].Text = string.Empty;
         }
+    }
+
+    /// <summary>
+    /// Removes all Word reviewer comments from the generated document so that
+    /// template author comments never appear in delivered reports.
+    /// Deletes:
+    ///   • the WordprocessingCommentsPart (the comment text store)
+    ///   • every CommentRangeStart / CommentRangeEnd markup pair in the body
+    ///   • every CommentReference run element in the body
+    /// </summary>
+    private static void RemoveAllComments(WordprocessingDocument wordDoc)
+    {
+        var mainPart = wordDoc.MainDocumentPart;
+        if (mainPart == null) return;
+
+        // 1. Drop the comments part (the sidebar panel content).
+        if (mainPart.WordprocessingCommentsPart != null)
+            mainPart.DeletePart(mainPart.WordprocessingCommentsPart);
+
+        // 2. Remove in-body comment anchors from the document body, headers and footers.
+        static void StripCommentMarkup(DocumentFormat.OpenXml.OpenXmlElement root)
+        {
+            // Remove CommentRangeStart and CommentRangeEnd elements.
+            root.Descendants<CommentRangeStart>().ToList().ForEach(e => e.Remove());
+            root.Descendants<CommentRangeEnd>().ToList().ForEach(e => e.Remove());
+
+            // CommentReference lives inside a Run — remove the enclosing Run when it is
+            // the only meaningful child (keeps formatting runs intact).
+            foreach (var run in root.Descendants<Run>().ToList())
+            {
+                var children = run.ChildElements.ToList();
+                if (children.Any(c => c is CommentReference))
+                {
+                    // If the run contains only RunProperties and a CommentReference, remove the whole run.
+                    bool onlyCommentRef = children.All(c => c is RunProperties || c is CommentReference);
+                    if (onlyCommentRef)
+                        run.Remove();
+                    else
+                        run.Descendants<CommentReference>().ToList().ForEach(e => e.Remove());
+                }
+            }
+        }
+
+        StripCommentMarkup(mainPart.Document.Body!);
+        foreach (var hp in mainPart.HeaderParts) StripCommentMarkup(hp.Header);
+        foreach (var fp in mainPart.FooterParts)  StripCommentMarkup(fp.Footer);
     }
 }
