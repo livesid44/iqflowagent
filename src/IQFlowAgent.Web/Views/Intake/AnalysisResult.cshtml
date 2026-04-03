@@ -259,6 +259,14 @@
                         🔓 Reopen Intake
                     </button>
                 </form>
+                <form action="/Report/RegenerateReport" method="post" style="margin:0;"
+                      onsubmit="return confirm('Regenerate the report from current field values? A new Word document will be created.');">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="intakeId" value="@Model.Id" />
+                    <button type="submit" class="btn-reanalyze" style="background:#1d4ed8;color:#fff;">
+                        🔄 Regenerate Report
+                    </button>
+                </form>
             }
         </div>
     </div>

@@ -344,6 +344,44 @@ public class ReportController : Controller
         return await ExecuteDocxPipelineAsync(intake, intakeId, fieldStatuses);
     }
 
+    // ── POST /Report/RegenerateReport ────────────────────────────────────────
+    /// <summary>
+    /// Regenerates the final DOCX report from the current stored field values without
+    /// re-running the full AI analysis pipeline.  Useful when fields have been manually
+    /// edited or updated from task artefacts and the user just wants a fresh document.
+    /// Available for intakes in Closed, Complete, or Error status.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RegenerateReport(int intakeId)
+    {
+        var intake = await _db.IntakeRecords.FindAsync(intakeId);
+        if (intake == null) return NotFound();
+
+        if (intake.Status is not ("Closed" or "Complete" or "Error"))
+        {
+            TempData["Error"] = "Report regeneration is only available for completed or closed intakes.";
+            return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
+        }
+
+        var fieldStatuses = await _db.ReportFieldStatuses
+            .Where(f => f.IntakeRecordId == intakeId)
+            .ToListAsync();
+
+        if (fieldStatuses.Count == 0)
+        {
+            TempData["Error"] = "No report fields found for this intake. Run AI Field Analysis first.";
+            return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
+        }
+
+        // Allow ExecuteDocxPipelineAsync to set status to Closed; temporarily lift it
+        // from Closed so the pipeline's status update is persisted (no-op when already Complete/Error).
+        if (intake.Status == "Closed")
+            intake.Status = "Complete";
+
+        return await ExecuteDocxPipelineAsync(intake, intakeId, fieldStatuses);
+    }
+
     // ── Private: polish + DOCX + upload + save + redirect ───────────────────
     /// <summary>
     /// Runs the final LLM polish pass on <paramref name="fieldStatuses"/>, generates
