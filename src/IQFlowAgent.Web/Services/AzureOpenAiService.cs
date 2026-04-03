@@ -2939,15 +2939,18 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         var systemPrompt =
             $"You are extracting data for the \"{sectionName}\" section of a BARTOK Due Diligence\n" +
-            "SOP document at TechM.  You will be given:\n" +
+            "SOP document at TechM.  You will be given one or more of the following sources:\n" +
             "  1. TASK ARTIFACTS — uploaded files (Excel, Word, PDF) and task comments collected\n" +
-            "     for this section and related tasks.  This is the PRIMARY and most authoritative source.\n" +
-            "     Treat every uploaded file as ground truth — do NOT paraphrase or transform the data.\n" +
+            "     for this section and related tasks.  When present, this is the PRIMARY and most\n" +
+            "     authoritative source.  Treat every uploaded file as ground truth — do NOT paraphrase.\n" +
             "     The artifacts section may include supplementary content from other checkpoint tasks;\n" +
             "     use all of it — prioritise section-specific content but also read the supplementary data.\n" +
-            "  2. GLOBAL INTAKE DOCUMENTS — the original process document.  Background context only.\n\n" +
+            "  2. UPLOADED INTAKE DOCUMENTS — the original process documents uploaded at intake.\n" +
+            "     When no task artifacts are present, these are the PRIMARY source and must be read\n" +
+            "     with the same rigour as task artifacts.  When task artifacts are also present,\n" +
+            "     treat intake documents as supplementary context.\n\n" +
             "CRITICAL EXTRACTION RULES — follow each one exactly:\n" +
-            "1. PRIMARY SOURCE IS ALWAYS THE UPLOADED FILE.  Read the COMPLETE content of every\n" +
+            "1. PRIMARY SOURCE IS ALWAYS THE UPLOADED CONTENT.  Read the COMPLETE content of every\n" +
             "   uploaded document and extract ALL field values EXACTLY as they appear.\n" +
             "   Do NOT paraphrase, summarise, re-order, or reformat the data in any way.\n" +
             "2. EXCEL / WORD TABLES:\n" +
@@ -3073,26 +3076,43 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         // Task-specific artifacts are the PRIMARY source — give them the most token budget.
         // The LLM extracts verbatim from the raw document text; no regex post-processing.
-        if (!string.IsNullOrWhiteSpace(taskArtifactText))
+        const int primaryCap = 16_000;
+        bool hasTaskArtifacts = !string.IsNullOrWhiteSpace(taskArtifactText);
+
+        if (hasTaskArtifacts)
         {
             sb.AppendLine();
             sb.AppendLine("=== TASK ARTIFACTS (PRIMARY SOURCE — section-specific + supplementary) ===");
             sb.AppendLine("Read the COMPLETE content below. Extract EVERY row, bullet, and value exactly as written.");
-            const int taskCap = 16_000;
-            sb.AppendLine(taskArtifactText.Length > taskCap
-                ? taskArtifactText[..taskCap] + "\n[...artifact truncated — extract from above]"
+            sb.AppendLine(taskArtifactText!.Length > primaryCap
+                ? taskArtifactText[..primaryCap] + "\n[...artifact truncated — extract from above]"
                 : taskArtifactText);
         }
 
-        // Global docs as background / supplementary context
+        // When no task artifacts exist the global intake documents ARE the primary source
+        // (the user uploaded process documents directly on the intake, not via tasks).
+        // Promote them to the full primary-source token budget so the AI can extract all fields.
+        // When task artifacts are also present, keep global docs as supplementary context with
+        // a smaller cap to avoid crowding out the more targeted task artifacts.
         if (!string.IsNullOrWhiteSpace(globalDocText))
         {
             sb.AppendLine();
-            sb.AppendLine("=== GLOBAL INTAKE DOCUMENTS (background context) ===");
-            const int globalCap = 3_000;
-            sb.AppendLine(globalDocText.Length > globalCap
-                ? globalDocText[..globalCap] + "\n[...document truncated]"
-                : globalDocText);
+            if (!hasTaskArtifacts)
+            {
+                sb.AppendLine("=== UPLOADED INTAKE DOCUMENTS (PRIMARY SOURCE) ===");
+                sb.AppendLine("Read the COMPLETE content below. Extract EVERY row, bullet, and value exactly as written.");
+                sb.AppendLine(globalDocText.Length > primaryCap
+                    ? globalDocText[..primaryCap] + "\n[...document truncated — extract from above]"
+                    : globalDocText);
+            }
+            else
+            {
+                sb.AppendLine("=== GLOBAL INTAKE DOCUMENTS (supplementary context) ===");
+                const int globalCap = 4_000;
+                sb.AppendLine(globalDocText.Length > globalCap
+                    ? globalDocText[..globalCap] + "\n[...document truncated]"
+                    : globalDocText);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(analysisJson))
