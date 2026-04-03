@@ -59,7 +59,7 @@ public class DocxReportService : IDocxReportService
             "ProcessOwnerContact"),
 
         new("po_volumes",         "2. Process Overview",         "Monthly Volumes",
-            "[RACI Sharepoint]",
+            "Enter actual transaction volume for each of the past 12 months:",
             "AI:monthlyVolumes"),
 
         new("po_peak_volume",     "2. Process Overview",         "Peak Volume",
