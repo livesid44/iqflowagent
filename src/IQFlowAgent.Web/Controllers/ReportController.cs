@@ -737,8 +737,9 @@ public class ReportController : Controller
 
         // ── Dedicated RACI matrix generation (post-section-loop) ────────────────
         // After all sections are analyzed, generate raci_content using a focused
-        // GenerateSingleFieldAsync call with the paired role-activity context.
-        // This overrides the AnalyzeSectionFieldsAsync result for the RACI section.
+        // GenerateSingleFieldAsync call with document text + any already-filled sibling fields.
+        // Runs unconditionally so that RACI is always generated (not gated on sibling fields
+        // already being present, which skipped it on first analysis).
         {
             var raciSiblings = existingStatuses
                 .Where(s => s.FieldKey != "raci_content"
@@ -747,19 +748,22 @@ public class ReportController : Controller
                 .OrderBy(s => s.FieldKey)
                 .ToList();
 
-            if (raciSiblings.Count > 0)
+            // Combine: document content (primary) + sibling role/task context (if available)
+            var raciCtx = raciSiblings.Count > 0 ? BuildRaciContext(raciSiblings) : null;
+            var raciDocContext = string.Join("\n\n",
+                new[] { allTaskArtifactText, globalDocText, raciCtx }
+                .Where(t => !string.IsNullOrWhiteSpace(t)));
+
+            var raciGenerated = await _aiService.GenerateSingleFieldAsync(
+                intake, "raci_content", "RACI Assignments (LLM Response)",
+                null, intake.AnalysisResult,
+                string.IsNullOrWhiteSpace(raciDocContext) ? null : raciDocContext);
+            if (!string.IsNullOrWhiteSpace(raciGenerated))
             {
-                var raciCtx       = BuildRaciContext(raciSiblings);
-                var raciGenerated = await _aiService.GenerateSingleFieldAsync(
-                    intake, "raci_content", "RACI Assignments (LLM Response)",
-                    null, intake.AnalysisResult, raciCtx);
-                if (!string.IsNullOrWhiteSpace(raciGenerated))
-                {
-                    aiValues["raci_content"] = raciGenerated;
-                    _logger.LogInformation(
-                        "Dedicated RACI generation completed for intake {IntakeId} using {Count} sibling fields.",
-                        intake.IntakeId, raciSiblings.Count);
-                }
+                aiValues["raci_content"] = raciGenerated;
+                _logger.LogInformation(
+                    "Dedicated RACI generation completed for intake {IntakeId} using {Count} sibling fields.",
+                    intake.IntakeId, raciSiblings.Count);
             }
         }
 
@@ -785,10 +789,16 @@ public class ReportController : Controller
         // ── Dedicated Volumetrics generation (post-section-loop) ─────────────────
         // GenerateSingleFieldAsync has an explicit month-by-month tabular format prompt.
         // Run a targeted pass so vol_content is always structured for the Volumetrics table.
+        // Include both task artifacts AND global intake documents so that volume data
+        // uploaded directly on the intake (not via tasks) is always considered.
         {
+            var volDocContext = string.Join("\n\n",
+                new[] { allTaskArtifactText, globalDocText }
+                .Where(t => !string.IsNullOrWhiteSpace(t)));
             var volGenerated = await _aiService.GenerateSingleFieldAsync(
                 intake, "vol_content", "Monthly Volume Data (LLM Response)",
-                null, intake.AnalysisResult, allTaskArtifactText);
+                null, intake.AnalysisResult,
+                string.IsNullOrWhiteSpace(volDocContext) ? null : volDocContext);
             if (!string.IsNullOrWhiteSpace(volGenerated))
             {
                 aiValues["vol_content"] = volGenerated;
@@ -1126,7 +1136,24 @@ public class ReportController : Controller
         new(@"\bTBC\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase |
                         System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    // Detects a value that consists ENTIRELY of [bracketed template placeholder text] —
+    // e.g. "[Describe action]", "[Role]", "[Name] | [Email]".  These are template
+    // authoring instructions echoed back verbatim by the AI; they are not real content.
+    private static readonly System.Text.RegularExpressions.Regex TemplateBracketRegex =
+        new(@"\[.*?\]", System.Text.RegularExpressions.RegexOptions.Compiled |
+                        System.Text.RegularExpressions.RegexOptions.Singleline);
+
+    private static bool IsTemplatePlaceholderEcho(string value)
+    {
+        if (!value.Contains('[')) return false;
+        // Strip all [...]  patterns plus common separators; if nothing real remains it's an echo.
+        var stripped = TemplateBracketRegex.Replace(value, "");
+        stripped = stripped.Trim(' ', '\t', '\n', '\r', '|', ';', '-', '/', '*', '←');
+        return stripped.Length == 0;
+    }
+
     private static bool IsPlaceholderText(string value) =>
+        IsTemplatePlaceholderEcho(value)                                       ||
         value.Contains("to be confirmed", StringComparison.OrdinalIgnoreCase) ||
         value.Contains("not in document",  StringComparison.OrdinalIgnoreCase) ||
         value.Contains("not provided",     StringComparison.OrdinalIgnoreCase) ||

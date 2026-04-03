@@ -15,8 +15,8 @@ public class AzureOpenAiService : IAzureOpenAiService
     private const int MaxArtifactCharsPerReport = 20_000;
     // Lower token limit for per-section calls: each call is focused on a narrow field set,
     // so responses are short but must be long enough to list all volume/SLA rows verbatim.
-    // 3000 is sufficient for a full RACI table or 12-month volume series.
-    private const int MaxSectionAnalysisTokens = 3_000;
+    // 4000 gives headroom for full SOP, RACI, or 12-month volume series in a single JSON response.
+    private const int MaxSectionAnalysisTokens = 4_000;
 
     private readonly IConfiguration _config;
     private readonly ILogger<AzureOpenAiService> _logger;
@@ -2054,7 +2054,12 @@ public class AzureOpenAiService : IAzureOpenAiService
             rephrase, elaborate, and structure information that is explicitly present in the provided data.
             Your task is to generate professional, document-ready content for a single SOP field.
             Return ONLY the field value as plain text — no JSON, no markdown headers, no extra commentary.
-            The content should be concise (1-4 sentences) and suitable for direct insertion into a document.
+            For simple text fields, keep the value concise and suitable for direct insertion into a document cell.
+            For multi-line structured fields (sopContent, raciContent, volContent, monthlyVolumes) produce
+            the COMPLETE structured output as specified in the field-specific rules below — do NOT truncate.
+            NEVER echo back template placeholder text such as "[Describe action]", "[Role]", "[Process Name]",
+            "[Expected output]" etc. as field values. If a document you receive contains [bracketed instructions],
+            those are template instructions — fill them with actual content from the source documents instead.
 
             Special rules for multi-line block fields (use actual newlines \n in your response):
 
@@ -2074,6 +2079,8 @@ public class AzureOpenAiService : IAzureOpenAiService
             FORBIDDEN on the TASKS: line: copying bullet list content or using pipe characters in task names.
             Role names: copy the short role title from the source (e.g. "Change Requester").
             Derive real task names and role titles from the intake data and artifact text.
+            If no RACI source data is available, infer a plausible 4-role × 4-task matrix from
+            the process description and document content.
 
             sopContent — produce all SOP steps, one step per block:
               Step N: [Action description]
@@ -2153,7 +2160,7 @@ public class AzureOpenAiService : IAzureOpenAiService
                     new { role = "system", content = systemPrompt },
                     new { role = "user",   content = await EnforcePiiPolicyAsync(userMessage, "GenerateSingleField") }
                 },
-                max_tokens  = Math.Min(maxTokens, 500),
+                max_tokens  = Math.Min(maxTokens, 4_000),
                 temperature = 0.4,
                 top_p       = 1.0,
                 model       = modelVersion
@@ -2953,6 +2960,11 @@ public class AzureOpenAiService : IAzureOpenAiService
             "1. PRIMARY SOURCE IS ALWAYS THE UPLOADED CONTENT.  Read the COMPLETE content of every\n" +
             "   uploaded document and extract ALL field values EXACTLY as they appear.\n" +
             "   Do NOT paraphrase, summarise, re-order, or reformat the data in any way.\n" +
+            "   IMPORTANT — TEMPLATE ECHO PREVENTION: Some uploaded documents may be BARTOK Word\n" +
+            "   templates containing [bracketed placeholder instructions] like \"[Describe action]\",\n" +
+            "   \"[Role]\", \"[Process Name]\", \"[Expected output]\", etc.  These are template authoring\n" +
+            "   instructions — do NOT copy them verbatim as field values.  Fill each field with\n" +
+            "   REAL content extracted from the actual process document text instead.\n" +
             "2. EXCEL / WORD TABLES:\n" +
             "   - Read EVERY row from top to bottom — do NOT skip any row.\n" +
             "   - Columns in the extracted text are separated by tab characters; use these\n" +
