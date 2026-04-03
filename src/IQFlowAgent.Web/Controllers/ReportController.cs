@@ -187,6 +187,9 @@ public class ReportController : Controller
         field.FillValue  = fillValue;
         field.Status     = string.IsNullOrWhiteSpace(fillValue) ? "Missing" : "Available";
         field.IsNA       = false;
+        field.Notes      = string.IsNullOrWhiteSpace(fillValue)
+            ? field.Notes   // preserve existing note when clearing the value
+            : "Manually entered by user.";
         field.UpdatedAt  = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
@@ -854,10 +857,15 @@ public class ReportController : Controller
                     if (!string.IsNullOrWhiteSpace(fillValue))
                     {
                         // Auto-sourced values (intake properties) always win — they are
-                        // definitively correct.  AI-derived values only update when the
-                        // existing cell is still empty.
-                        if (!string.IsNullOrWhiteSpace(autoVal)
-                            || string.IsNullOrWhiteSpace(existing.FillValue))
+                        // definitively correct.  AI-derived values overwrite any existing
+                        // value UNLESS the user has manually entered their own value (marked
+                        // by Notes == "Manually entered by user.").  This allows re-analysis
+                        // to refresh AI-extracted fields while preserving user edits.
+                        bool isManuallyEntered =
+                            existing.Notes == "Manually entered by user."
+                            && !string.IsNullOrWhiteSpace(existing.FillValue);
+
+                        if (!string.IsNullOrWhiteSpace(autoVal) || !isManuallyEntered)
                         {
                             existing.Status    = "Available";
                             existing.FillValue = fillValue;
