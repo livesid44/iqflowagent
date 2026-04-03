@@ -454,9 +454,24 @@ public class ReportController : Controller
             return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
         }
 
+        // Load all intake-level document names for the 1.2 Artefacts table.
+        var intakeDocNames = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null
+                        && !string.IsNullOrWhiteSpace(d.FileName))
+            .OrderBy(d => d.Id)
+            .Select(d => d.FileName)
+            .ToListAsync();
+
+        // Always include the primary uploaded file if it isn't already in the list.
+        if (!string.IsNullOrWhiteSpace(intake.UploadedFileName)
+            && !intakeDocNames.Contains(intake.UploadedFileName, StringComparer.OrdinalIgnoreCase))
+            intakeDocNames.Insert(0, intake.UploadedFileName);
+
         try
         {
-            var docxBytes = await _docxService.GenerateReportAsync(intake, fieldStatuses, templatePath);
+            var docxBytes = await _docxService.GenerateReportAsync(
+                intake, fieldStatuses, templatePath,
+                intakeDocNames.Count > 0 ? intakeDocNames : null);
 
             var now            = DateTime.UtcNow;
             var reportFileName = $"BARTOK_DD_{intake.IntakeId}_{now:yyyyMMddHHmmss}.docx";

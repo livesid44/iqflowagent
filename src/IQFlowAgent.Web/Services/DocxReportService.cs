@@ -256,7 +256,8 @@ public class DocxReportService : IDocxReportService
     public IReadOnlyList<FieldDefinition> GetFieldDefinitions() => FieldDefs.AsReadOnly();
 
     public Task<byte[]> GenerateReportAsync(
-        IntakeRecord intake, IList<ReportFieldStatus> fieldStatuses, string templatePath)
+        IntakeRecord intake, IList<ReportFieldStatus> fieldStatuses, string templatePath,
+        IList<string>? artefactFileNames = null)
     {
         var templateBytes = File.ReadAllBytes(templatePath);
         using var ms = new MemoryStream();
@@ -425,6 +426,18 @@ public class DocxReportService : IDocxReportService
         // delivered documents. Remove the comments part, all in-text comment
         // reference anchors, and any comment-mark runs.
         RemoveAllComments(wordDoc);
+
+        // ── Strip italic instruction paragraphs ────────────────────────────────
+        // The template contains author-guidance paragraphs styled entirely in
+        // italic (e.g. "Log all documents, data files…"). These must not appear
+        // in delivered reports.
+        RemoveInstructionParagraphs(wordDoc.MainDocumentPart!.Document.Body!);
+
+        // ── 1.2 Artefacts table — populate all uploaded documents ──────────────
+        // The template has a fixed-row artefacts table. Rebuild it with one row
+        // per uploaded intake document rather than just the single UploadedFileName.
+        if (artefactFileNames != null && artefactFileNames.Count > 0)
+            ReplaceArtefactsTable(body, artefactFileNames);
 
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
@@ -1218,5 +1231,112 @@ public class DocxReportService : IDocxReportService
         StripCommentMarkup(mainPart.Document.Body!);
         foreach (var hp in mainPart.HeaderParts) StripCommentMarkup(hp.Header);
         foreach (var fp in mainPart.FooterParts)  StripCommentMarkup(fp.Footer);
+    }
+
+    /// <summary>
+    /// Rebuilds the "1.2 Inputs &amp; Artefacts Received" table with one data row per
+    /// uploaded document.  The table is identified by the keyword "Artefact" in its
+    /// header row.  Column layout: No | Document / Artefact Name | Type | Source.
+    /// </summary>
+    private static void ReplaceArtefactsTable(Body body, IList<string> fileNames)
+    {
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var rows = t.Descendants<TableRow>().ToList();
+            if (rows.Count == 0) return false;
+            var headerText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
+            return headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase)
+                || headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (table == null) return;
+
+        var allRows = table.Elements<TableRow>().ToList();
+        if (allRows.Count == 0) return;
+
+        // Keep only the header row; remove all existing data rows.
+        foreach (var row in allRows.Skip(1))
+            row.Remove();
+
+        // Determine column count from header row.
+        int colCount = allRows[0].Elements<TableCell>().Count();
+
+        // Clone the visual style from the first data row if it exists, otherwise build plain rows.
+        // Build one new row per file.
+        for (int i = 0; i < fileNames.Count; i++)
+        {
+            var newRow = new TableRow();
+
+            // Copy table-row properties from the header row for consistent styling.
+            var srcRowProps = allRows[0].GetFirstChild<TableRowProperties>()?.CloneNode(true);
+            if (srcRowProps != null) newRow.AppendChild(srcRowProps);
+
+            var srcCells = allRows[0].Elements<TableCell>().ToList();
+
+            for (int col = 0; col < colCount; col++)
+            {
+                var newCell = new TableCell();
+
+                // Copy cell properties for consistent border/width styling.
+                if (col < srcCells.Count)
+                {
+                    var srcCellProps = srcCells[col].GetFirstChild<TableCellProperties>()?.CloneNode(true);
+                    if (srcCellProps != null) newCell.AppendChild(srcCellProps);
+                }
+
+                var cellText = col switch
+                {
+                    0 => (i + 1).ToString(),          // sequential No.
+                    1 => fileNames[i],                // Document / Artefact Name
+                    _ => string.Empty                 // Type, Source — leave blank
+                };
+
+                var para = new Paragraph();
+                if (!string.IsNullOrEmpty(cellText))
+                    para.AppendChild(new Run(new Text(cellText)));
+                newCell.AppendChild(para);
+                newRow.AppendChild(newCell);
+            }
+
+            table.AppendChild(newRow);
+        }
+    }
+
+    /// <summary>
+    /// Removes template-author instruction paragraphs from the generated document.
+    /// These are paragraphs whose every text-bearing run is formatted as italic —
+    /// a convention used throughout the BARTOK template to mark guidance text that
+    /// should only be visible while authoring, not in the final delivered report.
+    /// Paragraphs that are empty or contain only whitespace are not affected.
+    /// </summary>
+    private static void RemoveInstructionParagraphs(Body body)
+    {
+        foreach (var para in body.Descendants<Paragraph>().ToList())
+        {
+            var runs = para.Elements<Run>().ToList();
+            if (runs.Count == 0) continue;
+
+            // Keep paragraph if ANY run contains non-whitespace text that is NOT italic.
+            bool allItalic = runs.All(run =>
+            {
+                var rpr = run.GetFirstChild<RunProperties>();
+                bool italic = rpr?.Italic != null && (rpr.Italic.Val is null || rpr.Italic.Val == true);
+                // A run with no text content (e.g. line-break-only run) doesn't break the rule.
+                var text = string.Concat(run.Descendants<Text>().Select(t => t.Text));
+                if (string.IsNullOrWhiteSpace(text)) return true;
+                return italic;
+            });
+
+            if (!allItalic) continue;
+
+            // Confirm at least one run has real (non-whitespace) text to avoid removing
+            // legitimate empty paragraph spacers.
+            bool hasText = runs.Any(r =>
+                !string.IsNullOrWhiteSpace(
+                    string.Concat(r.Descendants<Text>().Select(t => t.Text))));
+
+            if (hasText)
+                para.Remove();
+        }
     }
 }

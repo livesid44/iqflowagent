@@ -11,7 +11,11 @@ public interface IDocxReportService
     /// Generates a filled copy of the BARTOK DD template.
     /// Returns the .docx bytes ready to stream or upload.
     /// </summary>
-    Task<byte[]> GenerateReportAsync(IntakeRecord intake, IList<ReportFieldStatus> fieldStatuses, string templatePath);
+    Task<byte[]> GenerateReportAsync(
+        IntakeRecord intake,
+        IList<ReportFieldStatus> fieldStatuses,
+        string templatePath,
+        IList<string>? artefactFileNames = null);
 }
 
 /// <summary>Static definition of one BARTOK template field.</summary>
