@@ -168,59 +168,77 @@ public class IntakeController : Controller
 
         var intakeId = GenerateIntakeId();
 
-        // ── Save files to local disk first — blob upload is deferred to background ──
-        // This ensures the HTTP response is returned quickly regardless of file size.
-        // The RagProcessorService uploads to blob storage (if configured) before processing.
-        string? savedFilePath = null;
-        string? savedFileName = null;
+        // ── Save files: upload to blob when configured, otherwise save to local disk ──
+        // For blob-configured tenants the file is immediately stored in the correct
+        // folder ({tenantId}/{intakeId}/documents/) so the RAG processor and
+        // DownloadDocument action can access it via the stored blob URL.
+        // For non-blob tenants the file is saved to disk; the RAG processor uploads
+        // it to blob the first time it processes the intake.
+        string? savedFilePath    = null;
+        string? savedFileName    = null;
         string? savedContentType = null;
-        long? savedFileSize = null;
+        long?   savedFileSize    = null;
 
         var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
         Directory.CreateDirectory(uploadsDir);
+
+        var blobConfigured = await _blobService.IsConfiguredAsync();
 
         // Handle primary document upload
         if (model.Document != null && model.Document.Length > 0)
         {
             var ext = Path.GetExtension(model.Document.FileName);
-            savedFileName = model.Document.FileName;
+            savedFileName    = model.Document.FileName;
             savedContentType = model.Document.ContentType;
-            savedFileSize = model.Document.Length;
+            savedFileSize    = model.Document.Length;
 
-            var safeFileName = $"{intakeId}{ext}";
-            var fullPath = Path.Combine(uploadsDir, safeFileName);
-            using var stream = new FileStream(fullPath, FileMode.Create);
-            await model.Document.CopyToAsync(stream);
-            savedFilePath = $"/uploads/{safeFileName}";
-            _logger.LogInformation("Saved document for {IntakeId} to disk: {Path}", intakeId, savedFilePath);
+            if (blobConfigured)
+            {
+                var folderPath = $"{tenantId}/{intakeId}/documents";
+                await using var ms = new MemoryStream();
+                await model.Document.CopyToAsync(ms);
+                ms.Position = 0;
+                savedFilePath = await _blobService.UploadToFolderAsync(
+                    ms, folderPath, savedFileName, savedContentType ?? "application/octet-stream");
+                _logger.LogInformation("Uploaded primary document for {IntakeId} to blob: {Path}", intakeId, savedFilePath);
+            }
+            else
+            {
+                var safeFileName = $"{intakeId}{ext}";
+                var fullPath = Path.Combine(uploadsDir, safeFileName);
+                using var stream = new FileStream(fullPath, FileMode.Create);
+                await model.Document.CopyToAsync(stream);
+                savedFilePath = $"/uploads/{safeFileName}";
+                _logger.LogInformation("Saved primary document for {IntakeId} to disk: {Path}", intakeId, savedFilePath);
+            }
         }
 
         var record = new IntakeRecord
         {
-            TenantId = tenantId,
-            IntakeId = intakeId,
-            ProcessName = model.ProcessName,
-            Description = model.Description,
-            BusinessUnit = model.BusinessUnit,
-            Department = model.Department,
-            Lob = model.Lob,
-            SdcLots = model.SdcLots,
-            ProcessOwnerName = model.ProcessOwnerName,
-            ProcessOwnerEmail = model.ProcessOwnerEmail,
-            ProcessType = model.ProcessType,
-            EstimatedVolumePerDay = model.EstimatedVolumePerDay,
-            Priority = model.Priority,
-            Country = model.Country,
-            City = model.City,
-            SiteLocation = model.SiteLocation,
-            TimeZone = model.TimeZone,
-            UploadedFileName = savedFileName,
-            UploadedFilePath = savedFilePath,
+            TenantId                = tenantId,
+            IntakeId                = intakeId,
+            ProcessName             = model.ProcessName,
+            Description             = model.Description,
+            BusinessUnit            = model.BusinessUnit,
+            Department              = model.Department,
+            Lob                     = model.Lob,
+            SdcLots                 = model.SdcLots,
+            ProcessOwnerName        = model.ProcessOwnerName,
+            ProcessOwnerEmail       = model.ProcessOwnerEmail,
+            ProcessType             = model.ProcessType,
+            EstimatedVolumePerDay   = model.EstimatedVolumePerDay,
+            Priority                = model.Priority,
+            Country                 = model.Country,
+            City                    = model.City,
+            SiteLocation            = model.SiteLocation,
+            TimeZone                = model.TimeZone,
+            UploadedFileName        = savedFileName,
+            UploadedFilePath        = savedFilePath,
             UploadedFileContentType = savedContentType,
-            UploadedFileSize = savedFileSize,
-            Status = "Submitted",
-            SubmittedAt = DateTime.UtcNow,
-            CreatedByUserId = User.Identity?.Name
+            UploadedFileSize        = savedFileSize,
+            Status                  = "Submitted",
+            SubmittedAt             = DateTime.UtcNow,
+            CreatedByUserId         = User.Identity?.Name
         };
 
         _db.IntakeRecords.Add(record);
@@ -252,12 +270,25 @@ public class IntakeController : Controller
 
         foreach (var file in additionalFiles)
         {
-            var ext  = Path.GetExtension(file.FileName);
-            var name = $"{intakeId}-{docCount + 1:D2}{ext}";
-            var fp   = Path.Combine(uploadsDir, name);
-            using var s = new FileStream(fp, FileMode.Create);
-            await file.CopyToAsync(s);
-            var filePath = $"/uploads/{name}";
+            string filePath;
+            if (blobConfigured)
+            {
+                var folderPath = $"{tenantId}/{intakeId}/documents";
+                await using var ms = new MemoryStream();
+                await file.CopyToAsync(ms);
+                ms.Position = 0;
+                filePath = await _blobService.UploadToFolderAsync(
+                    ms, folderPath, file.FileName, file.ContentType ?? "application/octet-stream");
+            }
+            else
+            {
+                var ext  = Path.GetExtension(file.FileName);
+                var name = $"{intakeId}-{docCount + 1:D2}{ext}";
+                var fp   = Path.Combine(uploadsDir, name);
+                using var s = new FileStream(fp, FileMode.Create);
+                await file.CopyToAsync(s);
+                filePath = $"/uploads/{name}";
+            }
 
             _db.IntakeDocuments.Add(new IntakeDocument
             {

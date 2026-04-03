@@ -482,9 +482,11 @@ public class ReportController : Controller
 
             if (await _blobService.IsConfiguredAsync())
             {
+                var tenantId   = _tenantContext.GetCurrentTenantId();
+                var folderPath = $"{tenantId}/{intake.IntakeId}/reports";
                 using var stream = new MemoryStream(docxBytes);
-                filePath = await _blobService.UploadAsync(
-                    stream, reportFileName,
+                filePath = await _blobService.UploadToFolderAsync(
+                    stream, folderPath, reportFileName,
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
             }
             else
