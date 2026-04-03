@@ -655,9 +655,10 @@ public class TaskController : Controller
                 {
                     string? content = null;
 
-                    if (ext is ".xlsx" or ".docx")
+                    if (ext is ".xlsx" or ".docx" or ".pdf" or ".pptx"
+                               or ".jpg" or ".jpeg" or ".png" or ".tiff" or ".bmp")
                     {
-                        // Binary document: download bytes then extract text
+                        // Binary / OCR document: download bytes then extract text
                         byte[]? bytes = null;
                         if (await _blobService.IsConfiguredAsync()
                             && doc.FilePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
@@ -672,7 +673,19 @@ public class TaskController : Controller
                         }
 
                         if (bytes != null)
-                            content = DocumentTextExtractor.Extract(bytes, ext);
+                        {
+                            if (ext is ".xlsx" or ".docx")
+                            {
+                                // Local extraction — no external service required
+                                content = DocumentTextExtractor.Extract(bytes, ext);
+                            }
+
+                            // For PDF, PPTX, and image formats use Azure Document Intelligence
+                            // if it is configured; this is the only reliable extraction path
+                            // for these formats.
+                            if (string.IsNullOrWhiteSpace(content) && _docIntel.IsConfigured())
+                                content = await _docIntel.ExtractTextAsync(bytes, doc.FileName ?? ("file" + ext));
+                        }
                     }
                     else if (ext is ".txt" or ".csv" or ".json" or ".xml" or ".md")
                     {
@@ -692,7 +705,7 @@ public class TaskController : Controller
                     if (!string.IsNullOrWhiteSpace(content))
                     {
                         sb.AppendLine($"--- Artifact: {doc.FileName} (Task: {task.TaskId}) ---");
-                        sb.AppendLine(content.Length > 2000 ? content[..2000] + "[...truncated]" : content);
+                        sb.AppendLine(content.Length > 8_000 ? content[..8_000] + "[...truncated]" : content);
                         sb.AppendLine();
                     }
                 }

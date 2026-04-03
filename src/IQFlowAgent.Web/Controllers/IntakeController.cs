@@ -834,58 +834,40 @@ public class IntakeController : Controller
             record.Status = "Analyzing";
             await db.SaveChangesAsync();
 
-            // Extract document text using the full multi-format pipeline.
-            // This mirrors RagProcessorService so that re-analysis gets the same
-            // rich content as the initial RAG job (PDF/Word/Excel/image OCR support).
+            // ── Load ALL intake documents and aggregate their text ─────────────
+            // Previously this method only read the single UploadedFilePath field,
+            // which caused additional documents uploaded to the intake to be
+            // silently ignored during re-analysis.  Now it reads every
+            // IntakeDocument record for this intake and combines them, matching
+            // exactly what RagProcessorService does for the initial analysis job.
+            var documents = await db.IntakeDocuments
+                .Where(d => d.IntakeRecordId == intakeId
+                         && d.DocumentType == "IntakeDocument"
+                         && d.IntakeTaskId == null)
+                .ToListAsync();
+
             string? docText = null;
-            if (!string.IsNullOrWhiteSpace(filePath))
+
+            if (documents.Count > 0)
             {
-                var ext = Path.GetExtension(filePath).ToLowerInvariant();
-
-                // Download bytes for binary formats
-                byte[]? docBytes = null;
-                if (blob != null && await blob.IsConfiguredAsync()
-                    && filePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                var aggregated = new System.Text.StringBuilder();
+                foreach (var doc in documents)
                 {
-                    docBytes = await blob.DownloadBytesAsync(filePath);
-                }
-                else
-                {
-                    var uploadsRoot = Path.GetFullPath(Path.Combine(webRoot, "uploads"));
-                    var localPath   = Path.GetFullPath(Path.Combine(webRoot, filePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
-                    if (localPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)
-                        && System.IO.File.Exists(localPath))
+                    var text = await ExtractSingleDocumentTextAsync(doc.FilePath, doc.FileName, blob, docIntel, webRoot);
+                    if (!string.IsNullOrWhiteSpace(text))
                     {
-                        if (ParseableExtensions.Contains(ext))
-                        {
-                            // Plain text — read directly (no need for bytes)
-                            docText = await System.IO.File.ReadAllTextAsync(localPath);
-                        }
-                        else
-                        {
-                            docBytes = await System.IO.File.ReadAllBytesAsync(localPath);
-                        }
+                        aggregated.AppendLine($"=== File: {doc.FileName} ===");
+                        aggregated.AppendLine(text);
+                        aggregated.AppendLine();
                     }
                 }
-
-                // Extract from bytes when available
-                if (docText == null && docBytes != null)
-                {
-                    if (_openXmlExts.Contains(ext))
-                    {
-                        docText = DocumentTextExtractor.Extract(docBytes, ext);
-                    }
-                    else if (_ocrExts.Contains(ext) && docIntel.IsConfigured())
-                    {
-                        var fileName = System.IO.Path.GetFileName(filePath);
-                        docText = await docIntel.ExtractTextAsync(docBytes, fileName);
-                    }
-
-                    // Fallback: for blob text files that DownloadTextAsync doesn't handle
-                    // (it filters by extension), try decoding as UTF-8 for plain-text blobs
-                    if (docText == null && ParseableExtensions.Contains(ext))
-                        docText = System.Text.Encoding.UTF8.GetString(docBytes);
-                }
+                docText = aggregated.Length > 0 ? aggregated.ToString() : null;
+            }
+            else if (!string.IsNullOrWhiteSpace(filePath))
+            {
+                // Legacy fallback: no IntakeDocument rows (e.g. very old intake records),
+                // so fall back to the single UploadedFilePath stored on the intake record.
+                docText = await ExtractSingleDocumentTextAsync(filePath, System.IO.Path.GetFileName(filePath), blob, docIntel, webRoot);
             }
 
             var result = await ai.AnalyzeIntakeAsync(record, docText);
@@ -918,6 +900,60 @@ public class IntakeController : Controller
                 _logger.LogError(innerEx, "Failed to update error status for intake id {IntakeId}", intakeId);
             }
         }
+    }
+
+    /// <summary>
+    /// Extracts readable text from a single document file (blob URL or local /uploads/ path).
+    /// Handles OpenXML (.docx/.xlsx), OCR formats (.pdf etc. via Document Intelligence),
+    /// and plain-text formats (.txt, .csv, .json, .xml, .md).
+    /// </summary>
+    private async Task<string?> ExtractSingleDocumentTextAsync(
+        string? path, string? fileName, IBlobStorageService blob,
+        IDocumentIntelligenceService docIntel, string webRoot)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+
+        byte[]? docBytes = null;
+        string? docText  = null;
+
+        if (blob != null && await blob.IsConfiguredAsync()
+            && path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            docBytes = await blob.DownloadBytesAsync(path);
+        }
+        else
+        {
+            var uploadsRoot = Path.GetFullPath(Path.Combine(webRoot, "uploads"));
+            var localPath   = Path.GetFullPath(Path.Combine(webRoot, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar)));
+            if (localPath.StartsWith(uploadsRoot, StringComparison.OrdinalIgnoreCase)
+                && System.IO.File.Exists(localPath))
+            {
+                if (ParseableExtensions.Contains(ext))
+                    docText = await System.IO.File.ReadAllTextAsync(localPath);
+                else
+                    docBytes = await System.IO.File.ReadAllBytesAsync(localPath);
+            }
+        }
+
+        if (docText == null && docBytes != null)
+        {
+            if (_openXmlExts.Contains(ext))
+            {
+                docText = DocumentTextExtractor.Extract(docBytes, ext);
+            }
+            else if (_ocrExts.Contains(ext) && docIntel.IsConfigured())
+            {
+                docText = await docIntel.ExtractTextAsync(docBytes, fileName ?? ("file" + ext));
+            }
+
+            // Fallback: try UTF-8 decoding for plain-text blobs
+            if (docText == null && ParseableExtensions.Contains(ext))
+                docText = System.Text.Encoding.UTF8.GetString(docBytes);
+        }
+
+        return docText;
     }
 
     /// <summary>
