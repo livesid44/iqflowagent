@@ -470,11 +470,54 @@ public class ReportController : Controller
             && !intakeDocNames.Contains(intake.UploadedFileName, StringComparer.OrdinalIgnoreCase))
             intakeDocNames.Insert(0, intake.UploadedFileName);
 
+        // ── Load Process Flow Diagram images ────────────────────────────────────
+        // Collect all uploaded image files (JPG, PNG, etc.) that may be process flow diagrams.
+        var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { ".jpg", ".jpeg", ".png", ".bmp", ".tiff" };
+
+        var processFlowImageDocs = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intakeId
+                        && !string.IsNullOrWhiteSpace(d.FileName)
+                        && !string.IsNullOrWhiteSpace(d.FilePath))
+            .OrderBy(d => d.Id)
+            .ToListAsync();
+
+        var processFlowImages = new List<(string FileName, byte[] Data)>();
+        foreach (var doc in processFlowImageDocs)
+        {
+            var ext = Path.GetExtension(doc.FileName);
+            if (!imageExtensions.Contains(ext)) continue;
+
+            try
+            {
+                byte[]? imageBytes;
+                if (await _blobService.IsConfiguredAsync())
+                {
+                    imageBytes = await _blobService.DownloadBytesAsync(doc.FilePath);
+                }
+                else
+                {
+                    var localPath = Path.Combine(_env.WebRootPath, doc.FilePath.TrimStart('/'));
+                    imageBytes = System.IO.File.Exists(localPath)
+                        ? await System.IO.File.ReadAllBytesAsync(localPath) : null;
+                }
+                if (imageBytes != null && imageBytes.Length > 0)
+                    processFlowImages.Add((doc.FileName, imageBytes));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to load process flow image '{FileName}' for intake {IntakeId}.",
+                    doc.FileName, intake.IntakeId);
+            }
+        }
+
         try
         {
             var docxBytes = await _docxService.GenerateReportAsync(
                 intake, fieldStatuses, templatePath,
-                intakeDocNames.Count > 0 ? intakeDocNames : null);
+                intakeDocNames.Count > 0 ? intakeDocNames : null,
+                processFlowImages.Count > 0 ? processFlowImages : null);
 
             var now            = DateTime.UtcNow;
             var reportFileName = $"BARTOK_DD_{intake.IntakeId}_{now:yyyyMMddHHmmss}.docx";
@@ -745,18 +788,19 @@ public class ReportController : Controller
         // format and content is required for that section.
         var dedicatedSections = new[]
         {
-            ("raci_content",  "RACI Assignments"),
-            ("sop_content",   "SOP Steps"),
-            ("wi_content",    "Work Instructions"),
-            ("esc_content",   "Escalation Matrix"),
-            ("exc_content",   "Exception Handling"),
-            ("sla_content",   "Service Level Agreements"),
-            ("perf_content",  "Actual vs Target Performance"),
-            ("vol_content",   "Monthly Volume Data"),
-            ("reg_content",   "Regulatory Mapping"),
-            ("train_content", "Training Materials"),
-            ("occ_content",   "OCC Obligations"),
-            ("flow_content",  "Process Flow Description"),
+            ("raci_content",     "RACI Assignments"),
+            ("sop_content",      "SOP Steps"),
+            ("wi_content",       "Work Instructions"),
+            ("esc_content",      "Escalation Matrix"),
+            ("exc_content",      "Exception Handling"),
+            ("sla_content",      "Service Level Agreements"),
+            ("perf_content",     "Actual vs Target Performance"),
+            ("vol_content",      "Monthly Volume Data"),
+            ("reg_content",      "Regulatory Mapping"),
+            ("train_content",    "Training Materials"),
+            ("occ_content",      "OCC Obligations"),
+            ("flow_content",     "Process Flow Description"),
+            ("glossary_content", "Glossary Terms"),
         };
 
         var combinedDocContext = string.Join("\n\n",

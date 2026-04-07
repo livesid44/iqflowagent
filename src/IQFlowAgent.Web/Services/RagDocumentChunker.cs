@@ -136,6 +136,10 @@ internal static class RagDocumentChunker
                                        "schedule 8", "sow", "statement of work",
                                        "contractual obligation", "customer contract",
                                        "occ reference", "occ number", "occ clause"],
+
+        ["Glossary"]                = ["glossary", "term", "definition", "acronym",
+                                       "abbreviation", "terminology", "meaning",
+                                       "stands for", "refers to", "defined as"],
     };
 
     /// <summary>
@@ -158,6 +162,7 @@ internal static class RagDocumentChunker
             "9"   => "regulatory compliance GDPR ISO 27001 ISO 9001 audit data protection regulation legislation legal obligation",
             "10"  => "training module competency e-learning classroom induction on-the-job training material upskilling",
             "11"  => "OCC Orange Customer Contract obligation schedule 8 contractual obligation",
+            "12"  => "glossary term definition acronym abbreviation terminology meaning",
             _     => sectionName,
         };
 
@@ -179,6 +184,7 @@ internal static class RagDocumentChunker
         ("9",  "Regulatory & Compliance"),
         ("10", "Training"),
         ("11", "OCC"),
+        ("12", "Glossary"),
     ];
 
     // ── Public API ────────────────────────────────────────────────────────────

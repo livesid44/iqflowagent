@@ -15,7 +15,8 @@ public interface IDocxReportService
         IntakeRecord intake,
         IList<ReportFieldStatus> fieldStatuses,
         string templatePath,
-        IList<string>? artefactFileNames = null);
+        IList<string>? artefactFileNames = null,
+        IList<(string FileName, byte[] Data)>? processFlowImages = null);
 }
 
 /// <summary>Static definition of one BARTOK template field.</summary>

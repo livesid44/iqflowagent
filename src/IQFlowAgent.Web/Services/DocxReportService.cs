@@ -127,6 +127,12 @@ public class DocxReportService : IDocxReportService
         new("flow_content",       "A. Process Flow",             "Process Flow Description",
             "[LLM to design end to end process map based on all documents uploaded]",
             "AI:processFlow"),
+
+        // ── B. Glossary (Table 6) ─────────────────────────────────────────────
+        // Populated via ReplaceTableDataWithLlmContent matching "Term" + "Definition" headers.
+        new("glossary_content",   "B. Glossary",                 "Glossary Terms",
+            "",
+            "AI:glossaryContent"),
     ];
 
     // Matches any remaining [placeholder] style text left over in the template.
@@ -150,7 +156,8 @@ public class DocxReportService : IDocxReportService
 
     public Task<byte[]> GenerateReportAsync(
         IntakeRecord intake, IList<ReportFieldStatus> fieldStatuses, string templatePath,
-        IList<string>? artefactFileNames = null)
+        IList<string>? artefactFileNames = null,
+        IList<(string FileName, byte[] Data)>? processFlowImages = null)
     {
         var templateBytes = File.ReadAllBytes(templatePath);
         using var ms = new MemoryStream();
@@ -167,6 +174,28 @@ public class DocxReportService : IDocxReportService
         foreach (var fs in fieldStatuses)
         {
             var value = fs.IsNA ? "N/A" : (fs.FillValue ?? string.Empty);
+
+            // ── Volume instruction echo guard ────────────────────────────────
+            // The LLM sometimes copies template instruction text verbatim from uploaded
+            // Word documents instead of extracting real data. Detect and replace with fallback.
+            if (fs.FieldKey == "vol_content" && !string.IsNullOrWhiteSpace(value)
+                && VolumeInstructionPatterns.Any(p =>
+                    value.Contains(p, StringComparison.OrdinalIgnoreCase)))
+            {
+                value = VolumeFallback;
+            }
+
+            // ── Fallback for critical sections that must never be blank ──────
+            if (string.IsNullOrWhiteSpace(value) && !fs.IsNA)
+            {
+                value = fs.FieldKey switch
+                {
+                    "vol_content"  => VolumeFallback,
+                    "sla_content"  => "SLAs to be confirmed with process owner.",
+                    "perf_content" => "Performance data to be confirmed with process owner — provide figures for the past 6 months.",
+                    _              => value
+                };
+            }
 
             // Prefer the current FieldDefs placeholder; fall back to the DB-stored one for
             // any field whose key is no longer in FieldDefs (orphaned legacy record).
@@ -216,6 +245,20 @@ public class DocxReportService : IDocxReportService
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content") ?? string.Empty;
         ApplyCurlyBracketReplacement(body, sopValue);
 
+        // ── RACI table: populate as a proper table with individual cells ────────
+        var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
+        if (!string.IsNullOrWhiteSpace(raciValue))
+            ReplaceRaciTable(body, raciValue);
+
+        // ── SOP table: populate as a proper table with individual cells ─────────
+        if (!string.IsNullOrWhiteSpace(sopValue))
+            ReplaceSopTableRows(body, sopValue);
+
+        // ── Work Instructions: replace paragraph section with LLM content ───────
+        var wiValue = GetFieldFillValue(fieldStatuses, "wi_content");
+        if (!string.IsNullOrWhiteSpace(wiValue))
+            ReplaceWorkInstructionParagraphs(body, wiValue);
+
         // ── Update Document Control table rows for Author and Approver ──────────
         // Both rows have the same placeholder text in the template, so we must use
         // row-label lookup to set them independently.
@@ -240,6 +283,19 @@ public class DocxReportService : IDocxReportService
                 headerKeywords : ["OCC Reference"],
                 keepHeaderRows : 1,
                 content        : occValue);
+
+        // ── Glossary table: populate Term/Definition table ──────────────────────
+        var glossaryValue = GetFieldFillValue(fieldStatuses, "glossary_content");
+        if (!string.IsNullOrWhiteSpace(glossaryValue))
+            ReplaceTableDataWithLlmContent(
+                body,
+                headerKeywords : ["Term", "Definition"],
+                keepHeaderRows : 1,
+                content        : glossaryValue);
+
+        // ── Process Flow Diagram: embed uploaded images ─────────────────────────
+        if (processFlowImages != null && processFlowImages.Count > 0)
+            InsertProcessFlowImages(wordDoc, body, processFlowImages);
 
         // ── Deduplication pass ─────────────────────────────────────────────────
         RemoveDuplicateDataRows(body);
@@ -1205,5 +1261,159 @@ public class DocxReportService : IDocxReportService
             if (hasText)
                 para.Remove();
         }
+    }
+
+    /// <summary>
+    /// Inserts uploaded process flow diagram images into the "A. Process Flow Diagram"
+    /// section of the document. Images are added as inline drawings after the section heading.
+    /// </summary>
+    private static void InsertProcessFlowImages(
+        WordprocessingDocument wordDoc,
+        Body body,
+        IList<(string FileName, byte[] Data)> images)
+    {
+        // Find the "A. Process Flow Diagram" heading paragraph
+        Paragraph? flowHeading = null;
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            var paraText = string.Concat(para.Descendants<Text>().Select(t => t.Text));
+            if (paraText.Contains("A. Process Flow Diagram", StringComparison.OrdinalIgnoreCase)
+                && !paraText.Contains("10", StringComparison.Ordinal))  // skip TOC entry
+            {
+                flowHeading = para;
+                // keep searching for the last (actual heading, not TOC)
+            }
+        }
+
+        if (flowHeading == null) return;
+
+        // Find insertion point: after the flow heading and its sub-paragraphs,
+        // but before the "B. Glossary" section
+        var insertAfter = flowHeading;
+        var sibling = flowHeading.NextSibling();
+        while (sibling != null)
+        {
+            if (sibling is Paragraph nextPara)
+            {
+                var txt = string.Concat(nextPara.Descendants<Text>().Select(t => t.Text));
+                if (txt.StartsWith("B.", StringComparison.OrdinalIgnoreCase)
+                    || txt.Contains("Glossary", StringComparison.OrdinalIgnoreCase))
+                    break;
+                insertAfter = nextPara;
+            }
+            else
+            {
+                break;
+            }
+            sibling = sibling.NextSibling();
+        }
+
+        // Insert each image
+        var mainPart = wordDoc.MainDocumentPart!;
+        foreach (var (fileName, data) in images)
+        {
+            var ext = Path.GetExtension(fileName).ToLowerInvariant();
+            var contentType = ext switch
+            {
+                ".png"  => "image/png",
+                ".jpg"  => "image/jpeg",
+                ".jpeg" => "image/jpeg",
+                ".tiff" => "image/tiff",
+                ".bmp"  => "image/bmp",
+                _       => "image/jpeg"
+            };
+
+            // Add image part
+            var imagePart = mainPart.AddImagePart(ext switch
+            {
+                ".png"  => ImagePartType.Png,
+                ".tiff" => ImagePartType.Tiff,
+                ".bmp"  => ImagePartType.Bmp,
+                _       => ImagePartType.Jpeg
+            });
+
+            using (var stream = new MemoryStream(data))
+                imagePart.FeedData(stream);
+
+            var relationshipId = mainPart.GetIdOfPart(imagePart);
+
+            // Default image dimensions: 6 inches wide × 4 inches tall (in EMUs)
+            // 1 inch = 914400 EMUs
+            const long defaultWidthEmu  = 5486400L; // 6 inches
+            const long defaultHeightEmu = 3657600L; // 4 inches
+
+            // Create the drawing element
+            var drawing = CreateInlineDrawing(relationshipId, fileName,
+                defaultWidthEmu, defaultHeightEmu);
+
+            // Add caption paragraph with image name
+            var captionPara = new Paragraph(
+                new Run(new Text($"Process Flow Diagram: {fileName}")
+                {
+                    Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve
+                }));
+
+            // Add image paragraph
+            var imagePara = new Paragraph(new Run(drawing));
+
+            // Insert after the current insertion point
+            insertAfter.InsertAfterSelf(captionPara);
+            captionPara.InsertAfterSelf(imagePara);
+            insertAfter = imagePara;
+        }
+    }
+
+    /// <summary>
+    /// Creates an OpenXML <see cref="Drawing"/> element for an inline image.
+    /// </summary>
+    private static Drawing CreateInlineDrawing(
+        string relationshipId, string name, long widthEmu, long heightEmu)
+    {
+        var inline = new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline(
+            new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent
+            {
+                Cx = widthEmu,
+                Cy = heightEmu
+            },
+            new DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties
+            {
+                Id = (uint)Math.Abs(name.GetHashCode()),
+                Name = name
+            },
+            new DocumentFormat.OpenXml.Drawing.Wordprocessing.NonVisualGraphicFrameDrawingProperties(
+                new DocumentFormat.OpenXml.Drawing.GraphicFrameLocks { NoChangeAspect = true }),
+            new DocumentFormat.OpenXml.Drawing.Graphic(
+                new DocumentFormat.OpenXml.Drawing.GraphicData(
+                    new DocumentFormat.OpenXml.Drawing.Pictures.Picture(
+                        new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualPictureProperties(
+                            new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualDrawingProperties
+                            {
+                                Id = 0U,
+                                Name = name
+                            },
+                            new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualPictureDrawingProperties()),
+                        new DocumentFormat.OpenXml.Drawing.Pictures.BlipFill(
+                            new DocumentFormat.OpenXml.Drawing.Blip
+                            {
+                                Embed = relationshipId
+                            },
+                            new DocumentFormat.OpenXml.Drawing.Stretch(
+                                new DocumentFormat.OpenXml.Drawing.FillRectangle())),
+                        new DocumentFormat.OpenXml.Drawing.Pictures.ShapeProperties(
+                            new DocumentFormat.OpenXml.Drawing.Transform2D(
+                                new DocumentFormat.OpenXml.Drawing.Offset { X = 0L, Y = 0L },
+                                new DocumentFormat.OpenXml.Drawing.Extents { Cx = widthEmu, Cy = heightEmu }),
+                            new DocumentFormat.OpenXml.Drawing.PresetGeometry(
+                                new DocumentFormat.OpenXml.Drawing.AdjustValueList())
+                            { Preset = DocumentFormat.OpenXml.Drawing.ShapeTypeValues.Rectangle })))
+                { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+        {
+            DistanceFromTop = 0U,
+            DistanceFromBottom = 0U,
+            DistanceFromLeft = 0U,
+            DistanceFromRight = 0U
+        };
+
+        return new Drawing(inline);
     }
 }

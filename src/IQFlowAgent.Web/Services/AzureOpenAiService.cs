@@ -653,6 +653,13 @@ public class AzureOpenAiService : IAzureOpenAiService
                 NEVER paste raw table rows. NEVER repeat the same figure across all months.
                 ALWAYS produce one bullet per actual month in the data.
 
+            13. glossaryContent field — produce a glossary of process-specific terms. Use newline (\n) to separate.
+                Format (one line per term, tab-separated):
+                  [Term]\t[Definition]
+                Extract real terms and acronyms from the intake data, document content, and process description.
+                Include process-specific terminology, system names, acronyms, and any specialised vocabulary.
+                If no specific glossary data is available, generate a reasonable set of terms relevant to this process type.
+
             Respond ONLY with valid JSON matching this structure (no markdown fences):
             {
               "fields": [
@@ -1267,6 +1274,20 @@ public class AzureOpenAiService : IAzureOpenAiService
                      $"Decision point at step 4: if quality check fails, escalation path triggered.\n" +
                      $"All steps logged in ticketing system with timestamps for audit trail.",
                      "Synthesised from intake metadata — regenerate with AI after uploading process documents."),
+
+                "glossaryContent" =>
+                    ("Available",
+                     $"SLA\tService Level Agreement — contractual target for service delivery performance.\n" +
+                     $"KPI\tKey Performance Indicator — measurable value demonstrating process effectiveness.\n" +
+                     $"RACI\tResponsible, Accountable, Consulted, Informed — role assignment matrix.\n" +
+                     $"SOP\tStandard Operating Procedure — step-by-step instructions for process execution.\n" +
+                     $"BARTOK\tBusiness Analysis and Reporting Toolkit for Operations Knowledge.\n" +
+                     $"OCC\tOrange Customer Contract — contractual obligations under MOSA.\n" +
+                     $"MOSA\tManaged Operations Services Agreement.\n" +
+                     $"DD\tDue Diligence — pre-transition assessment of processes.\n" +
+                     $"BCP\tBusiness Continuity Plan — procedures to maintain operations during disruptions.\n" +
+                     $"RCA\tRoot Cause Analysis — investigation methodology for incident resolution.",
+                     "Standard glossary terms — regenerate with AI after uploading process documents."),
 
                 _ =>
                     Placeholder(label, extra: $"(Field key: {aiProp})")
@@ -2047,6 +2068,11 @@ public class AzureOpenAiService : IAzureOpenAiService
             flow_content — Process Flow Description. Describe the end-to-end process as a structured
             narrative with numbered stages covering all roles, decision points, inputs, and outputs.
             This text description will be used to support process flow diagram creation.
+
+            glossary_content — Glossary of terms. Format (tab-separated, one line per term):
+              [Term]\t[Definition]
+            Extract all acronyms, process-specific terms, system names, and specialised vocabulary
+            from the source documents. Include at least 8-10 terms relevant to the process.
             """;
 
         var sb = new System.Text.StringBuilder();
@@ -2878,9 +2904,10 @@ public class AzureOpenAiService : IAzureOpenAiService
 
         // ── System prompt ─────────────────────────────────────────────────────
         var fieldKeys = string.Join(", ", sectionFields.Select(f => $"\"{f.Key}\""));
-        bool hasVolumeField = sectionFields.Any(f => f.Key == "vol_content");
-        bool hasRaciField   = sectionFields.Any(f => f.Key == "raci_content");
-        bool hasSopField    = sectionFields.Any(f => f.Key == "sop_content");
+        bool hasVolumeField  = sectionFields.Any(f => f.Key == "vol_content");
+        bool hasRaciField    = sectionFields.Any(f => f.Key == "raci_content");
+        bool hasSopField     = sectionFields.Any(f => f.Key == "sop_content");
+        bool hasGlossaryField = sectionFields.Any(f => f.Key == "glossary_content");
         // Section-level instruction from the template placeholder (the [..] text)
         var sectionInstruction = sectionFields.FirstOrDefault(f =>
             !string.IsNullOrWhiteSpace(f.TemplatePlaceholder))?.TemplatePlaceholder ?? "";
@@ -3014,6 +3041,17 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  Step 2: Assess risk and complexity of the requested change\n" +
             "  Role: Change Approver | System: CAB Review Board | Output: Risk assessment record\n" +
             "  Automation: Manual | Rating: Medium | Type: N/A" : "")
+            + // ── Per-field override for glossary ──────────────────────────────
+            (hasGlossaryField ? "\n\n" +
+            "SPECIAL RULE FOR KEY \"glossary_content\" (Glossary Terms):\n" +
+            "  Produce a glossary of process-specific terms extracted from the uploaded documents.\n" +
+            "  Format: one line per term, with term and definition separated by a tab character:\n" +
+            "    [Term]\\t[Definition]\n" +
+            "  Include ALL acronyms, process-specific terms, system names, and specialised vocabulary\n" +
+            "  found in the source documents.\n" +
+            "  EXAMPLE OUTPUT:\n" +
+            "  SLA\\tService Level Agreement — contractual target for service delivery performance.\n" +
+            "  RFC\\tRequest for Change — formal request to modify an IT service or system." : "")
             + sectionInstructionClause;
 
         // ── User message ──────────────────────────────────────────────────────
