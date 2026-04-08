@@ -811,9 +811,28 @@ public class ReportController : Controller
 
         foreach (var (fieldKey, fieldLabel) in dedicatedSections)
         {
+            // Prefer field-specific task artifact text when available.
+            // This avoids sending the entire combined context (e.g. multi-sheet
+            // Excel with unrelated data) which can confuse the LLM.
+            string? fieldArtifactContext = null;
+            if (fieldTaskMap.TryGetValue(fieldKey, out var linkedTasks) && linkedTasks.Count > 0)
+            {
+                var fieldSpecificText = await AggregateArtifactTextAsync(linkedTasks);
+                if (!string.IsNullOrWhiteSpace(fieldSpecificText))
+                {
+                    // Use field-specific text as primary, supplement with global docs only
+                    fieldArtifactContext = !string.IsNullOrWhiteSpace(globalDocText)
+                        ? fieldSpecificText
+                          + "\n\n=== SUPPLEMENTARY INTAKE DOCUMENTS ===\n"
+                          + globalDocText
+                        : fieldSpecificText;
+                }
+            }
+            fieldArtifactContext ??= combinedDocContextOrNull;
+
             var generated = await _aiService.GenerateSingleFieldAsync(
                 intake, fieldKey, fieldLabel,
-                null, intake.AnalysisResult, combinedDocContextOrNull);
+                null, intake.AnalysisResult, fieldArtifactContext);
             if (!string.IsNullOrWhiteSpace(generated))
             {
                 aiValues[fieldKey] = generated;
@@ -914,7 +933,7 @@ public class ReportController : Controller
             var e = entry.Entity;
             if (e.Status != "NA")
             {
-                if (!string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Missing")
+                if (!string.IsNullOrWhiteSpace(e.FillValue) && e.Status is "Missing" or "TaskCreated")
                     e.Status = "Available";
                 else if (string.IsNullOrWhiteSpace(e.FillValue) && e.Status == "Available")
                     e.Status = "Missing";

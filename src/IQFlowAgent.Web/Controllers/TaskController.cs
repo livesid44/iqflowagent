@@ -230,6 +230,23 @@ public class TaskController : Controller
             CreatedByName = User.Identity?.Name
         });
 
+        // ── Propagate task completion to linked ReportFieldStatus ──────────
+        // When a task is marked "Completed" and it has a linked field that is
+        // still "TaskCreated", check if the field already has a fill value
+        // (populated by AnalyzeForTask) and promote it to "Available".
+        // This ensures the Report/Prepare page reflects task outcomes.
+        if (newStatus == "Completed")
+        {
+            var linkedField = await _db.ReportFieldStatuses
+                .FirstOrDefaultAsync(f => f.LinkedTaskId == task.TaskId
+                                       && f.Status == "TaskCreated");
+            if (linkedField != null && !string.IsNullOrWhiteSpace(linkedField.FillValue))
+            {
+                linkedField.Status    = "Available";
+                linkedField.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _db.SaveChangesAsync();
 
         TempData["Success"] = $"Status updated to '{newStatus}'.";
@@ -393,6 +410,20 @@ public class TaskController : Controller
                 CreatedByUserId = User.Identity?.Name,
                 CreatedByName   = User.Identity?.Name
             });
+
+            // ── Propagate validated content to the linked ReportFieldStatus ──
+            // When the task artifact passes validation, extract content and update
+            // the linked field so the Report/Prepare page reflects the data.
+            var linkedField = await _db.ReportFieldStatuses
+                .FirstOrDefaultAsync(f => f.LinkedTaskId == task.TaskId
+                                       && f.Status == "TaskCreated");
+            if (linkedField != null)
+            {
+                linkedField.FillValue = topChunks;
+                linkedField.Status    = "Available";
+                linkedField.Notes     = "Extracted by task artifact analysis.";
+                linkedField.UpdatedAt = now;
+            }
 
             await _db.SaveChangesAsync();
             TempData["Success"] = $"Analysis passed — relevant content found for '{sectionName}'.";
