@@ -38,8 +38,9 @@
     .prog-stat { text-align: center; }
     .prog-stat-num { font-size: 1.6rem; font-weight: 800; }
     .prog-stat-lbl { font-size: 0.72rem; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }
-    .prog-stat-num[data-filter] { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
-    .prog-stat-num[data-filter]:hover { opacity: .7; }
+    .prog-stat[data-filter] { cursor: pointer; }
+    .prog-stat[data-filter]:hover { opacity: .7; }
+    .prog-stat[data-filter] .prog-stat-num { text-decoration: underline; text-underline-offset: 3px; }
     .section-counts span[data-filter] { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
     .section-counts span[data-filter]:hover { opacity: .7; }
     .filter-active-banner { background:#eef2ff; border:1px solid #a5b4fc; border-radius:8px; padding:8px 16px; margin-bottom:12px; font-size:0.82rem; color:#3730a3; display:flex; align-items:center; gap:10px; }
@@ -181,10 +182,10 @@
         <!-- Progress Banner -->
         <div class="progress-banner">
             <div class="prog-stat"><div class="prog-stat-num">@totalFields</div><div class="prog-stat-lbl">Total Fields</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-available" data-filter="available" onclick="applyFilter('available')" title="Click to show only Available fields">@availableFields</div><div class="prog-stat-lbl">Available</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-na" data-filter="na" onclick="applyFilter('na')" title="Click to show only N/A fields">@naFields</div><div class="prog-stat-lbl">Marked N/A</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-missing" data-filter="missing" onclick="applyFilter('missing')" title="Click to show only Missing fields">@missingFields</div><div class="prog-stat-lbl">Missing</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-task" data-filter="task" onclick="applyFilter('task')" title="Click to show only Task Created fields">@taskCreated</div><div class="prog-stat-lbl">Tasks Created</div></div>
+            <div class="prog-stat" data-filter="available" onclick="applyFilter('available')" title="Click to show only Available fields"><div class="prog-stat-num num-available" data-filter="available">@availableFields</div><div class="prog-stat-lbl">Available</div></div>
+            <div class="prog-stat" data-filter="na" onclick="applyFilter('na')" title="Click to show only N/A fields"><div class="prog-stat-num num-na" data-filter="na">@naFields</div><div class="prog-stat-lbl">Marked N/A</div></div>
+            <div class="prog-stat" data-filter="missing" onclick="applyFilter('missing')" title="Click to show only Missing fields"><div class="prog-stat-num num-missing" data-filter="missing">@missingFields</div><div class="prog-stat-lbl">Missing</div></div>
+            <div class="prog-stat" data-filter="task" onclick="applyFilter('task')" title="Click to show only Task Created fields"><div class="prog-stat-num num-task" data-filter="task">@taskCreated</div><div class="prog-stat-lbl">Tasks Created</div></div>
             <div class="prog-bar-wrap">
                 @{ var pct = totalFields > 0 ? ((availableFields + naFields) * 100 / totalFields) : 0; }
                 <div style="font-size:0.78rem;color:#6b7280;margin-bottom:4px;">@pct% ready</div>
@@ -329,7 +330,7 @@
                         <!-- Label + status -->
                         <div>
                             <div class="field-label">@field.FieldLabel</div>
-                            <div style="margin-top:6px;">
+                            <div style="margin-top:6px;" id="badge-wrap-@field.Id">
                                 @{
                                     var badgeClass = field.IsNA ? "badge-na" : field.Status switch {
                                         "Available"   => "badge-available",
@@ -341,24 +342,25 @@
                                     };
                                     var badgeText = field.IsNA ? "N/A" : field.Status;
                                 }
-                                <span class="badge @badgeClass">@badgeText</span>
+                                <span class="badge @badgeClass" id="badge-@field.Id">@badgeText</span>
                             </div>
-                            @if (!string.IsNullOrWhiteSpace(field.LinkedTaskId))
-                            {
-                                <div style="font-size:0.73rem;color:#7c3aed;margin-top:4px;">Task: @field.LinkedTaskId</div>
-                            }
+                            <div style="font-size:0.73rem;color:#7c3aed;margin-top:4px;@(string.IsNullOrWhiteSpace(field.LinkedTaskId) ? "display:none" : "")" id="task-link-@field.Id">
+                                Task: <span id="task-id-@field.Id">@field.LinkedTaskId</span>
+                            </div>
                         </div>
 
                         <!-- Value editor -->
                         <div class="field-value">
-                            <form method="post" action="/Report/SetValue" id="save-form-@field.Id">
+                            <form method="post" action="/Report/SetValue" id="save-form-@field.Id"
+                                  onsubmit="return saveValueAjax(event, @field.Id)">
                                 @Html.AntiForgeryToken()
                                 <input type="hidden" name="fieldStatusId" value="@field.Id" />
                                 <textarea name="fillValue" id="textarea-@field.Id" rows="2" placeholder="@field.TemplatePlaceholder">@field.FillValue</textarea>
                                 <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                                    <button type="submit" class="btn-sm btn-save-val">💾 Save Value</button>
+                                    <button type="submit" class="btn-sm btn-save-val" id="save-btn-@field.Id">💾 Save Value</button>
                                     <button type="button" class="btn-ai-gen" id="ai-btn-@field.Id"
                                             onclick="toggleAiPanel(@field.Id)">✨ Generate with AI</button>
+                                    <span id="save-status-@field.Id" style="font-size:0.72rem;"></span>
                                 </div>
                             </form>
                             <!-- AI generation panel -->
@@ -390,34 +392,28 @@
                         </div>
 
                         <!-- Action buttons -->
-                        <div class="action-btns">
-                            @if (!field.IsNA)
-                            {
-                                <form method="post" action="/Report/MarkNA">
-                                    @Html.AntiForgeryToken()
-                                    <input type="hidden" name="fieldStatusId" value="@field.Id" />
-                                    <input type="hidden" name="isNA" value="true" />
-                                    <button type="submit" class="btn-sm btn-mark-na">Mark N/A</button>
-                                </form>
+                        <div class="action-btns" id="actions-@field.Id">
+                            @{
+                                var showMarkNA = !field.IsNA;
+                                var showCreateTask = (field.Status is "Missing" or "Pending" or "TaskCreated") && !field.IsNA;
                             }
-                            else
-                            {
-                                <form method="post" action="/Report/MarkNA">
-                                    @Html.AntiForgeryToken()
-                                    <input type="hidden" name="fieldStatusId" value="@field.Id" />
-                                    <input type="hidden" name="isNA" value="false" />
-                                    <button type="submit" class="btn-sm btn-undo-na">Undo N/A</button>
-                                </form>
-                            }
+                            <form method="post" action="/Report/MarkNA" id="na-form-@field.Id"
+                                  onsubmit="return markNaAjax(event, @field.Id, @(field.IsNA ? "false" : "true"))">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="fieldStatusId" value="@field.Id" />
+                                <input type="hidden" name="isNA" value="@(field.IsNA ? "false" : "true")" id="na-val-@field.Id" />
+                                <button type="submit" class="btn-sm @(field.IsNA ? "btn-undo-na" : "btn-mark-na")" id="na-btn-@field.Id">
+                                    @(field.IsNA ? "Undo N/A" : "Mark N/A")
+                                </button>
+                            </form>
 
-                            @if (field.Status is "Missing" or "Pending" or "TaskCreated" && !field.IsNA)
-                            {
-                                <form method="post" action="/Report/CreateTaskForField">
-                                    @Html.AntiForgeryToken()
-                                    <input type="hidden" name="fieldStatusId" value="@field.Id" />
-                                    <button type="submit" class="btn-sm btn-task">+ Create Task</button>
-                                </form>
-                            }
+                            <form method="post" action="/Report/CreateTaskForField" id="task-form-@field.Id"
+                                  style="@(showCreateTask ? "" : "display:none")"
+                                  onsubmit="return createTaskAjax(event, @field.Id)">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="fieldStatusId" value="@field.Id" />
+                                <button type="submit" class="btn-sm btn-task" id="task-btn-@field.Id">+ Create Task</button>
+                            </form>
                         </div>
                     </div>
                 }
@@ -472,6 +468,183 @@ async function runAiGenerate(fieldId, fieldLabel) {
     runBtn.textContent = '🤖 Generate';
 }
 
+/* ── AJAX helpers ──────────────────────────────────────────────── */
+var badgeMap = {
+    'Available':   { cls: 'badge-available', text: 'Available',   filter: 'available' },
+    'Missing':     { cls: 'badge-missing',   text: 'Missing',     filter: 'missing' },
+    'Pending':     { cls: 'badge-pending',   text: 'Pending',     filter: 'missing' },
+    'TaskCreated': { cls: 'badge-task',      text: 'TaskCreated', filter: 'task' },
+    'NA':          { cls: 'badge-na',        text: 'N/A',         filter: 'na' }
+};
+
+function updateFieldBadge(fieldId, status, isNA) {
+    var row   = document.getElementById('field-' + fieldId);
+    var badge = document.getElementById('badge-' + fieldId);
+    if (!row || !badge) return;
+
+    var info = isNA ? badgeMap['NA'] : (badgeMap[status] || badgeMap['Missing']);
+    badge.className = 'badge ' + info.cls;
+    badge.textContent = info.text;
+    row.setAttribute('data-status', info.filter);
+
+    // Update the NA button
+    var naBtn = document.getElementById('na-btn-' + fieldId);
+    var naVal = document.getElementById('na-val-' + fieldId);
+    if (naBtn && naVal) {
+        if (isNA) {
+            naBtn.textContent = 'Undo N/A';
+            naBtn.className = 'btn-sm btn-undo-na';
+            naVal.value = 'false';
+        } else {
+            naBtn.textContent = 'Mark N/A';
+            naBtn.className = 'btn-sm btn-mark-na';
+            naVal.value = 'true';
+        }
+    }
+
+    // Show/hide Create Task button
+    var taskForm = document.getElementById('task-form-' + fieldId);
+    if (taskForm) {
+        var showTask = !isNA && (status === 'Missing' || status === 'Pending' || status === 'TaskCreated');
+        taskForm.style.display = showTask ? '' : 'none';
+    }
+
+    // Reapply active filter if present
+    if (currentFilter) { applyFilter(currentFilter); }
+}
+
+function updateProgressCounts() {
+    var rows = document.querySelectorAll('.field-row');
+    var total = rows.length, avail = 0, na = 0, missing = 0, task = 0;
+    rows.forEach(function(r) {
+        switch (r.getAttribute('data-status')) {
+            case 'available': avail++; break;
+            case 'na': na++; break;
+            case 'task': task++; break;
+            default: missing++; break;
+        }
+    });
+    // Update the banner numbers
+    document.querySelectorAll('.prog-stat-num[data-filter="available"]').forEach(function(el) { el.textContent = avail; });
+    document.querySelectorAll('.prog-stat-num[data-filter="na"]').forEach(function(el) { el.textContent = na; });
+    document.querySelectorAll('.prog-stat-num[data-filter="missing"]').forEach(function(el) { el.textContent = missing; });
+    document.querySelectorAll('.prog-stat-num[data-filter="task"]').forEach(function(el) { el.textContent = task; });
+    // Update progress bar
+    var pct = total > 0 ? Math.round((avail + na) * 100 / total) : 0;
+    var fillBar = document.querySelector('.prog-bar-fill');
+    if (fillBar) fillBar.style.width = pct + '%';
+    var pctLabel = document.querySelector('.prog-bar-wrap > div');
+    if (pctLabel) pctLabel.textContent = pct + '% ready';
+}
+
+function showInlineStatus(fieldId, elementId, message, isSuccess) {
+    var el = document.getElementById(elementId);
+    if (el) {
+        el.textContent = message;
+        el.style.color = isSuccess ? '#059669' : '#dc2626';
+        if (isSuccess) { setTimeout(function() { el.textContent = ''; }, 3000); }
+    }
+}
+
+/* ── Save Value via AJAX ───────────────────────────────────────── */
+async function saveValueAjax(event, fieldId) {
+    event.preventDefault();
+    var form = document.getElementById('save-form-' + fieldId);
+    var btn  = document.getElementById('save-btn-' + fieldId);
+    var statusEl = 'save-status-' + fieldId;
+    btn.disabled = true;
+    btn.textContent = '⏳ Saving…';
+
+    try {
+        var formData = new FormData(form);
+        var resp = await fetch('/Report/SetValue', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        var data = await resp.json();
+        if (data.success) {
+            updateFieldBadge(fieldId, data.status, data.isNA);
+            updateProgressCounts();
+            showInlineStatus(fieldId, statusEl, '✓ Saved', true);
+        } else {
+            showInlineStatus(fieldId, statusEl, '✗ ' + (data.message || 'Save failed.'), false);
+        }
+    } catch (ex) {
+        showInlineStatus(fieldId, statusEl, '✗ Network error: ' + ex.message, false);
+    }
+    btn.disabled = false;
+    btn.textContent = '💾 Save Value';
+    return false;
+}
+
+/* ── Mark N/A via AJAX ─────────────────────────────────────────── */
+async function markNaAjax(event, fieldId, newIsNA) {
+    event.preventDefault();
+    var btn = document.getElementById('na-btn-' + fieldId);
+    btn.disabled = true;
+    btn.textContent = '⏳ …';
+
+    try {
+        var form = document.getElementById('na-form-' + fieldId);
+        var formData = new FormData(form);
+        var resp = await fetch('/Report/MarkNA', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        var data = await resp.json();
+        if (data.success) {
+            updateFieldBadge(fieldId, data.status, data.isNA);
+            updateProgressCounts();
+        } else {
+            alert('Failed: ' + (data.message || 'Unknown error.'));
+        }
+    } catch (ex) {
+        alert('Network error: ' + ex.message);
+    }
+    btn.disabled = false;
+    // Button text/class is updated by updateFieldBadge
+}
+
+/* ── Create Task via AJAX ──────────────────────────────────────── */
+async function createTaskAjax(event, fieldId) {
+    event.preventDefault();
+    var btn = document.getElementById('task-btn-' + fieldId);
+    btn.disabled = true;
+    btn.textContent = '⏳ Creating…';
+
+    try {
+        var form = document.getElementById('task-form-' + fieldId);
+        var formData = new FormData(form);
+        var resp = await fetch('/Report/CreateTaskForField', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        var data = await resp.json();
+        if (data.success) {
+            updateFieldBadge(fieldId, 'TaskCreated', false);
+            // Show linked task ID
+            var taskLink = document.getElementById('task-link-' + fieldId);
+            var taskIdEl = document.getElementById('task-id-' + fieldId);
+            if (taskLink && taskIdEl) {
+                taskIdEl.textContent = data.taskId;
+                taskLink.style.display = '';
+            }
+            updateProgressCounts();
+            showInlineStatus(fieldId, 'save-status-' + fieldId, '✓ Task ' + data.taskId + ' created', true);
+        } else {
+            alert('Failed to create task: ' + (data.message || 'Unknown error.'));
+        }
+    } catch (ex) {
+        alert('Network error creating task: ' + ex.message);
+    }
+    btn.disabled = false;
+    btn.textContent = '+ Create Task';
+    return false;
+}
+
 /* ── Status filter ─────────────────────────────────────────────── */
 var currentFilter = null;
 var filterLabels = { available: 'Available', missing: 'Missing', na: 'N/A', task: 'Task Created' };
@@ -510,5 +683,13 @@ function clearFilter() {
         card.style.display = '';
     });
 }
+
+/* ── Scroll to anchor on page load ─────────────────────────────── */
+document.addEventListener('DOMContentLoaded', function() {
+    if (window.location.hash) {
+        var el = document.querySelector(window.location.hash);
+        if (el) { setTimeout(function() { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); }
+    }
+});
 </script>
 }

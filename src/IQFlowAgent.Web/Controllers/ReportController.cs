@@ -23,6 +23,8 @@ public class ReportController : Controller
     private const string TemplateName = "BARTOK_DD_Template.docx";
     private const int MaxArtifactCharsPerFile = 8_000;  // per-file cap when aggregating task artifacts
 
+    private bool IsAjaxRequest => Request.Headers.XRequestedWith == "XMLHttpRequest";
+
     private static string GenerateTaskId() =>
         "TSK-" + DateTime.UtcNow.ToString("yyyyMMdd") + "-" + Guid.NewGuid().ToString("N")[..6].ToUpper();
 
@@ -166,12 +168,16 @@ public class ReportController : Controller
     public async Task<IActionResult> MarkNA(int fieldStatusId, bool isNA)
     {
         var field = await _db.ReportFieldStatuses.FindAsync(fieldStatusId);
-        if (field == null) return NotFound();
+        if (field == null)
+            return IsAjaxRequest ? Json(new { success = false, message = "Field not found." }) : NotFound();
 
         field.IsNA      = isNA;
         field.Status    = isNA ? "NA" : "Missing";
         field.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+
+        if (IsAjaxRequest)
+            return Json(new { success = true, status = field.Status, isNA = field.IsNA });
 
         return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
     }
@@ -182,7 +188,8 @@ public class ReportController : Controller
     public async Task<IActionResult> SetValue(int fieldStatusId, string fillValue)
     {
         var field = await _db.ReportFieldStatuses.FindAsync(fieldStatusId);
-        if (field == null) return NotFound();
+        if (field == null)
+            return IsAjaxRequest ? Json(new { success = false, message = "Field not found." }) : NotFound();
 
         field.FillValue  = fillValue;
         field.Status     = string.IsNullOrWhiteSpace(fillValue) ? "Missing" : "Available";
@@ -192,6 +199,9 @@ public class ReportController : Controller
             : "Manually entered by user.";
         field.UpdatedAt  = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+
+        if (IsAjaxRequest)
+            return Json(new { success = true, status = field.Status, isNA = false });
 
         return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
     }
@@ -204,59 +214,78 @@ public class ReportController : Controller
         var field = await _db.ReportFieldStatuses
             .Include(f => f.IntakeRecord)
             .FirstOrDefaultAsync(f => f.Id == fieldStatusId);
-        if (field == null) return NotFound();
+        if (field == null)
+            return IsAjaxRequest ? Json(new { success = false, message = "Field not found." }) : NotFound();
 
         var intake = field.IntakeRecord;
+        if (intake == null)
+            return IsAjaxRequest
+                ? Json(new { success = false, message = "Linked intake record not found." })
+                : NotFound();
 
-        // Check for existing open task with same title (reuse only if still active)
-        var title = $"[Report] Gather: {field.FieldLabel}";
-        var existing = await _db.IntakeTasks
-            .FirstOrDefaultAsync(t => t.IntakeRecordId == intake.Id && t.Title == title
-                && t.Status != "Completed" && t.Status != "Closed");
-
-        string taskId;
-        if (existing != null)
+        try
         {
-            taskId = existing.TaskId;
+            // Check for existing open task with same title (reuse only if still active)
+            var title = $"[Report] Gather: {field.FieldLabel}";
+            var existing = await _db.IntakeTasks
+                .FirstOrDefaultAsync(t => t.IntakeRecordId == intake.Id && t.Title == title
+                    && t.Status != "Completed" && t.Status != "Closed");
+
+            string taskId;
+            if (existing != null)
+            {
+                taskId = existing.TaskId;
+            }
+            else
+            {
+                var now = DateTime.UtcNow;
+                var task = new IntakeTask
+                {
+                    TaskId         = GenerateTaskId(),
+                    IntakeRecordId = intake.Id,
+                    Title          = title,
+                    Description    = $"Gather the following information required for the BARTOK DD Report field '{field.FieldLabel}' (Section: {field.Section}): {field.Notes}",
+                    Priority       = "High",
+                    Owner          = intake.ProcessOwnerEmail ?? User.Identity?.Name ?? "Unassigned",
+                    Status         = "Open",
+                    CreatedAt      = now,
+                    DueDate        = now.AddHours(48),
+                    CreatedByUserId = User.Identity?.Name
+                };
+                _db.IntakeTasks.Add(task);
+                _db.TaskActionLogs.Add(new TaskActionLog
+                {
+                    Task            = task,
+                    ActionType      = "StatusChange",
+                    OldStatus       = null,
+                    NewStatus       = "Open",
+                    Comment         = $"Task created to gather report field '{field.FieldLabel}' for BARTOK DD Report.",
+                    CreatedAt       = now,
+                    CreatedByUserId = User.Identity?.Name,
+                    CreatedByName   = User.Identity?.Name
+                });
+                taskId = task.TaskId;
+            }
+
+            field.Status        = "TaskCreated";
+            field.LinkedTaskId  = taskId;
+            field.UpdatedAt     = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            if (IsAjaxRequest)
+                return Json(new { success = true, taskId, fieldLabel = field.FieldLabel });
+
+            TempData["Success"] = $"Task created for field '{field.FieldLabel}'.";
+            return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
         }
-        else
+        catch (Exception ex)
         {
-            var now = DateTime.UtcNow;
-            var task = new IntakeTask
-            {
-                TaskId         = GenerateTaskId(),
-                IntakeRecordId = intake.Id,
-                Title          = title,
-                Description    = $"Gather the following information required for the BARTOK DD Report field '{field.FieldLabel}' (Section: {field.Section}): {field.Notes}",
-                Priority       = "High",
-                Owner          = intake.ProcessOwnerEmail ?? User.Identity?.Name ?? "Unassigned",
-                Status         = "Open",
-                CreatedAt      = now,
-                DueDate        = now.AddHours(48),
-                CreatedByUserId = User.Identity?.Name
-            };
-            _db.IntakeTasks.Add(task);
-            _db.TaskActionLogs.Add(new TaskActionLog
-            {
-                Task            = task,
-                ActionType      = "StatusChange",
-                OldStatus       = null,
-                NewStatus       = "Open",
-                Comment         = $"Task created to gather report field '{field.FieldLabel}' for BARTOK DD Report.",
-                CreatedAt       = now,
-                CreatedByUserId = User.Identity?.Name,
-                CreatedByName   = User.Identity?.Name
-            });
-            taskId = task.TaskId;
+            _logger.LogError(ex, "Failed to create task for field {FieldId}", fieldStatusId);
+            if (IsAjaxRequest)
+                return Json(new { success = false, message = "Failed to create task: " + ex.Message });
+            TempData["Error"] = "Failed to create task. Please try again.";
+            return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
         }
-
-        field.Status        = "TaskCreated";
-        field.LinkedTaskId  = taskId;
-        field.UpdatedAt     = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-
-        TempData["Success"] = $"Task created for field '{field.FieldLabel}'.";
-        return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
     }
 
     // ── POST /Report/AiGenerateField ─────────────────────────────────────────
