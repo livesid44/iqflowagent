@@ -112,7 +112,12 @@ internal static class RagDocumentChunker
                                        "daily volumes", "weekly volumes", "per day", "per month",
                                        "total transactions", "transaction count",
                                        "incidents per", "cases per", "requests per",
-                                       "high season", "low season"],
+                                       "high season", "low season",
+                                       "received", "handled", "tickets",
+                                       "jan-", "feb-", "mar-", "apr-", "may-", "jun-",
+                                       "jul-", "aug-", "sep-", "oct-", "nov-", "dec-",
+                                       "ytd", "year to date", "average volume",
+                                       "ticket volume", "monthly trend"],
 
         ["Regulatory & Compliance"] = ["regulation", "compliance regulation", "gdpr", "iso 27001",
                                        "iso 9001", "iso 22301", "hipaa", "sox",

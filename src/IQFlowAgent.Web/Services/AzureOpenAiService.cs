@@ -2015,6 +2015,10 @@ public class AzureOpenAiService : IAzureOpenAiService
               [Role name]: [a] | [b] | [c] | [d]
             Where each [a]-[d] is R, A, C, I, or hyphen (-). Use semicolons to separate task names.
             Derive real task names and role titles from the intake data and document content.
+            IMPORTANT: Task names must be concise 2-5 word labels (e.g. "Detect and report incidents").
+            Do NOT copy long bullet-point descriptions as task names.
+            Each role line has EXACTLY one assignment letter per task column, separated by pipes.
+            Include ALL roles and ALL tasks found in the source data (up to 8 roles x 8 tasks).
             If no RACI data is available, infer a plausible 4-role x 4-task matrix from the process.
 
             sop_content — SOP Steps. Produce all steps in this format, one block per step:
@@ -2046,10 +2050,13 @@ public class AzureOpenAiService : IAzureOpenAiService
             Use only performance data from the source documents.
             If no data is present: "Performance data to be confirmed with process owner."
 
-            vol_content — Monthly Volume Data. Produce month-by-month data:
+            vol_content — Monthly Volume Data. Produce month-by-month data as pipe-delimited rows:
               Month | Volume / Transaction Type | Notes
               Mar-25 | [volume] | [notes or "None"]
               Forecast Avg | [forecast] |
+            IMPORTANT: Look for Excel tab-separated rows with columns like Month, Received, Handled,
+            Tickets, Volume etc. Month labels often appear as "Jan-25", "Feb-25", etc.
+            Extract ALL months with actual numeric data. Do NOT skip any row.
             If volume data is in the artifact text extract it. Otherwise: "Volume data to be confirmed with process owner."
 
             reg_content — Regulatory and Compliance Mapping. Format:
@@ -2961,7 +2968,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             "   Omit any field you genuinely cannot fill from the provided data." +
             // ── Per-field override for monthly volume data ─────────────────────
             (hasVolumeField ? "\n\n" +
-            "SPECIAL RULE FOR KEY \"po_volumes\" (Monthly Volumes) — overrides rule 1 for this field only:\n" +
+            "SPECIAL RULE FOR KEY \"vol_content\" (Monthly Volumes) — overrides rule 1 for this field only:\n" +
             "  GOAL: produce a month-by-month volumetric trend with one bullet line per month.\n" +
             "  Prompt style: \"month-by-month volumetric trend — give monthly pointers not table\".\n\n" +
             "  Step 1 — Find tabular volume data in the Task Artifacts.\n" +
@@ -3015,7 +3022,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             "    CORRECT: TASKS: Submit Change Request ; Create Demand Entry ; Facilitate Communication ; Assess & Qualify Change\n" +
             "  - Role names: copy the short role title from the source (e.g. \"Change Requester\").\n" +
             "  - Each assignment cell: one letter (R / A / C / I) or a hyphen (-). No other text.\n" +
-            "  - Include up to 4 tasks and up to 4 roles. If the source has more, select the most significant 4.\n" +
+            "  - Include up to 8 tasks and up to 8 roles. If the source has more, select the most significant ones.\n" +
             "  - Do NOT include task descriptions, responsibilities, or any explanatory text in the matrix.\n" +
             "  EXAMPLE OUTPUT (2 tasks, 2 roles — note semicolons between task names, pipes for assignments):\n" +
             "  TASKS: Submit Change Request ; Assess & Approve Change\n" +

@@ -700,15 +700,30 @@ public class ReportController : Controller
         }
 
         // ── Section-keyword task mapping (second pass) ────────────────────────
+        // Supplementary keywords extend the section-name-derived keywords for
+        // sections whose single-word name is too narrow to catch related tasks.
+        var supplementaryKeywords = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["8. Volumetrics"] = ["volume", "monthly", "transaction", "received", "handled", "tickets"],
+            ["3. RACI"]        = ["raci", "role", "responsible", "accountable"],
+            ["7. SLAs & Performance"] = ["sla", "performance", "kpi", "metric", "target"],
+        };
+
         var sectionKeywordMap = fieldDefs
             .GroupBy(f => f.Section, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 g => g.Key,
-                g => g.Key
-                    .Split([' ', '.', ':', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
-                    .Select(w => w.Trim().ToLowerInvariant())
-                    .Where(w => w.Length >= 3 && !int.TryParse(w, out _))
-                    .ToArray(),
+                g =>
+                {
+                    var nameWords = g.Key
+                        .Split([' ', '.', ':', '-', '_'], StringSplitOptions.RemoveEmptyEntries)
+                        .Select(w => w.Trim().ToLowerInvariant())
+                        .Where(w => w.Length >= 3 && !int.TryParse(w, out _))
+                        .ToList();
+                    if (supplementaryKeywords.TryGetValue(g.Key, out var extras))
+                        nameWords.AddRange(extras.Where(e => !nameWords.Contains(e)));
+                    return nameWords.ToArray();
+                },
                 StringComparer.OrdinalIgnoreCase);
 
         var taskWordMap = tasks.ToDictionary(
