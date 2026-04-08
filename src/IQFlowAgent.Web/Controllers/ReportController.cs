@@ -173,7 +173,7 @@ public class ReportController : Controller
         field.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
+        return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
     }
 
     // ── POST /Report/SetValue ────────────────────────────────────────────────
@@ -193,7 +193,7 @@ public class ReportController : Controller
         field.UpdatedAt  = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
+        return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
     }
 
     // ── POST /Report/CreateTaskForField ─────────────────────────────────────
@@ -208,10 +208,11 @@ public class ReportController : Controller
 
         var intake = field.IntakeRecord;
 
-        // Check for existing task with same title
+        // Check for existing open task with same title (reuse only if still active)
         var title = $"[Report] Gather: {field.FieldLabel}";
         var existing = await _db.IntakeTasks
-            .FirstOrDefaultAsync(t => t.IntakeRecordId == intake.Id && t.Title == title);
+            .FirstOrDefaultAsync(t => t.IntakeRecordId == intake.Id && t.Title == title
+                && t.Status != "Completed" && t.Status != "Closed");
 
         string taskId;
         if (existing != null)
@@ -255,7 +256,7 @@ public class ReportController : Controller
         await _db.SaveChangesAsync();
 
         TempData["Success"] = $"Task created for field '{field.FieldLabel}'.";
-        return RedirectToAction(nameof(Prepare), new { selectedId = field.IntakeRecordId });
+        return Redirect(Url.Action(nameof(Prepare), new { selectedId = field.IntakeRecordId }) + $"#field-{fieldStatusId}");
     }
 
     // ── POST /Report/AiGenerateField ─────────────────────────────────────────

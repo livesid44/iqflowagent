@@ -38,6 +38,12 @@
     .prog-stat { text-align: center; }
     .prog-stat-num { font-size: 1.6rem; font-weight: 800; }
     .prog-stat-lbl { font-size: 0.72rem; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }
+    .prog-stat-num[data-filter] { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    .prog-stat-num[data-filter]:hover { opacity: .7; }
+    .section-counts span[data-filter] { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+    .section-counts span[data-filter]:hover { opacity: .7; }
+    .filter-active-banner { background:#eef2ff; border:1px solid #a5b4fc; border-radius:8px; padding:8px 16px; margin-bottom:12px; font-size:0.82rem; color:#3730a3; display:flex; align-items:center; gap:10px; }
+    .filter-active-banner .clear-filter { cursor:pointer; font-weight:700; color:#4f46e5; text-decoration:underline; }
     .num-available { color: #10b981; }
     .num-na        { color: #6b7280; }
     .num-missing   { color: #ef4444; }
@@ -175,10 +181,10 @@
         <!-- Progress Banner -->
         <div class="progress-banner">
             <div class="prog-stat"><div class="prog-stat-num">@totalFields</div><div class="prog-stat-lbl">Total Fields</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-available">@availableFields</div><div class="prog-stat-lbl">Available</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-na">@naFields</div><div class="prog-stat-lbl">Marked N/A</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-missing">@missingFields</div><div class="prog-stat-lbl">Missing</div></div>
-            <div class="prog-stat"><div class="prog-stat-num num-task">@taskCreated</div><div class="prog-stat-lbl">Tasks Created</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-available" data-filter="available" onclick="applyFilter('available')" title="Click to show only Available fields">@availableFields</div><div class="prog-stat-lbl">Available</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-na" data-filter="na" onclick="applyFilter('na')" title="Click to show only N/A fields">@naFields</div><div class="prog-stat-lbl">Marked N/A</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-missing" data-filter="missing" onclick="applyFilter('missing')" title="Click to show only Missing fields">@missingFields</div><div class="prog-stat-lbl">Missing</div></div>
+            <div class="prog-stat"><div class="prog-stat-num num-task" data-filter="task" onclick="applyFilter('task')" title="Click to show only Task Created fields">@taskCreated</div><div class="prog-stat-lbl">Tasks Created</div></div>
             <div class="prog-bar-wrap">
                 @{ var pct = totalFields > 0 ? ((availableFields + naFields) * 100 / totalFields) : 0; }
                 <div style="font-size:0.78rem;color:#6b7280;margin-bottom:4px;">@pct% ready</div>
@@ -288,6 +294,11 @@
 
     @if (hasFields)
     {
+        <div id="filterBanner" class="filter-active-banner" style="display:none;">
+            <span>🔍 Showing only <strong id="filterLabel"></strong> fields.</span>
+            <span class="clear-filter" onclick="clearFilter()">✕ Show all</span>
+        </div>
+
         foreach (var sectionGroup in sections)
         {
             var sAvail   = sectionGroup.Count(f => f.Status == "Available");
@@ -298,15 +309,23 @@
                 <div class="section-header">
                     <div class="section-title">@sectionGroup.Key</div>
                     <div class="section-counts">
-                        <span style="color:#10b981">✓ @sAvail ready</span>
-                        @if (sNA > 0) { <span style="margin-left:8px;color:#6b7280">N/A: @sNA</span> }
-                        @if (sMissing > 0) { <span style="margin-left:8px;color:#ef4444">⚠ @sMissing missing</span> }
+                        <span style="color:#10b981" data-filter="available" onclick="applyFilter('available')" title="Click to show only Available fields">✓ @sAvail ready</span>
+                        @if (sNA > 0) { <span style="margin-left:8px;color:#6b7280" data-filter="na" onclick="applyFilter('na')" title="Click to show only N/A fields">N/A: @sNA</span> }
+                        @if (sMissing > 0) { <span style="margin-left:8px;color:#ef4444" data-filter="missing" onclick="applyFilter('missing')" title="Click to show only Missing fields">⚠ @sMissing missing</span> }
                     </div>
                 </div>
 
                 @foreach (var field in sectionGroup)
                 {
-                    <div class="field-row">
+                    var fieldFilterStatus = field.IsNA ? "na" : field.Status switch {
+                        "Available"   => "available",
+                        "Missing"     => "missing",
+                        "Pending"     => "missing",
+                        "TaskCreated" => "task",
+                        "NA"          => "na",
+                        _             => "missing"
+                    };
+                    <div class="field-row" id="field-@field.Id" data-status="@fieldFilterStatus">
                         <!-- Label + status -->
                         <div>
                             <div class="field-label">@field.FieldLabel</div>
@@ -391,7 +410,7 @@
                                 </form>
                             }
 
-                            @if (field.Status is "Missing" or "Pending" && !field.IsNA)
+                            @if (field.Status is "Missing" or "Pending" or "TaskCreated" && !field.IsNA)
                             {
                                 <form method="post" action="/Report/CreateTaskForField">
                                     @Html.AntiForgeryToken()
@@ -451,6 +470,45 @@ async function runAiGenerate(fieldId, fieldLabel) {
     }
     runBtn.disabled = false;
     runBtn.textContent = '🤖 Generate';
+}
+
+/* ── Status filter ─────────────────────────────────────────────── */
+var currentFilter = null;
+var filterLabels = { available: 'Available', missing: 'Missing', na: 'N/A', task: 'Task Created' };
+
+function applyFilter(status) {
+    if (currentFilter === status) { clearFilter(); return; }
+    currentFilter = status;
+
+    var banner = document.getElementById('filterBanner');
+    var label  = document.getElementById('filterLabel');
+    if (banner && label) {
+        label.textContent = filterLabels[status] || status;
+        banner.style.display = 'flex';
+    }
+
+    document.querySelectorAll('.field-row').forEach(function(row) {
+        row.style.display = row.getAttribute('data-status') === status ? '' : 'none';
+    });
+
+    // Hide section cards that have no visible field rows
+    document.querySelectorAll('.section-card').forEach(function(card) {
+        var visibleRows = card.querySelectorAll('.field-row:not([style*="display: none"])');
+        card.style.display = visibleRows.length > 0 ? '' : 'none';
+    });
+}
+
+function clearFilter() {
+    currentFilter = null;
+    var banner = document.getElementById('filterBanner');
+    if (banner) banner.style.display = 'none';
+
+    document.querySelectorAll('.field-row').forEach(function(row) {
+        row.style.display = '';
+    });
+    document.querySelectorAll('.section-card').forEach(function(card) {
+        card.style.display = '';
+    });
 }
 </script>
 }
