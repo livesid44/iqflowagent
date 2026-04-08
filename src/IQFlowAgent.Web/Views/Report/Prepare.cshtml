@@ -562,6 +562,10 @@ async function saveValueAjax(event, fieldId) {
             body: formData,
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
+        if (!resp.ok) {
+            showInlineStatus(fieldId, statusEl, '✗ Server error (' + resp.status + ')', false);
+            btn.disabled = false; btn.textContent = '💾 Save Value'; return false;
+        }
         var data = await resp.json();
         if (data.success) {
             updateFieldBadge(fieldId, data.status, data.isNA);
@@ -593,6 +597,10 @@ async function markNaAjax(event, fieldId, newIsNA) {
             body: formData,
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
+        if (!resp.ok) {
+            alert('Server error (' + resp.status + '). Please try again.');
+            btn.disabled = false; return;
+        }
         var data = await resp.json();
         if (data.success) {
             updateFieldBadge(fieldId, data.status, data.isNA);
@@ -604,7 +612,6 @@ async function markNaAjax(event, fieldId, newIsNA) {
         alert('Network error: ' + ex.message);
     }
     btn.disabled = false;
-    // Button text/class is updated by updateFieldBadge
 }
 
 /* ── Create Task via AJAX ──────────────────────────────────────── */
@@ -622,6 +629,10 @@ async function createTaskAjax(event, fieldId) {
             body: formData,
             headers: { 'X-Requested-With': 'XMLHttpRequest' }
         });
+        if (!resp.ok) {
+            alert('Server error (' + resp.status + '). Please try again.');
+            btn.disabled = false; btn.textContent = '+ Create Task'; return false;
+        }
         var data = await resp.json();
         if (data.success) {
             updateFieldBadge(fieldId, 'TaskCreated', false);
