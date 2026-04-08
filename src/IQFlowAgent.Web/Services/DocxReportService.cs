@@ -245,6 +245,10 @@ public class DocxReportService : IDocxReportService
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content") ?? string.Empty;
         ApplyCurlyBracketReplacement(body, sopValue);
 
+        // ── Artefacts table: populate with uploaded file names ───────────────────
+        if (artefactFileNames != null && artefactFileNames.Count > 0)
+            ReplaceArtefactsTable(body, artefactFileNames);
+
         // ── RACI table: populate as a proper table with individual cells ────────
         var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
         if (!string.IsNullOrWhiteSpace(raciValue))
@@ -266,10 +270,17 @@ public class DocxReportService : IDocxReportService
         var approverValue    = GetFieldFillValue(fieldStatuses, "dc_approver")    ?? string.Empty;
         UpdateDocControlRowsByLabel(body, authorValue, approverValue);
 
+        // ── Escalation Matrix: populate as a proper table ───────────────────────
+        var escValue = GetFieldFillValue(fieldStatuses, "esc_content");
+        if (!string.IsNullOrWhiteSpace(escValue))
+            ReplaceStructuredSectionTable(body, escValue,
+                sectionHeading: "6.1",
+                defaultHeaders: ["Trigger", "Escalation Path", "Timeframe", "Resolution Target"]);
+
         // ── Regulatory table (Table 4): replace N/A rows with LLM content ──────
         var regValue = GetFieldFillValue(fieldStatuses, "reg_content");
         if (!string.IsNullOrWhiteSpace(regValue))
-            ReplaceTableDataWithLlmContent(
+            ReplaceTableWithParsedRows(
                 body,
                 headerKeywords : ["Regulation", "Standard"],
                 keepHeaderRows : 1,
@@ -278,7 +289,7 @@ public class DocxReportService : IDocxReportService
         // ── OCC table (Table 5): replace N/A rows with LLM content ──────────────
         var occValue = GetFieldFillValue(fieldStatuses, "occ_content");
         if (!string.IsNullOrWhiteSpace(occValue))
-            ReplaceTableDataWithLlmContent(
+            ReplaceTableWithParsedRows(
                 body,
                 headerKeywords : ["OCC Reference"],
                 keepHeaderRows : 1,
@@ -287,11 +298,15 @@ public class DocxReportService : IDocxReportService
         // ── Glossary table: populate Term/Definition table ──────────────────────
         var glossaryValue = GetFieldFillValue(fieldStatuses, "glossary_content");
         if (!string.IsNullOrWhiteSpace(glossaryValue))
-            ReplaceTableDataWithLlmContent(
-                body,
-                headerKeywords : ["Term", "Definition"],
-                keepHeaderRows : 1,
-                content        : glossaryValue);
+            ReplaceGlossaryTableRows(body, glossaryValue);
+
+        // ── Volumetrics: populate as a proper table ─────────────────────────────
+        var volValue = GetFieldFillValue(fieldStatuses, "vol_content");
+        if (!string.IsNullOrWhiteSpace(volValue)
+            && volValue != VolumeFallback)
+            ReplaceStructuredSectionTable(body, volValue,
+                sectionHeading: "8.",
+                defaultHeaders: ["Month", "Volume / Transaction Type", "Notes"]);
 
         // ── Process Flow Diagram: embed uploaded images ─────────────────────────
         if (processFlowImages != null && processFlowImages.Count > 0)
@@ -315,6 +330,9 @@ public class DocxReportService : IDocxReportService
 
         // ── Strip italic instruction paragraphs ────────────────────────────────
         RemoveInstructionParagraphs(body);
+
+        // ── Mark TOC as dirty so Word refreshes it on open ──────────────────────
+        MarkTocDirty(wordDoc);
 
         wordDoc.MainDocumentPart.Document.Save();
         wordDoc.Dispose();
@@ -488,7 +506,7 @@ public class DocxReportService : IDocxReportService
         // Fall back to merged-cell approach if the LLM did not use the structured format.
         if (taskNames == null || roleRows.Count == 0)
         {
-            ReplaceTableDataWithLlmContent(body, ["Role", "Task"], 1, raciContent);
+            ReplaceTableWithParsedRows(body, ["Role", "Task"], 1, raciContent);
             return;
         }
 
@@ -728,8 +746,8 @@ public class DocxReportService : IDocxReportService
         var steps = ParseSopSteps(sopContent);
         if (steps.Count == 0)
         {
-            // Fallback: merged-cell dump (preserves previous behaviour)
-            ReplaceTableDataWithLlmContent(
+            // Fallback: try structured row parsing (proper individual cells)
+            ReplaceTableWithParsedRows(
                 body, ["Step", "Action", "Auto Status"], 2, sopContent);
             return;
         }
@@ -871,10 +889,401 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
+    /// Parses pipe-delimited or tab-delimited LLM output into rows of cell values.
+    /// Skips empty lines and lines that look like header separators (e.g. "---|---|---").
+    /// </summary>
+    private static List<string[]> ParseDelimitedContent(string content)
+    {
+        var rows = new List<string[]>();
+        var lines = content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        foreach (var line in lines)
+        {
+            // Skip separator lines (e.g., "---|---|---" or "--- | --- | ---")
+            if (Regex.IsMatch(line, @"^[\s\-|]+$")) continue;
+            // Skip lines that are just whitespace
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            // Determine separator: prefer pipe, fall back to tab
+            var separator = line.Contains('|') ? '|' : '\t';
+            var cells = line.Split(separator, StringSplitOptions.TrimEntries);
+
+            // Skip if all cells are empty
+            if (cells.All(string.IsNullOrWhiteSpace)) continue;
+
+            rows.Add(cells);
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Finds the first table matching <paramref name="headerKeywords"/> in its first row,
+    /// clears all data rows, then inserts properly-structured individual-cell rows by
+    /// parsing the pipe/tab-delimited <paramref name="content"/>.
+    /// Falls back to merged-cell approach if the content cannot be parsed into rows.
+    /// </summary>
+    private static void ReplaceTableWithParsedRows(
+        Body body,
+        string[] headerKeywords,
+        int keepHeaderRows,
+        string content)
+    {
+        // Locate the target table by matching keywords against its first row.
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+            if (firstRow == null) return false;
+            var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
+            return headerKeywords.All(k =>
+                headerText.Contains(k, StringComparison.OrdinalIgnoreCase));
+        });
+
+        if (table == null) return;
+
+        var parsedRows = ParseDelimitedContent(content);
+
+        // If the first parsed row looks like a header (matches keywords), skip it
+        if (parsedRows.Count > 0)
+        {
+            var firstRow = parsedRows[0];
+            bool looksLikeHeader = headerKeywords.All(k =>
+                firstRow.Any(c => c.Contains(k, StringComparison.OrdinalIgnoreCase)));
+            if (looksLikeHeader)
+                parsedRows = parsedRows.Skip(1).ToList();
+        }
+
+        // Fall back to merged-cell approach if parsing yields no data rows
+        if (parsedRows.Count == 0)
+        {
+            ReplaceTableDataWithLlmContent(body, headerKeywords, keepHeaderRows, content);
+            return;
+        }
+
+        var allRows = table.Elements<TableRow>().ToList();
+        if (allRows.Count == 0) return;
+
+        // Keep header rows, remove data rows
+        foreach (var row in allRows.Skip(keepHeaderRows))
+            row.Remove();
+
+        int colCount = allRows.First().Elements<TableCell>().Count();
+        var templateCells = allRows.Last().Elements<TableCell>().ToList();
+
+        // Insert one row per parsed data line
+        foreach (var cells in parsedRows)
+        {
+            var newRow = new TableRow();
+            for (int c = 0; c < colCount; c++)
+            {
+                var cellText = c < cells.Length ? cells[c].Trim() : string.Empty;
+                var tmplCell = c < templateCells.Count ? templateCells[c] : null;
+                newRow.AppendChild(BuildRaciCell(cellText, tmplCell));
+            }
+            table.AppendChild(newRow);
+        }
+    }
+
+    /// <summary>
+    /// Parses pipe/tab-delimited glossary content (Term\tDefinition or Term | Definition)
+    /// and inserts proper individual-cell rows into the Glossary table.
+    /// </summary>
+    private static void ReplaceGlossaryTableRows(Body body, string glossaryContent)
+    {
+        // Locate the Glossary table
+        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+            if (firstRow == null) return false;
+            var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
+            return headerText.Contains("Term", StringComparison.OrdinalIgnoreCase)
+                && headerText.Contains("Definition", StringComparison.OrdinalIgnoreCase);
+        });
+
+        if (table == null) return;
+
+        var parsedRows = ParseDelimitedContent(glossaryContent);
+
+        // If the first parsed row looks like a header, skip it
+        if (parsedRows.Count > 0)
+        {
+            var first = parsedRows[0];
+            if (first.Any(c => c.Contains("Term", StringComparison.OrdinalIgnoreCase))
+                && first.Any(c => c.Contains("Definition", StringComparison.OrdinalIgnoreCase)))
+                parsedRows = parsedRows.Skip(1).ToList();
+        }
+
+        // Fall back to merged-cell approach if parsing fails
+        if (parsedRows.Count == 0)
+        {
+            ReplaceTableDataWithLlmContent(body, ["Term", "Definition"], 1, glossaryContent);
+            return;
+        }
+
+        var allRows = table.Elements<TableRow>().ToList();
+        if (allRows.Count == 0) return;
+
+        // Keep header row, remove data rows
+        foreach (var row in allRows.Skip(1))
+            row.Remove();
+
+        int colCount = allRows.First().Elements<TableCell>().Count();
+        var templateCells = allRows[0].Elements<TableCell>().ToList();
+
+        foreach (var cells in parsedRows)
+        {
+            var newRow = new TableRow();
+            for (int c = 0; c < colCount; c++)
+            {
+                var cellText = c < cells.Length ? cells[c].Trim() : string.Empty;
+                var tmplCell = c < templateCells.Count ? templateCells[c] : null;
+                newRow.AppendChild(BuildRaciCell(cellText, tmplCell));
+            }
+            table.AppendChild(newRow);
+        }
+    }
+
+    /// <summary>
+    /// Handles sections (Escalation Matrix, Volumetrics, etc.) where the template has
+    /// a paragraph placeholder but the content should be rendered as a table.
+    /// Finds the heading paragraph matching <paramref name="sectionHeading"/>, locates
+    /// the paragraph containing the LLM-generated content beneath it, and replaces it
+    /// with a proper table. If an existing table already exists in that section, it is
+    /// populated instead.
+    /// </summary>
+    private static void ReplaceStructuredSectionTable(
+        Body body,
+        string content,
+        string sectionHeading,
+        string[] defaultHeaders)
+    {
+        var parsedRows = ParseDelimitedContent(content);
+        if (parsedRows.Count == 0) return;
+
+        // Check if the first row looks like a header
+        string[] headers;
+        List<string[]> dataRows;
+        bool firstRowIsHeader = parsedRows[0].Length >= 2
+            && defaultHeaders.Any(h =>
+                parsedRows[0].Any(c => c.Contains(h, StringComparison.OrdinalIgnoreCase)));
+
+        if (firstRowIsHeader)
+        {
+            headers = parsedRows[0];
+            dataRows = parsedRows.Skip(1).ToList();
+        }
+        else
+        {
+            headers = defaultHeaders;
+            dataRows = parsedRows;
+        }
+
+        if (dataRows.Count == 0) return;
+
+        int colCount = Math.Max(headers.Length, dataRows.Max(r => r.Length));
+
+        // Try to find an existing table for this section first
+        var existingTable = body.Descendants<Table>().FirstOrDefault(t =>
+        {
+            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+            if (firstRow == null) return false;
+            var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
+            return defaultHeaders.Any(h =>
+                headerText.Contains(h, StringComparison.OrdinalIgnoreCase));
+        });
+
+        if (existingTable != null)
+        {
+            // Populate existing table
+            var allRows = existingTable.Elements<TableRow>().ToList();
+            foreach (var row in allRows.Skip(1))
+                row.Remove();
+
+            var templateCells = allRows[0].Elements<TableCell>().ToList();
+            int existingColCount = templateCells.Count;
+
+            foreach (var cells in dataRows)
+            {
+                var newRow = new TableRow();
+                for (int c = 0; c < existingColCount; c++)
+                {
+                    var cellText = c < cells.Length ? cells[c].Trim() : string.Empty;
+                    var tmplCell = c < templateCells.Count ? templateCells[c] : null;
+                    newRow.AppendChild(BuildRaciCell(cellText, tmplCell));
+                }
+                existingTable.AppendChild(newRow);
+            }
+            return;
+        }
+
+        // No existing table — find the section heading and insert a new table
+        // after the content paragraph(s) that contain the LLM-generated text.
+        Paragraph? sectionPara = null;
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text));
+            if (txt.Contains(sectionHeading, StringComparison.OrdinalIgnoreCase))
+            {
+                sectionPara = para;
+                break;
+            }
+        }
+
+        if (sectionPara == null) return;
+
+        // Find the content paragraph(s) right after the heading — remove them
+        // and insert a table in their place.
+        var insertAfter = sectionPara;
+        var nextSibling = sectionPara.NextSibling();
+
+        // Remove content paragraphs between the heading and the next section
+        var toRemove = new List<DocumentFormat.OpenXml.OpenXmlElement>();
+        var curr = nextSibling;
+        while (curr != null)
+        {
+            if (curr is Paragraph p)
+            {
+                var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                // Stop at the next numbered section heading
+                if (Regex.IsMatch(txt, @"^\d+[\.\s]") || txt.StartsWith("A.", StringComparison.OrdinalIgnoreCase))
+                    break;
+                // Only remove non-empty content paragraphs (keep spacing)
+                if (!string.IsNullOrWhiteSpace(txt))
+                    toRemove.Add(p);
+            }
+            else if (curr is Table)
+            {
+                break; // Stop at existing tables
+            }
+            curr = curr.NextSibling();
+        }
+
+        foreach (var el in toRemove)
+            el.Remove();
+
+        // Build the new table
+        var table = new Table();
+
+        // Add table properties for borders
+        var tblProps = new TableProperties(
+            new TableBorders(
+                new TopBorder     { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new BottomBorder  { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new LeftBorder    { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new RightBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideVerticalBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" }),
+            new TableWidth { Type = TableWidthUnitValues.Pct, Width = "5000" }); // 100%
+        table.AppendChild(tblProps);
+
+        // Header row
+        var headerRow = new TableRow();
+        foreach (var h in headers)
+        {
+            var cell = new TableCell();
+            cell.AppendChild(new TableCellProperties(
+                new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" },
+                new Shading { Val = ShadingPatternValues.Clear, Fill = "D9E2F3" }));
+            var run = new Run(new Text(h));
+            run.PrependChild(new RunProperties(new Bold()));
+            cell.AppendChild(new Paragraph(run));
+            headerRow.AppendChild(cell);
+        }
+        // Pad header if needed
+        for (int c = headers.Length; c < colCount; c++)
+        {
+            var cell = new TableCell();
+            cell.AppendChild(new Paragraph());
+            headerRow.AppendChild(cell);
+        }
+        table.AppendChild(headerRow);
+
+        // Data rows
+        foreach (var cells in dataRows)
+        {
+            var dataRow = new TableRow();
+            for (int c = 0; c < colCount; c++)
+            {
+                var cellText = c < cells.Length ? cells[c].Trim() : string.Empty;
+                var cell = new TableCell();
+                cell.AppendChild(new TableCellProperties(
+                    new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" }));
+                cell.AppendChild(new Paragraph(new Run(new Text(cellText))));
+                dataRow.AppendChild(cell);
+            }
+            table.AppendChild(dataRow);
+        }
+
+        // Insert the table after the section heading
+        sectionPara.InsertAfterSelf(table);
+    }
+
+    /// <summary>
+    /// Marks all TOC (Table of Contents) fields in the document as dirty so that
+    /// Word will prompt the user to refresh them on open. This ensures the TOC reflects
+    /// any content changes made by the report generator.
+    /// </summary>
+    private static void MarkTocDirty(WordprocessingDocument wordDoc)
+    {
+        var settings = wordDoc.MainDocumentPart?.DocumentSettingsPart?.Settings;
+        if (settings != null)
+        {
+            // Add UpdateFieldsOnOpen if not already present
+            if (settings.GetFirstChild<UpdateFieldsOnOpen>() == null)
+                settings.PrependChild(new UpdateFieldsOnOpen { Val = true });
+        }
+
+        // Also mark individual SdtBlock (structured document tags) as dirty —
+        // the TOC is typically wrapped in an SdtBlock.
+        var body = wordDoc.MainDocumentPart?.Document.Body;
+        if (body == null) return;
+
+        foreach (var sdt in body.Descendants<SdtBlock>())
+        {
+            var alias = sdt.Descendants<SdtAlias>().FirstOrDefault();
+            if (alias?.Val?.Value?.Contains("TOC", StringComparison.OrdinalIgnoreCase) == true
+                || alias?.Val?.Value?.Contains("Table of Contents", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                // Mark the field codes inside the TOC as dirty
+                foreach (var fldChar in sdt.Descendants<FieldChar>())
+                {
+                    if (fldChar.FieldCharType?.Value == FieldCharValues.Begin)
+                        fldChar.Dirty = true;
+                }
+            }
+        }
+
+        // Also handle inline field codes (not in SdtBlock)
+        foreach (var fldCode in body.Descendants<FieldCode>())
+        {
+            if (fldCode.Text?.Contains("TOC", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                // Find the preceding FieldChar (Begin) and mark it dirty
+                var parent = fldCode.Parent;
+                if (parent != null)
+                {
+                    var prevSibling = parent.PreviousSibling();
+                    while (prevSibling != null)
+                    {
+                        var fldChar = prevSibling.Descendants<FieldChar>().FirstOrDefault();
+                        if (fldChar?.FieldCharType?.Value == FieldCharValues.Begin)
+                        {
+                            fldChar.Dirty = true;
+                            break;
+                        }
+                        prevSibling = prevSibling.PreviousSibling();
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Finds the first table in <paramref name="body"/> whose first row contains ALL
     /// of the <paramref name="headerKeywords"/>, removes every data row beyond the
     /// first <paramref name="keepHeaderRows"/> rows, then appends a new merged-cell row
     /// containing <paramref name="content"/> (newlines become OOXML line-breaks).
+    /// Used as a fallback when structured row parsing fails.
     /// </summary>
     private static void ReplaceTableDataWithLlmContent(
         Body body,
