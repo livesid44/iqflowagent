@@ -2003,6 +2003,10 @@ public class AzureOpenAiService : IAzureOpenAiService
             headers, no extra commentary.
             For simple text fields, keep the value concise and suitable for direct insertion into a document cell.
             For multi-line structured sections produce the COMPLETE structured output as specified below — do NOT truncate.
+            DOCUMENT-FIRST APPROACH: For table/structured sections (RACI, Volume, SOP, etc.), read the
+            provided documents AS A WHOLE and GENERATE a clean structured table from the content.
+            Do NOT try to parse individual Excel cells or tab-separated rows — understand the data
+            holistically and produce the table in the specified format.
             NEVER echo back template placeholder text such as "[Describe action]", "[Role]", "[Process Name]",
             "[Expected output]", "[From Intake]" etc. as field values. If a document you receive contains
             [bracketed instructions], those are template instructions — fill them with actual content from
@@ -2050,14 +2054,19 @@ public class AzureOpenAiService : IAzureOpenAiService
             Use only performance data from the source documents.
             If no data is present: "Performance data to be confirmed with process owner."
 
-            vol_content — Monthly Volume Data. Produce month-by-month data as pipe-delimited rows:
+            vol_content — Monthly Volume Data. Read the provided task documents and produce the
+            LAST 12 MONTHS of volumetric data as a pipe-delimited table. Do NOT try to parse
+            individual cells or rows — instead, understand the document as a whole and generate
+            a clean table with one row per month:
               Month | Volume / Transaction Type | Notes
-              Mar-25 | [volume] | [notes or "None"]
-              Forecast Avg | [forecast] |
-            IMPORTANT: Look for Excel tab-separated rows with columns like Month, Received, Handled,
-            Tickets, Volume etc. Month labels often appear as "Jan-25", "Feb-25", etc.
-            Extract ALL months with actual numeric data. Do NOT skip any row.
-            If volume data is in the artifact text extract it. Otherwise: "Volume data to be confirmed with process owner."
+              Jan-25 | 12,346 Received / 11,980 Handled | Peak month
+              Feb-25 | 10,200 Received / 10,150 Handled | None
+              ...
+              Forecast Avg | [average] |
+            Include ALL months present in the document. Use actual figures exactly as they appear.
+            If the document contains volume data in any format (tables, bullets, paragraphs),
+            reformat it into the pipe-delimited table above.
+            If no volume data exists in any document: "Volume data to be confirmed with process owner."
 
             reg_content — Regulatory and Compliance Mapping. Format:
               Regulation / Standard | Obligation | Control in this Process | Evidence Artefact | Owner
@@ -2947,58 +2956,52 @@ public class AzureOpenAiService : IAzureOpenAiService
             "   \"[Role]\", \"[Process Name]\", \"[Expected output]\", etc.  These are template authoring\n" +
             "   instructions — do NOT copy them verbatim as field values.  Fill each field with\n" +
             "   REAL content extracted from the actual process document text instead.\n" +
-            "2. EXCEL / WORD TABLES:\n" +
+            "2. DOCUMENT-FIRST TABLE GENERATION (for table/structured fields like vol_content, raci_content, sop_content):\n" +
+            "   - Read the document AS A WHOLE to understand the data.\n" +
+            "   - Do NOT try to parse individual Excel cells, rows, or tab-separated columns.\n" +
+            "   - Instead, understand the overall content and GENERATE a clean structured table\n" +
+            "     in the format specified by the field's special rule below.\n" +
+            "   - This is like asking: 'From this document, produce the last 12 months volume data as a table.'\n" +
+            "3. EXCEL / WORD TABLES (for simple text fields):\n" +
             "   - Read EVERY row from top to bottom — do NOT skip any row.\n" +
             "   - Columns in the extracted text are separated by tab characters; use these\n" +
             "     boundaries to identify which value belongs to which column.\n" +
             "   - Reproduce cell values verbatim: if a cell says \"12,346 Received\" copy exactly that.\n" +
             "   - If a cell is blank or shows an error (e.g. #VALUE!) write \"not available\".\n" +
-            "3. BULLET-POINT LISTS IN WORD DOCUMENTS:\n" +
+            "4. BULLET-POINT LISTS IN WORD DOCUMENTS:\n" +
             "   - Bullets within a cell are separated by \" | \" — include ALL of them.\n" +
             "   - Do NOT stop at the first bullet; include every bullet point in the field value.\n" +
-            "4. ROLE TABLES (RACI):\n" +
-            "   - The first tab-separated row is the header row (role names).\n" +
-            "   - Subsequent rows contain responsibilities per role — include all of them.\n" +
-            "5. Do NOT write placeholder text (\"To be confirmed\", \"TBC\", \"N/A\") if the data IS\n" +
+            "5. ROLE TABLES (RACI):\n" +
+            "   - Read the document as a whole and produce a structured RACI matrix.\n" +
+            "   - Do NOT copy raw tab-separated data — generate clean role/task assignments.\n" +
+            "6. Do NOT write placeholder text (\"To be confirmed\", \"TBC\", \"N/A\") if the data IS\n" +
             "   present anywhere in the Task Artifacts.\n" +
-            "6. Do NOT invent data that is not present in the provided content.\n" +
-            "7. You MUST respond ONLY with valid JSON (no markdown fences, no extra commentary):\n" +
+            "7. Do NOT invent data that is not present in the provided content.\n" +
+            "8. You MUST respond ONLY with valid JSON (no markdown fences, no extra commentary):\n" +
             "   {\"fields\": [{\"key\": \"field_key\", \"fillValue\": \"the value\"}]}\n" +
             $"   Include ONLY keys from this set: {fieldKeys}\n" +
             "   Omit any field you genuinely cannot fill from the provided data." +
             // ── Per-field override for monthly volume data ─────────────────────
             (hasVolumeField ? "\n\n" +
             "SPECIAL RULE FOR KEY \"vol_content\" (Monthly Volumes) — overrides rule 1 for this field only:\n" +
-            "  GOAL: produce a month-by-month volumetric trend with one bullet line per month.\n" +
-            "  Prompt style: \"month-by-month volumetric trend — give monthly pointers not table\".\n\n" +
-            "  Step 1 — Find tabular volume data in the Task Artifacts.\n" +
-            "           Look for tab-separated rows with columns like Month / Received / Handled.\n" +
-            "           The month column will contain values such as \"Jan-25\", \"Feb-25\", etc.\n\n" +
-            "  Step 2 — If tabular data is found WITH ACTUAL NUMBERS in the volume columns,\n" +
-            "           output EXACTLY ONE bullet per calendar month:\n" +
-            "             - MMM-YY: Received [X] | Handled [Y]\n" +
-            "           Replace [X] and [Y] with the ACTUAL numeric figures from the spreadsheet.\n" +
-            "           Use \"not available\" ONLY for months where the source shows an error or blank.\n" +
-            "           Include ALL months from the data — do NOT skip any.\n" +
-            "           Do NOT paste raw tab-separated rows verbatim.\n" +
-            "           CRITICAL: Do NOT produce bullets where [X] and [Y] are both empty/missing.\n" +
-            "           If you can see month labels but the corresponding cells are blank or missing,\n" +
-            "           that means the spreadsheet has no data — go to Step 4 instead.\n" +
-            "           FORBIDDEN: '- Jan-2025: Received  | Handled '  ← empty values, NOT allowed.\n\n" +
-            "  Step 3 — IGNORE completely any text that is a form instruction or template placeholder.\n" +
-            "           Specifically, NEVER use the following as the field value:\n" +
-            "             \"Enter actual transaction volume\"\n" +
-            "             \"RACI SharePoint\" / \"RACI Checkpoint\"\n" +
-            "             \"3. Roles and Responsibilities\"\n" +
-            "             \"Record actual transaction volumes\"\n" +
-            "           If you see these strings in the documents, skip them — they are template text.\n" +
-            "           FORBIDDEN EXAMPLE — if the artifact text you see looks like this:\n" +
-            "             \"Enter actual transaction volume for each of the past 12 months: | 3. Roles and Responsibilities (RACI)\"\n" +
-            "           that is template instruction text, NOT volume data. Output the Step 4 fallback instead.\n\n" +
-            "  Step 4 — If NO actual numeric volume data exists anywhere in the Task Artifacts\n" +
-            "           (including when month labels are present but all value cells are blank),\n" +
-            "           output exactly this one sentence (nothing else):\n" +
-            "           Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "") +
+            "  GOAL: Read the provided documents as a whole and produce the last 12 months of\n" +
+            "  volumetric data as a pipe-delimited table. Do NOT attempt to parse individual cells,\n" +
+            "  rows, or tab-separated columns — instead, understand the overall document content\n" +
+            "  and generate a clean, structured table.\n\n" +
+            "  OUTPUT FORMAT — one pipe-delimited row per calendar month:\n" +
+            "    Month | Volume / Transaction Type | Notes\n" +
+            "    Jan-25 | 12,346 Received / 11,980 Handled | Peak month\n" +
+            "    Feb-25 | 10,200 Received / 10,150 Handled | None\n" +
+            "    Forecast Avg | [average] |\n\n" +
+            "  Rules:\n" +
+            "  - Include ALL months present in the document with actual numeric data.\n" +
+            "  - Use actual figures exactly as they appear in the source.\n" +
+            "  - If the document has volume data in any format (tables, bullets, paragraphs),\n" +
+            "    reformat it into the pipe-delimited table above.\n" +
+            "  - IGNORE template placeholder text such as \"Enter actual transaction volume\",\n" +
+            "    \"Record actual transaction volumes\", \"RACI SharePoint\", or any [bracketed instructions].\n" +
+            "  - If NO actual numeric volume data exists anywhere in the documents,\n" +
+            "    output exactly: Volume data to be confirmed with process owner — upload Excel/volume file and regenerate." : "") +
             // ── Per-field override for RACI data ──────────────────────────────
             (hasRaciField ? "\n\n" +
             "SPECIAL RULE FOR KEY \"raci_content\" (RACI Assignment Matrix) — overrides rule 4 for this field only:\n" +
