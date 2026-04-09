@@ -277,6 +277,20 @@ public class DocxReportService : IDocxReportService
                 sectionHeading: "6.1",
                 defaultHeaders: ["Trigger", "Escalation Path", "Timeframe", "Resolution Target"]);
 
+        // ── Exception Handling: populate as a proper table ──────────────────────
+        var excValue = GetFieldFillValue(fieldStatuses, "exc_content");
+        if (!string.IsNullOrWhiteSpace(excValue) && excValue.Contains('|'))
+            ReplaceStructuredSectionTable(body, excValue,
+                sectionHeading: "6.2",
+                defaultHeaders: ["Exception Type", "Handling Approach", "Approval Required"]);
+
+        // ── SLA table (7.1): populate as a proper table ──────────────────────────
+        var slaValue = GetFieldFillValue(fieldStatuses, "sla_content");
+        if (!string.IsNullOrWhiteSpace(slaValue) && slaValue.Contains('|'))
+            ReplaceStructuredSectionTable(body, slaValue,
+                sectionHeading: "7.1",
+                defaultHeaders: ["Metric", "Target", "Measurement Method", "Reporting Frequency", "Tool"]);
+
         // ── Regulatory table (Table 4): replace N/A rows with LLM content ──────
         var regValue = GetFieldFillValue(fieldStatuses, "reg_content");
         if (!string.IsNullOrWhiteSpace(regValue))
@@ -520,7 +534,12 @@ public class DocxReportService : IDocxReportService
                 && text.Contains("Task", StringComparison.OrdinalIgnoreCase);
         });
 
-        if (table == null) return;
+        if (table == null)
+        {
+            // No existing RACI table — create a new matrix table at section "3."
+            InsertRaciMatrixAtSection(body, taskNames, roleRows);
+            return;
+        }
 
         var allRows = table.Elements<TableRow>().ToList();
         if (allRows.Count == 0) return;
@@ -553,6 +572,96 @@ public class DocxReportService : IDocxReportService
 
             table.AppendChild(dataRow);
         }
+    }
+
+    /// <summary>
+    /// Creates a new RACI matrix table at the section "3." heading when no existing
+    /// RACI table is found in the DOCX. The table has a header row of "Role" followed
+    /// by each task name, and one data row per role with its R/A/C/I assignments.
+    /// </summary>
+    private static void InsertRaciMatrixAtSection(
+        Body body,
+        string[] taskNames,
+        List<(string RoleName, string[] Assignments)> roleRows)
+    {
+        // Find the RACI section paragraph (heading containing "3.")
+        Paragraph? sectionPara = null;
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            if (IsTocParagraph(para)) continue;
+            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
+            if (Regex.IsMatch(txt, @"^3[\.\s]"))
+            {
+                sectionPara = para;
+                break;
+            }
+        }
+
+        if (sectionPara == null) return;
+
+        // Remove existing content paragraphs between the heading and the next section
+        var toRemove = new List<DocumentFormat.OpenXml.OpenXmlElement>();
+        var curr = sectionPara.NextSibling();
+        while (curr != null)
+        {
+            if (curr is Paragraph p)
+            {
+                var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                if (Regex.IsMatch(txt, @"^\d+[\.\s]") || txt.StartsWith("A.", StringComparison.OrdinalIgnoreCase))
+                    break;
+                if (!string.IsNullOrWhiteSpace(txt))
+                    toRemove.Add(p);
+            }
+            else if (curr is Table)
+            {
+                break;
+            }
+            curr = curr.NextSibling();
+        }
+        foreach (var el in toRemove)
+            el.Remove();
+
+        // Build the RACI matrix table
+        var tbl = new Table();
+        tbl.AppendChild(new TableProperties(
+            new TableBorders(
+                new TopBorder     { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new BottomBorder  { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new LeftBorder    { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new RightBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideVerticalBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" }),
+            new TableWidth { Type = TableWidthUnitValues.Pct, Width = "5000" }));
+
+        // Header row: "Role" | task1 | task2 | ...
+        var headerRow = new TableRow();
+        foreach (var h in new[] { "Role" }.Concat(taskNames))
+        {
+            var cell = new TableCell();
+            cell.AppendChild(new TableCellProperties(
+                new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" },
+                new Shading { Val = ShadingPatternValues.Clear, Fill = "D9E2F3" }));
+            var run = new Run(new Text(h));
+            run.PrependChild(new RunProperties(new Bold()));
+            cell.AppendChild(new Paragraph(run));
+            headerRow.AppendChild(cell);
+        }
+        tbl.AppendChild(headerRow);
+
+        // Data rows: role name | R | A | C | I | ...
+        foreach (var (roleName, assignments) in roleRows)
+        {
+            var dataRow = new TableRow();
+            dataRow.AppendChild(BuildRaciCell(roleName, null));
+            for (int i = 0; i < taskNames.Length; i++)
+            {
+                var assignment = i < assignments.Length ? assignments[i] : "-";
+                dataRow.AppendChild(BuildRaciCell(assignment, null));
+            }
+            tbl.AppendChild(dataRow);
+        }
+
+        sectionPara.InsertAfterSelf(tbl);
     }
 
     /// <summary>Overwrites all text content in a table cell with <paramref name="text"/>.</summary>

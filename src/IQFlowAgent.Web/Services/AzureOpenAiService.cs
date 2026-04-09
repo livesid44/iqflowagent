@@ -1227,11 +1227,13 @@ public class AzureOpenAiService : IAzureOpenAiService
 
                 "exceptionContent" =>
                     ("Available",
+                     $"Exception Type | Handling Approach | Approval Required\n" +
                      $"Incomplete or invalid input data | Return to originator with guidance. Log in exception register. Re-enter queue once corrected. | Yes — Team Lead approval required.",
                      "Synthesised from intake metadata."),
 
                 "slaContent" =>
                     ("Available",
+                     $"Metric | Target | Measurement Method | Reporting Frequency | Tool\n" +
                      $"{procName} Processing Time | As per contract | Time from receipt to completion (ticketing system) | {(vol > 100 ? "Daily" : "Weekly")} | Ticketing system / Service management platform",
                      "Synthesised from intake metadata — confirm SLAs with process owner."),
 
@@ -2040,9 +2042,11 @@ public class AzureOpenAiService : IAzureOpenAiService
               Trigger | Escalation Path | Timeframe | Resolution Target
             Include all escalation levels described in the source documents.
 
-            exc_content — Exception Handling. Format as a bulleted list:
-              - Exception Type: [type] | Handling: [approach] | Approval: [Yes/No - who approves]
+            exc_content — Exception Handling. Format as a pipe-delimited table with a header row:
+              Exception Type | Handling Approach | Approval Required
+              [type1] | [approach1] | [Yes/No - who approves]
             Include all exception types described in the source documents.
+            If no exception data is present: "Exception handling to be confirmed with process owner."
 
             sla_content — Service Level Agreements. Format as a structured table-style list:
               Metric | Target | Measurement Method | Reporting Frequency | Tool
