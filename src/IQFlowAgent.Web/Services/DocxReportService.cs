@@ -279,14 +279,14 @@ public class DocxReportService : IDocxReportService
 
         // ── Exception Handling: populate as a proper table ──────────────────────
         var excValue = GetFieldFillValue(fieldStatuses, "exc_content");
-        if (!string.IsNullOrWhiteSpace(excValue) && excValue.Contains('|'))
+        if (!string.IsNullOrWhiteSpace(excValue))
             ReplaceStructuredSectionTable(body, excValue,
                 sectionHeading: "6.2",
                 defaultHeaders: ["Exception Type", "Handling Approach", "Approval Required"]);
 
         // ── SLA table (7.1): populate as a proper table ──────────────────────────
         var slaValue = GetFieldFillValue(fieldStatuses, "sla_content");
-        if (!string.IsNullOrWhiteSpace(slaValue) && slaValue.Contains('|'))
+        if (!string.IsNullOrWhiteSpace(slaValue))
             ReplaceStructuredSectionTable(body, slaValue,
                 sectionHeading: "7.1",
                 defaultHeaders: ["Metric", "Target", "Measurement Method", "Reporting Frequency", "Tool"]);
@@ -517,27 +517,53 @@ public class DocxReportService : IDocxReportService
             }
         }
 
-        // Fall back to merged-cell approach if the LLM did not use the structured format.
+        // Fall back to generic table approach (section-scoped) if the LLM did
+        // not use the structured TASKS: format.
         if (taskNames == null || roleRows.Count == 0)
         {
-            ReplaceTableWithParsedRows(body, ["Role", "Task"], 1, raciContent);
+            ReplaceStructuredSectionTable(body, raciContent, "3.", ["Role", "Task"]);
             return;
         }
 
-        // ── Locate RACI table ──────────────────────────────────────────────────
-        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        // ── Locate RACI table within section "3." ─────────────────────────────
+        // Find the "3." heading paragraph first so the table search is scoped to
+        // the RACI section and cannot accidentally match a table in another section.
+        Paragraph? sectionPara = null;
+        foreach (var para in body.Descendants<Paragraph>())
         {
-            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
-            if (firstRow == null) return false;
-            var text = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
-            return text.Contains("Role", StringComparison.OrdinalIgnoreCase)
-                && text.Contains("Task", StringComparison.OrdinalIgnoreCase);
-        });
+            if (IsTocParagraph(para)) continue;
+            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
+            if (Regex.IsMatch(txt, @"^3[\.\s]"))
+            {
+                sectionPara = para;
+                break;
+            }
+        }
+
+        if (sectionPara == null) return;
+
+        Table? table = null;
+        var curr = sectionPara.NextSibling();
+        while (curr != null)
+        {
+            if (curr is Paragraph p)
+            {
+                var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                if (Regex.IsMatch(txt, @"^\d+[\.\s]") || txt.StartsWith("A.", StringComparison.OrdinalIgnoreCase))
+                    break;
+            }
+            else if (curr is Table t)
+            {
+                table = t;
+                break;
+            }
+            curr = curr.NextSibling();
+        }
 
         if (table == null)
         {
             // No existing RACI table — create a new matrix table at section "3."
-            InsertRaciMatrixAtSection(body, taskNames, roleRows);
+            InsertRaciMatrixAtSection(body, taskNames, roleRows, sectionPara);
             return;
         }
 
@@ -575,30 +601,17 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
-    /// Creates a new RACI matrix table at the section "3." heading when no existing
-    /// RACI table is found in the DOCX. The table has a header row of "Role" followed
-    /// by each task name, and one data row per role with its R/A/C/I assignments.
+    /// Creates a new RACI matrix table immediately after <paramref name="sectionPara"/>
+    /// (the "3. RACI" heading) when no existing RACI table is found in the DOCX.
+    /// The table has a header row of "Role" followed by each task name, and one data
+    /// row per role with its R/A/C/I assignments.
     /// </summary>
     private static void InsertRaciMatrixAtSection(
         Body body,
         string[] taskNames,
-        List<(string RoleName, string[] Assignments)> roleRows)
+        List<(string RoleName, string[] Assignments)> roleRows,
+        Paragraph sectionPara)
     {
-        // Find the RACI section paragraph (heading containing "3.")
-        Paragraph? sectionPara = null;
-        foreach (var para in body.Descendants<Paragraph>())
-        {
-            if (IsTocParagraph(para)) continue;
-            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
-            if (Regex.IsMatch(txt, @"^3[\.\s]"))
-            {
-                sectionPara = para;
-                break;
-            }
-        }
-
-        if (sectionPara == null) return;
-
         // Remove existing content paragraphs between the heading and the next section
         var toRemove = new List<DocumentFormat.OpenXml.OpenXmlElement>();
         var curr = sectionPara.NextSibling();
@@ -1156,12 +1169,15 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
-    /// Handles sections (Escalation Matrix, Volumetrics, etc.) where the template has
-    /// a paragraph placeholder but the content should be rendered as a table.
-    /// Finds the heading paragraph matching <paramref name="sectionHeading"/>, locates
-    /// the paragraph containing the LLM-generated content beneath it, and replaces it
-    /// with a proper table. If an existing table already exists in that section, it is
-    /// populated instead.
+    /// Handles sections (Escalation Matrix, Volumetrics, SLA, Exception Handling, etc.)
+    /// where the template has a paragraph placeholder but the content should be rendered
+    /// as a table. Finds the heading paragraph matching <paramref name="sectionHeading"/>,
+    /// then scans forward within that section (stopping at the next numbered heading) to
+    /// detect any existing table. If found, it populates that table. If not found, it
+    /// removes the placeholder paragraphs and inserts a brand-new table.
+    /// The table search is section-scoped — it never reaches into a different section —
+    /// which prevents false matches from tables in adjacent sections (e.g. a Performance
+    /// table that also has a "Month" column is no longer confused with Volumetrics).
     /// </summary>
     private static void ReplaceStructuredSectionTable(
         Body body,
@@ -1194,19 +1210,48 @@ public class DocxReportService : IDocxReportService
 
         int colCount = Math.Max(headers.Length, dataRows.Max(r => r.Length));
 
-        // Try to find an existing table for this section first
-        var existingTable = body.Descendants<Table>().FirstOrDefault(t =>
+        // ── Find the section heading paragraph ────────────────────────────────────
+        // Skip TOC paragraphs: the section number appears in the TOC before the real heading.
+        Paragraph? sectionPara = null;
+        foreach (var para in body.Descendants<Paragraph>())
         {
-            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
-            if (firstRow == null) return false;
-            var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
-            return defaultHeaders.Any(h =>
-                headerText.Contains(h, StringComparison.OrdinalIgnoreCase));
-        });
+            if (IsTocParagraph(para)) continue;
+            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text));
+            if (txt.Contains(sectionHeading, StringComparison.OrdinalIgnoreCase))
+            {
+                sectionPara = para;
+                break;
+            }
+        }
+
+        if (sectionPara == null) return;
+
+        // ── Look for an existing table scoped to this section ─────────────────────
+        // Scan from the section heading to the next numbered section heading.
+        // This prevents false matches from tables in adjacent sections (e.g. a
+        // Performance 7.2 table that also has "Month" would be mistaken for Volumetrics
+        // if we scan the entire document).
+        Table? existingTable = null;
+        var sibling = sectionPara.NextSibling();
+        while (sibling != null)
+        {
+            if (sibling is Paragraph p)
+            {
+                var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                if (Regex.IsMatch(txt, @"^\d+[\.\s]") || txt.StartsWith("A.", StringComparison.OrdinalIgnoreCase))
+                    break; // reached the next section — stop
+            }
+            else if (sibling is Table t)
+            {
+                existingTable = t;
+                break;
+            }
+            sibling = sibling.NextSibling();
+        }
 
         if (existingTable != null)
         {
-            // Populate existing table
+            // Populate existing table: keep header row, replace all data rows.
             var allRows = existingTable.Elements<TableRow>().ToList();
             foreach (var row in allRows.Skip(1))
                 row.Remove();
@@ -1228,31 +1273,9 @@ public class DocxReportService : IDocxReportService
             return;
         }
 
-        // No existing table — find the section heading and insert a new table
-        // after the content paragraph(s) that contain the LLM-generated text.
-        // Skip TOC paragraphs: the section number appears in the TOC before the real heading.
-        Paragraph? sectionPara = null;
-        foreach (var para in body.Descendants<Paragraph>())
-        {
-            if (IsTocParagraph(para)) continue;
-            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text));
-            if (txt.Contains(sectionHeading, StringComparison.OrdinalIgnoreCase))
-            {
-                sectionPara = para;
-                break;
-            }
-        }
-
-        if (sectionPara == null) return;
-
-        // Find the content paragraph(s) right after the heading — remove them
-        // and insert a table in their place.
-        var insertAfter = sectionPara;
-        var nextSibling = sectionPara.NextSibling();
-
-        // Remove content paragraphs between the heading and the next section
+        // ── No existing table — remove placeholder paragraphs and insert a new one ─
         var toRemove = new List<DocumentFormat.OpenXml.OpenXmlElement>();
-        var curr = nextSibling;
+        var curr = sectionPara.NextSibling();
         while (curr != null)
         {
             if (curr is Paragraph p)

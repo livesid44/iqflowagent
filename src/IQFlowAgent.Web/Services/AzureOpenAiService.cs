@@ -2042,16 +2042,16 @@ public class AzureOpenAiService : IAzureOpenAiService
               Trigger | Escalation Path | Timeframe | Resolution Target
             Include all escalation levels described in the source documents.
 
-            exc_content — Exception Handling. Format as a pipe-delimited table with a header row:
+            exc_content — Exception Handling. Output MUST be a pipe-delimited table:
               Exception Type | Handling Approach | Approval Required
               [type1] | [approach1] | [Yes/No - who approves]
-            Include all exception types described in the source documents.
-            If no exception data is present: "Exception handling to be confirmed with process owner."
+            Include all exception types from the source documents. DO NOT use bullet points or prose.
 
-            sla_content — Service Level Agreements. Format as a structured table-style list:
+            sla_content — Service Level Agreements. Output MUST be a pipe-delimited table:
               Metric | Target | Measurement Method | Reporting Frequency | Tool
+              [metric1] | [target1] | [method1] | [frequency1] | [tool1]
             Use only SLA/KPI data explicitly stated in the intake or documents.
-            If no SLA data is present: "SLAs to be confirmed with process owner."
+            If no SLA data is present, output a single row: Processing Time | To be confirmed with process owner | Time from receipt to completion | TBC | TBC
 
             perf_content — Actual vs Target Performance (last 6 months). Format:
               Metric | Month | Actual | Target | Status (Met/Missed)
@@ -2928,6 +2928,8 @@ public class AzureOpenAiService : IAzureOpenAiService
         bool hasRaciField    = sectionFields.Any(f => f.Key == "raci_content");
         bool hasSopField     = sectionFields.Any(f => f.Key == "sop_content");
         bool hasGlossaryField = sectionFields.Any(f => f.Key == "glossary_content");
+        bool hasExcField     = sectionFields.Any(f => f.Key == "exc_content");
+        bool hasSlaField     = sectionFields.Any(f => f.Key == "sla_content");
         // Section-level instruction from the template placeholder (the [..] text)
         var sectionInstruction = sectionFields.FirstOrDefault(f =>
             !string.IsNullOrWhiteSpace(f.TemplatePlaceholder))?.TemplatePlaceholder ?? "";
@@ -3066,6 +3068,30 @@ public class AzureOpenAiService : IAzureOpenAiService
             "  EXAMPLE OUTPUT:\n" +
             "  SLA\\tService Level Agreement — contractual target for service delivery performance.\n" +
             "  RFC\\tRequest for Change — formal request to modify an IT service or system." : "")
+            + // ── Per-field override for exception handling ──────────────────────
+            (hasExcField ? "\n\n" +
+            "SPECIAL RULE FOR KEY \"exc_content\" (Exception Handling) — overrides rule 1 for this field only:\n" +
+            "  Output MUST be a pipe-delimited table with EXACTLY this header row on line 1:\n" +
+            "    Exception Type | Handling Approach | Approval Required\n" +
+            "  Followed by one data row per exception type, e.g.:\n" +
+            "    Invalid input data | Return to originator with correction note; log in exception register | Yes — Team Lead\n" +
+            "    System unavailable | Log manually; raise IT incident ticket | No\n" +
+            "  Rules:\n" +
+            "  - Extract ALL exception types described in the source documents.\n" +
+            "  - If no exception data is present, output a single row: Unknown exception | Escalate to Team Lead | Yes — Team Lead\n" +
+            "  DO NOT output bullet points, prose, or any format other than the pipe-delimited table above." : "")
+            + // ── Per-field override for SLA ─────────────────────────────────────
+            (hasSlaField ? "\n\n" +
+            "SPECIAL RULE FOR KEY \"sla_content\" (Service Level Agreements) — overrides rule 1 for this field only:\n" +
+            "  Output MUST be a pipe-delimited table with EXACTLY this header row on line 1:\n" +
+            "    Metric | Target | Measurement Method | Reporting Frequency | Tool\n" +
+            "  Followed by one data row per SLA metric, e.g.:\n" +
+            "    End-to-end processing time | < 4 business hours | Time from receipt to completion in ticketing system | Daily | Ticketing system\n" +
+            "    First-time accuracy rate | > 98% | QC review log | Weekly | Spreadsheet / Service management platform\n" +
+            "  Rules:\n" +
+            "  - Use only SLA/KPI data explicitly stated in the intake or uploaded documents.\n" +
+            "  - If no SLA data is present, output a single row: Processing Time | To be confirmed with process owner | Time from receipt to completion | TBC | TBC\n" +
+            "  DO NOT output bullet points, prose, or any format other than the pipe-delimited table above." : "")
             + sectionInstructionClause;
 
         // ── User message ──────────────────────────────────────────────────────
