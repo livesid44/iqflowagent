@@ -479,6 +479,49 @@ public class ReportController : Controller
                 intake.IntakeId);
         }
 
+        // ── Table-reformat pass (sla_content, exc_content) ─────────────────
+        // When these structured fields are stored as plain prose (no pipe characters)
+        // from an older AI generation run, re-run them through the LLM to produce
+        // the required pipe-delimited table format before DOCX rendering.
+        try
+        {
+            var tableFields = new[]
+            {
+                ("sla_content", "Service Level Agreements"),
+                ("exc_content", "Exception Handling"),
+            };
+
+            foreach (var (fieldKey, label) in tableFields)
+            {
+                var fs = fieldStatuses.FirstOrDefault(f =>
+                    f.FieldKey.Equals(fieldKey, StringComparison.OrdinalIgnoreCase));
+                if (fs == null || fs.IsNA || string.IsNullOrWhiteSpace(fs.FillValue))
+                    continue;
+                if (fs.FillValue!.Contains('|'))
+                    continue; // already in pipe-delimited table format
+
+                var reformatted = await _aiService.GenerateSingleFieldAsync(
+                    intake, fs.FieldKey, label,
+                    userContext: $"The following stored value must be converted to a pipe-delimited table. Do not return prose — output ONLY the table rows:\n\n{fs.FillValue}",
+                    analysisJson: intake.AnalysisResult,
+                    artifactText: null);
+
+                if (!string.IsNullOrWhiteSpace(reformatted) && !IsPlaceholderText(reformatted))
+                {
+                    fs.FillValue = reformatted;
+                    _logger.LogInformation(
+                        "Table-reformat pass updated '{FieldKey}' for intake {IntakeId}.",
+                        fieldKey, intakeId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Table-reformat pass failed for intake {IntakeId} — proceeding with existing values.",
+                intakeId);
+        }
+
         // ── DOCX generation ──────────────────────────────────────────────────
         var templatePath = Path.Combine(_env.WebRootPath, "templates", TemplateName);
         if (!System.IO.File.Exists(templatePath))
@@ -487,18 +530,36 @@ public class ReportController : Controller
             return RedirectToAction(nameof(Prepare), new { selectedId = intakeId });
         }
 
-        // Load all intake-level document names for the 1.2 Artefacts table.
-        var intakeDocNames = await _db.IntakeDocuments
-            .Where(d => d.IntakeRecordId == intakeId && d.IntakeTaskId == null
-                        && !string.IsNullOrWhiteSpace(d.FileName))
-            .OrderBy(d => d.Id)
-            .Select(d => d.FileName)
+        // Load ALL intake documents (intake-level + task-level) for the 1.2 Artefacts table.
+        // Each row shows the file name, who uploaded it, and which task or intake it belongs to.
+        var allIntakeDocs = await _db.IntakeDocuments
+            .Where(d => d.IntakeRecordId == intakeId && !string.IsNullOrWhiteSpace(d.FileName))
+            .OrderBy(d => d.IntakeTaskId).ThenBy(d => d.Id)
+            .Select(d => new
+            {
+                d.FileName,
+                d.UploadedByName,
+                d.IntakeTaskId,
+                d.IntakeRecordId
+            })
             .ToListAsync();
 
-        // Always include the primary uploaded file if it isn't already in the list.
+        var artefactFiles = allIntakeDocs
+            .Select(d => new ArtefactFile(
+                d.FileName!,
+                d.UploadedByName,
+                d.IntakeTaskId.HasValue
+                    ? $"Task #{d.IntakeTaskId}"
+                    : $"Intake #{d.IntakeRecordId}"))
+            .ToList();
+
+        // Always include the primary uploaded file at the top if not already listed.
         if (!string.IsNullOrWhiteSpace(intake.UploadedFileName)
-            && !intakeDocNames.Contains(intake.UploadedFileName, StringComparer.OrdinalIgnoreCase))
-            intakeDocNames.Insert(0, intake.UploadedFileName);
+            && !artefactFiles.Any(f => f.FileName.Equals(intake.UploadedFileName, StringComparison.OrdinalIgnoreCase)))
+            artefactFiles.Insert(0, new ArtefactFile(
+                intake.UploadedFileName,
+                intake.ProcessOwnerName,
+                $"Intake #{intake.IntakeId}"));
 
         // ── Load Process Flow Diagram images ────────────────────────────────────
         // Collect all uploaded image files (JPG, PNG, etc.) that may be process flow diagrams.
@@ -546,7 +607,7 @@ public class ReportController : Controller
         {
             var docxBytes = await _docxService.GenerateReportAsync(
                 intake, fieldStatuses, templatePath,
-                intakeDocNames.Count > 0 ? intakeDocNames : null,
+                artefactFiles.Count > 0 ? artefactFiles : null,
                 processFlowImages.Count > 0 ? processFlowImages : null);
 
             var now            = DateTime.UtcNow;

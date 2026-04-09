@@ -156,7 +156,7 @@ public class DocxReportService : IDocxReportService
 
     public Task<byte[]> GenerateReportAsync(
         IntakeRecord intake, IList<ReportFieldStatus> fieldStatuses, string templatePath,
-        IList<string>? artefactFileNames = null,
+        IList<ArtefactFile>? artefactFiles = null,
         IList<(string FileName, byte[] Data)>? processFlowImages = null)
     {
         var templateBytes = File.ReadAllBytes(templatePath);
@@ -217,12 +217,12 @@ public class DocxReportService : IDocxReportService
         // ── Artefact list: build formatted text for the artefact_content placeholder ──
         // If uploaded file names are provided, build a numbered list and add it to
         // replacements so the paragraph placeholder is replaced with real file names.
-        if (artefactFileNames != null && artefactFileNames.Count > 0)
+        if (artefactFiles != null && artefactFiles.Count > 0)
         {
             const string artefactPlaceholder =
                 "[All Document uploaded in task or Name of document, date when uploaded in a table]";
-            var artefactLines = artefactFileNames
-                .Select((f, i) => $"{i + 1}. {f}")
+            var artefactLines = artefactFiles
+                .Select((f, i) => $"{i + 1}. {f.FileName}")
                 .ToList();
             replacements[artefactPlaceholder] = string.Join("\n", artefactLines);
         }
@@ -240,14 +240,15 @@ public class DocxReportService : IDocxReportService
             ApplyReplacements(footerPart.Footer, replacements);
 
         // ── Handle the mixed-bracket SOP placeholder "{Detailed SOP should come here]" ──
-        // The template source has a curly-open + square-close typo. We replace it with
-        // the sop_content value (or empty) after the main replacements pass.
+        // Clear the placeholder text (replace with empty string) so that the table-based
+        // rendering in ReplaceSopTableRows can insert a proper table at section "4."
+        // without the placeholder paragraph fighting the table insertion.
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content") ?? string.Empty;
-        ApplyCurlyBracketReplacement(body, sopValue);
+        ApplyCurlyBracketReplacement(body, string.Empty);
 
         // ── Artefacts table: populate with uploaded file names ───────────────────
-        if (artefactFileNames != null && artefactFileNames.Count > 0)
-            ReplaceArtefactsTable(body, artefactFileNames);
+        if (artefactFiles != null && artefactFiles.Count > 0)
+            ReplaceArtefactsTable(body, artefactFiles);
 
         // ── RACI table: populate as a proper table with individual cells ────────
         var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
@@ -531,7 +532,7 @@ public class DocxReportService : IDocxReportService
         Paragraph? sectionPara = null;
         foreach (var para in body.Descendants<Paragraph>())
         {
-            if (IsTocParagraph(para)) continue;
+            if (IsTocParagraph(para) || IsInsideTable(para)) continue;
             var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
             if (Regex.IsMatch(txt, @"^3[\.\s]"))
             {
@@ -857,35 +858,76 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
-    /// Finds the SOP table in <paramref name="body"/> (identified by "Step" and "Action"
-    /// in the first row), clears all data rows beyond the two header rows, then inserts
-    /// one properly-structured table row per parsed SOP step — mapping step number, action,
-    /// role, system, output, and automation fields to the correct column by header text.
-    /// Falls back to the merged-cell approach when the sopContent cannot be parsed.
+    /// Finds (or creates) the SOP table in section "4." of <paramref name="body"/>,
+    /// then fills it with the parsed <see cref="SopStep"/> records.
+    /// The table search is section-scoped: it only looks between the "4." heading and the
+    /// next numbered heading, preventing accidental matches from tables in other sections.
+    /// When no existing table is present, a new bordered table is inserted after the
+    /// section heading with standard SOP columns.
+    /// Falls back gracefully when no steps can be parsed from <paramref name="sopContent"/>.
     /// </summary>
     private static void ReplaceSopTableRows(Body body, string sopContent)
     {
         var steps = ParseSopSteps(sopContent);
+
+        // ── Find section "4." heading (section-scoped, not doc-wide) ─────────────
+        Paragraph? sectionPara = null;
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            if (IsTocParagraph(para) || IsInsideTable(para)) continue;
+            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
+            if (Regex.IsMatch(txt, @"^4[\.\s]"))
+            {
+                sectionPara = para;
+                break;
+            }
+        }
+
+        // ── Find existing SOP table within section "4." ───────────────────────────
+        Table? table = null;
+        if (sectionPara != null)
+        {
+            var curr = sectionPara.NextSibling();
+            while (curr != null)
+            {
+                if (curr is Paragraph p)
+                {
+                    var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                    if (Regex.IsMatch(txt, @"^\d+[\.\s]") || txt.StartsWith("A.", StringComparison.OrdinalIgnoreCase))
+                        break; // reached the next section — stop searching
+                }
+                else if (curr is Table t)
+                {
+                    var firstRow = t.Descendants<TableRow>().FirstOrDefault();
+                    var headerTxt = firstRow != null
+                        ? string.Concat(firstRow.Descendants<Text>().Select(x => x.Text))
+                        : string.Empty;
+                    if (headerTxt.Contains("Step",   StringComparison.OrdinalIgnoreCase)
+                        && headerTxt.Contains("Action", StringComparison.OrdinalIgnoreCase))
+                    {
+                        table = t;
+                        break;
+                    }
+                }
+                curr = curr.NextSibling();
+            }
+        }
+
         if (steps.Count == 0)
         {
-            // Fallback: try structured row parsing (proper individual cells)
-            ReplaceTableWithParsedRows(
-                body, ["Step", "Action", "Auto Status"], 2, sopContent);
+            // Nothing to render — section is intact (placeholder already cleared).
             return;
         }
 
-        // Locate SOP table by header keywords
-        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        if (table == null)
         {
-            var firstRow = t.Descendants<TableRow>().FirstOrDefault();
-            if (firstRow == null) return false;
-            var txt = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
-            return txt.Contains("Step",   StringComparison.OrdinalIgnoreCase)
-                && txt.Contains("Action", StringComparison.OrdinalIgnoreCase);
-        });
+            // No existing SOP table — create a fresh one at section "4."
+            if (sectionPara != null)
+                InsertSopTableAtSection(steps, sectionPara);
+            return;
+        }
 
-        if (table == null) return;
-
+        // ── Populate existing table ───────────────────────────────────────────────
         var allRows = table.Elements<TableRow>().ToList();
         if (allRows.Count == 0) return;
 
@@ -950,6 +992,80 @@ public class DocxReportService : IDocxReportService
             }
             table.AppendChild(newRow);
         }
+    }
+
+    /// <summary>
+    /// Creates a new SOP table immediately after <paramref name="sectionPara"/>
+    /// (the "4. SOP" heading) when no existing SOP table is found in the DOCX.
+    /// Standard columns: Step | Action | Role | System | Output | Automation | Rating | Type.
+    /// </summary>
+    private static void InsertSopTableAtSection(List<SopStep> steps, Paragraph sectionPara)
+    {
+        // Remove any placeholder paragraphs between the heading and the next section.
+        var toRemove = new List<DocumentFormat.OpenXml.OpenXmlElement>();
+        var curr = sectionPara.NextSibling();
+        while (curr != null)
+        {
+            if (curr is Paragraph p)
+            {
+                var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                if (Regex.IsMatch(txt, @"^\d+[\.\s]") || txt.StartsWith("A.", StringComparison.OrdinalIgnoreCase))
+                    break;
+                if (!string.IsNullOrWhiteSpace(txt))
+                    toRemove.Add(p);
+            }
+            else if (curr is Table)
+            {
+                break;
+            }
+            curr = curr.NextSibling();
+        }
+        foreach (var el in toRemove) el.Remove();
+
+        var headers = new[] { "Step", "Action", "Role", "System", "Output", "Automation", "Rating", "Type" };
+
+        var tbl = new Table();
+        tbl.AppendChild(new TableProperties(
+            new TableBorders(
+                new TopBorder    { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new BottomBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new LeftBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new RightBorder  { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideVerticalBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" }),
+            new TableWidth { Type = TableWidthUnitValues.Pct, Width = "5000" }));
+
+        // Header row
+        var headerRow = new TableRow();
+        foreach (var h in headers)
+        {
+            var cell = new TableCell();
+            cell.AppendChild(new TableCellProperties(
+                new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" },
+                new Shading { Val = ShadingPatternValues.Clear, Fill = "D9E2F3" }));
+            var run = new Run(new Text(h));
+            run.PrependChild(new RunProperties(new Bold()));
+            cell.AppendChild(new Paragraph(run));
+            headerRow.AppendChild(cell);
+        }
+        tbl.AppendChild(headerRow);
+
+        // Data rows — one per parsed SOP step
+        foreach (var step in steps)
+        {
+            var dataRow = new TableRow();
+            foreach (var val in new[]
+            {
+                step.StepNumber, step.Action, step.Role, step.System,
+                step.Output, step.AutoStatus, step.OppRating, step.AutoType
+            })
+            {
+                dataRow.AppendChild(BuildRaciCell(val, null));
+            }
+            tbl.AppendChild(dataRow);
+        }
+
+        sectionPara.InsertAfterSelf(tbl);
     }
 
     /// <summary>
@@ -1055,8 +1171,10 @@ public class DocxReportService : IDocxReportService
         string content)
     {
         // Locate the target table by matching keywords against its first row.
+        // Skip nested tables (IsInsideTable) to avoid false matches.
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideTable(t)) return false;
             var firstRow = t.Descendants<TableRow>().FirstOrDefault();
             if (firstRow == null) return false;
             var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
@@ -1115,9 +1233,10 @@ public class DocxReportService : IDocxReportService
     /// </summary>
     private static void ReplaceGlossaryTableRows(Body body, string glossaryContent)
     {
-        // Locate the Glossary table
+        // Locate the Glossary table (skip nested tables)
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideTable(t)) return false;
             var firstRow = t.Descendants<TableRow>().FirstOrDefault();
             if (firstRow == null) return false;
             var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
@@ -1212,10 +1331,12 @@ public class DocxReportService : IDocxReportService
 
         // ── Find the section heading paragraph ────────────────────────────────────
         // Skip TOC paragraphs: the section number appears in the TOC before the real heading.
+        // Skip paragraphs inside table cells: numbered list items like "8. filename" in the
+        // artefacts table would otherwise match section "8." and put the table in the wrong place.
         Paragraph? sectionPara = null;
         foreach (var para in body.Descendants<Paragraph>())
         {
-            if (IsTocParagraph(para)) continue;
+            if (IsTocParagraph(para) || IsInsideTable(para)) continue;
             var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text));
             if (txt.Contains(sectionHeading, StringComparison.OrdinalIgnoreCase))
             {
@@ -1353,6 +1474,23 @@ public class DocxReportService : IDocxReportService
 
         // Insert the table after the section heading
         sectionPara.InsertAfterSelf(table);
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="element"/> is nested inside a <see cref="Table"/>.
+    /// Used to prevent section-heading searches from matching paragraphs inside table cells
+    /// (e.g. a numbered file list "8. filename.xlsx" in the artefacts table would otherwise
+    /// match the "8. Volumetrics" section heading check).
+    /// </summary>
+    private static bool IsInsideTable(DocumentFormat.OpenXml.OpenXmlElement element)
+    {
+        var parent = element.Parent;
+        while (parent != null)
+        {
+            if (parent is Table) return true;
+            parent = parent.Parent;
+        }
+        return false;
     }
 
     /// <summary>
@@ -1731,15 +1869,16 @@ public class DocxReportService : IDocxReportService
     /// uploaded document.  The table is identified by the keyword "Artefact" in its
     /// header row.  Column layout: No | Document / Artefact Name | Type | Source.
     /// </summary>
-    private static void ReplaceArtefactsTable(Body body, IList<string> fileNames)
+    private static void ReplaceArtefactsTable(Body body, IList<ArtefactFile> artefactFiles)
     {
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideTable(t)) return false;
             var rows = t.Descendants<TableRow>().ToList();
             if (rows.Count == 0) return false;
             var headerText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
             return headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase)
-                || headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase);
+                || headerText.Contains("Document", StringComparison.OrdinalIgnoreCase);
         });
 
         if (table == null) return;
@@ -1754,23 +1893,22 @@ public class DocxReportService : IDocxReportService
         // Determine column count from header row.
         int colCount = allRows[0].Elements<TableCell>().Count();
 
-        // Clone the visual style from the first data row if it exists, otherwise build plain rows.
+        var srcCells = allRows[0].Elements<TableCell>().ToList();
+
         // Build one new row per file.
-        for (int i = 0; i < fileNames.Count; i++)
+        for (int i = 0; i < artefactFiles.Count; i++)
         {
+            var file   = artefactFiles[i];
             var newRow = new TableRow();
 
             // Copy table-row properties from the header row for consistent styling.
             var srcRowProps = allRows[0].GetFirstChild<TableRowProperties>()?.CloneNode(true);
             if (srcRowProps != null) newRow.AppendChild(srcRowProps);
 
-            var srcCells = allRows[0].Elements<TableCell>().ToList();
-
             for (int col = 0; col < colCount; col++)
             {
                 var newCell = new TableCell();
 
-                // Copy cell properties for consistent border/width styling.
                 if (col < srcCells.Count)
                 {
                     var srcCellProps = srcCells[col].GetFirstChild<TableCellProperties>()?.CloneNode(true);
@@ -1779,9 +1917,11 @@ public class DocxReportService : IDocxReportService
 
                 var cellText = col switch
                 {
-                    0 => (i + 1).ToString(),          // sequential No.
-                    1 => fileNames[i],                // Document / Artefact Name
-                    _ => string.Empty                 // Type, Source — leave blank
+                    0 => (i + 1).ToString(),                        // No.
+                    1 => file.FileName,                              // Document / Artefact Name
+                    2 => file.UploadedBy ?? string.Empty,            // Uploaded By
+                    3 => file.SourceId,                              // Task / Intake ID
+                    _ => string.Empty
                 };
 
                 var para = new Paragraph();

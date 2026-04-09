@@ -15,7 +15,7 @@ public interface IDocxReportService
         IntakeRecord intake,
         IList<ReportFieldStatus> fieldStatuses,
         string templatePath,
-        IList<string>? artefactFileNames = null,
+        IList<ArtefactFile>? artefactFiles = null,
         IList<(string FileName, byte[] Data)>? processFlowImages = null);
 }
 
@@ -31,3 +31,15 @@ public sealed record FieldDefinition(
     /// Use "" (empty) when the user must supply the value manually.
     /// </summary>
     string? AutoSource);
+
+/// <summary>
+/// Metadata for a single file to be listed in the 1.2 Artefacts table of the BARTOK DD report.
+/// </summary>
+public sealed record ArtefactFile(
+    /// <summary>File name as uploaded.</summary>
+    string FileName,
+    /// <summary>Display name of the person who uploaded the file, or null if unknown.</summary>
+    string? UploadedBy,
+    /// <summary>Source identifier, e.g. "Task #5" or "Intake #12".</summary>
+    string SourceId);
+
