@@ -849,6 +849,9 @@ public class DocxReportService : IDocxReportService
         for (int i = 0; i < bodyChildren.Count; i++)
         {
             if (bodyChildren[i] is not Paragraph p) continue;
+            // Skip TOC entries — the "5. Work Instructions" text appears in the TOC
+            // before the real heading in the document body.
+            if (IsTocParagraph(p)) continue;
             var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text));
 
             if (wiHeadingIdx < 0 &&
@@ -1118,9 +1121,11 @@ public class DocxReportService : IDocxReportService
 
         // No existing table — find the section heading and insert a new table
         // after the content paragraph(s) that contain the LLM-generated text.
+        // Skip TOC paragraphs: the section number appears in the TOC before the real heading.
         Paragraph? sectionPara = null;
         foreach (var para in body.Descendants<Paragraph>())
         {
+            if (IsTocParagraph(para)) continue;
             var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text));
             if (txt.Contains(sectionHeading, StringComparison.OrdinalIgnoreCase))
             {
@@ -1216,6 +1221,30 @@ public class DocxReportService : IDocxReportService
 
         // Insert the table after the section heading
         sectionPara.InsertAfterSelf(table);
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when <paramref name="para"/> is part of the Table of Contents —
+    /// either because it lives inside an <see cref="SdtBlock"/> (Word wraps the TOC in one)
+    /// or because its paragraph style begins with "TOC" (e.g. "TOC1", "TOC2").
+    /// Used to prevent section-heading searches from matching TOC entries before the
+    /// real headings in the document body.
+    /// </summary>
+    private static bool IsTocParagraph(Paragraph para)
+    {
+        // Check for TOC paragraph style (e.g. "TOC1", "TOC2", "TOCHeading")
+        var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Check if the paragraph is nested inside an SdtBlock (Word's TOC container)
+        var parent = para.Parent;
+        while (parent != null)
+        {
+            if (parent is SdtBlock) return true;
+            parent = parent.Parent;
+        }
+        return false;
     }
 
     /// <summary>
