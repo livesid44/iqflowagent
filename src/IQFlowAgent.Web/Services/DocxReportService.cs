@@ -933,8 +933,10 @@ public class DocxReportService : IDocxReportService
         string content)
     {
         // Locate the target table by matching keywords against its first row.
+        // Exclude tables inside the TOC SdtBlock to avoid populating TOC placeholders.
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideSdtBlock(t)) return false;
             var firstRow = t.Descendants<TableRow>().FirstOrDefault();
             if (firstRow == null) return false;
             var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
@@ -993,9 +995,10 @@ public class DocxReportService : IDocxReportService
     /// </summary>
     private static void ReplaceGlossaryTableRows(Body body, string glossaryContent)
     {
-        // Locate the Glossary table
+        // Locate the Glossary table — skip tables inside the TOC SdtBlock.
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideSdtBlock(t)) return false;
             var firstRow = t.Descendants<TableRow>().FirstOrDefault();
             if (firstRow == null) return false;
             var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
@@ -1085,9 +1088,10 @@ public class DocxReportService : IDocxReportService
 
         int colCount = Math.Max(headers.Length, dataRows.Max(r => r.Length));
 
-        // Try to find an existing table for this section first
+        // Try to find an existing table for this section first — skip TOC tables.
         var existingTable = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideSdtBlock(t)) return false;
             var firstRow = t.Descendants<TableRow>().FirstOrDefault();
             if (firstRow == null) return false;
             var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
@@ -1237,8 +1241,18 @@ public class DocxReportService : IDocxReportService
         if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // Check if the paragraph is nested inside an SdtBlock (Word's TOC container)
-        var parent = para.Parent;
+        return IsInsideSdtBlock(para);
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if <paramref name="element"/> is nested inside a
+    /// <see cref="SdtBlock"/> — the container Word uses for the Table of Contents.
+    /// Used to prevent table-finding operations from matching placeholder tables
+    /// that live inside the TOC and would otherwise be populated there.
+    /// </summary>
+    private static bool IsInsideSdtBlock(DocumentFormat.OpenXml.OpenXmlElement element)
+    {
+        var parent = element.Parent;
         while (parent != null)
         {
             if (parent is SdtBlock) return true;
@@ -1321,8 +1335,10 @@ public class DocxReportService : IDocxReportService
         string content)
     {
         // Locate the target table by matching keywords against its first row.
+        // Exclude tables inside the TOC SdtBlock to avoid populating TOC placeholder tables.
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
+            if (IsInsideSdtBlock(t)) return false;
             var firstRow = t.Descendants<TableRow>().FirstOrDefault();
             if (firstRow == null) return false;
             var headerText = string.Concat(firstRow.Descendants<Text>().Select(x => x.Text));
