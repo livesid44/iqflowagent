@@ -2188,14 +2188,16 @@ public class AzureOpenAiService : IAzureOpenAiService
     // mermaid.ink render dimensions in pixels.
     private const int MermaidRenderWidth  = 900;
     private const int MermaidRenderHeight = 600;
-    // Timeout for the mermaid.ink render HTTP call.
-    private const int MermaidRenderTimeoutSeconds = 30;
+    // Timeout for individual Mermaid render HTTP call (per provider).
+    private const int MermaidRenderTimeoutSeconds = 20;
 
     /// <summary>
     /// Generates a workflow diagram PNG for the Work Instructions section.
     /// Step 1: The LLM converts the WI text into a Mermaid <c>graph TD</c> definition.
-    /// Step 2: The mermaid.ink public rendering API converts the definition to a PNG image.
-    /// Returns the PNG bytes, or <c>null</c> if generation fails (caller falls back to text).
+    /// Step 2: Renders the definition to PNG.  mermaid.ink is tried first; if it fails or
+    /// times out, kroki.io is tried as a fallback so that intermittent outages of one
+    /// provider do not silently revert the WI section to plain text.
+    /// Returns the PNG bytes, or <c>null</c> if all providers fail (caller falls back to text).
     /// </summary>
     public async Task<byte[]?> GenerateWorkflowDiagramAsync(string wiContent, string processName)
     {
@@ -2280,7 +2282,19 @@ public class AzureOpenAiService : IAzureOpenAiService
             return null;
         }
 
-        // ── Step 2: Render the Mermaid definition to PNG via mermaid.ink ─────────
+        // ── Step 2: Render the Mermaid definition to PNG ─────────────────────────
+        // Try mermaid.ink first; if it fails or times out, fall back to kroki.io.
+        return await RenderMermaidToPngAsync(mermaidDefinition, processName);
+    }
+
+    /// <summary>
+    /// Tries to render a Mermaid definition to PNG using mermaid.ink, then falls back
+    /// to kroki.io if mermaid.ink is unreachable or returns an error.  Logging on each
+    /// provider failure makes it easy to diagnose which provider is down.
+    /// </summary>
+    private async Task<byte[]?> RenderMermaidToPngAsync(string mermaidDefinition, string processName)
+    {
+        // ── Provider 1: mermaid.ink ──────────────────────────────────────────────
         try
         {
             // mermaid.ink accepts base64url-encoded Mermaid definitions
@@ -2292,21 +2306,48 @@ public class AzureOpenAiService : IAzureOpenAiService
 
             using var http = _httpClientFactory.CreateClient();
             http.Timeout = TimeSpan.FromSeconds(MermaidRenderTimeoutSeconds);
-            var pngResponse = await http.GetAsync(renderUrl);
+            var response = await http.GetAsync(renderUrl);
 
-            if (!pngResponse.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("mermaid.ink returned {Status} for diagram render.", (int)pngResponse.StatusCode);
-                return null;
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+                if (bytes.Length > 0) return bytes;
             }
-
-            return await pngResponse.Content.ReadAsByteArrayAsync();
+            _logger.LogWarning("mermaid.ink returned {Status} for '{ProcessName}' — trying kroki.io fallback.",
+                (int)response.StatusCode, processName);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to render Mermaid diagram via mermaid.ink for '{ProcessName}'.", processName);
-            return null;
+            _logger.LogWarning(ex, "mermaid.ink unreachable for '{ProcessName}' — trying kroki.io fallback.", processName);
         }
+
+        // ── Provider 2: kroki.io (fallback) ─────────────────────────────────────
+        try
+        {
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(MermaidRenderTimeoutSeconds);
+
+            // kroki.io POST endpoint accepts the Mermaid source as plain text
+            var content  = new StringContent(mermaidDefinition, System.Text.Encoding.UTF8, "text/plain");
+            var response = await http.PostAsync("https://kroki.io/mermaid/png", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+                if (bytes.Length > 0)
+                {
+                    _logger.LogInformation("kroki.io rendered diagram ({Bytes} bytes) for '{ProcessName}'.", bytes.Length, processName);
+                    return bytes;
+                }
+            }
+            _logger.LogWarning("kroki.io returned {Status} for '{ProcessName}'.", (int)response.StatusCode, processName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "kroki.io also unreachable for '{ProcessName}' — WI diagram unavailable.", processName);
+        }
+
+        return null;
     }
 
     /// <summary>Strips markdown code fences (```mermaid ... ```) from LLM output.</summary>
