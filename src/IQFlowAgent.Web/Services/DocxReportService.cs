@@ -273,9 +273,10 @@ public class DocxReportService : IDocxReportService
         var sopValue = GetFieldFillValue(fieldStatuses, "sop_content") ?? string.Empty;
         ApplyCurlyBracketReplacement(body, string.Empty);
 
-        // ── Artefacts table: populate with uploaded file names ───────────────────
-        if (artefactFiles != null && artefactFiles.Count > 0)
-            ReplaceArtefactsTable(body, artefactFiles);
+        // ── Artefacts table: always create the table (even when no files uploaded) ──
+        // Passing an empty list causes the method to insert a header-only table,
+        // which is preferable to leaving the section blank.
+        ReplaceArtefactsTable(body, artefactFiles ?? []);
 
         // ── RACI table: populate as a proper table with individual cells ────────
         var raciValue = GetFieldFillValue(fieldStatuses, "raci_content");
