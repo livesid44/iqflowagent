@@ -220,12 +220,28 @@ public class DocxReportService : IDocxReportService
         // "1. file1\n...\n8. file8\n..." from being left as a body paragraph, which would
         // otherwise cause ReplaceStructuredSectionTable (sectionHeading "8.") to false-match
         // the artefact paragraph and overwrite the artefacts table with volumetrics data.
-        if (artefactFiles != null && artefactFiles.Count > 0)
-        {
-            const string artefactPlaceholder =
-                "[All Document uploaded in task or Name of document, date when uploaded in a table]";
-            replacements[artefactPlaceholder] = string.Empty;
-        }
+        const string artefactPlaceholder =
+            "[All Document uploaded in task or Name of document, date when uploaded in a table]";
+        replacements[artefactPlaceholder] = string.Empty;
+
+        // ── SOP placeholder: clear so ApplyReplacements does not inject raw SOP text ─
+        // The template uses a mixed-bracket placeholder "{Detailed SOP should come here]".
+        // If this placeholder is put into the document body via ApplyReplacements, the raw
+        // sopContent text appears as unformatted text (before or at section 4) instead of
+        // as a proper table. Setting it to empty here lets ApplyReplacements erase the
+        // placeholder text, and ReplaceSopTableRows inserts the correctly formatted table
+        // at section "4." without interference from the injected raw text.
+        const string sopParagraphPlaceholder = "{Detailed SOP should come here]";
+        replacements[sopParagraphPlaceholder] = string.Empty;
+
+        // ── WI placeholder: clear so ApplyReplacements does not inject WI text ──────
+        // The wi_content placeholder [Details Work Instructions to come here] is a standard
+        // bracket placeholder, so ApplyReplacements would replace it wherever it appears —
+        // including any matching text in the TOC area — causing WI content to surface in
+        // unexpected locations. Setting it to empty ensures only ReplaceWorkInstructionParagraphs
+        // handles the insertion at section "5."
+        const string wiParagraphPlaceholder = "[Details Work Instructions to come here]";
+        replacements[wiParagraphPlaceholder] = string.Empty;
 
         using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);
         var body = wordDoc.MainDocumentPart!.Document.Body!;
@@ -1874,14 +1890,18 @@ public class DocxReportService : IDocxReportService
     /// </summary>
     private static void ReplaceArtefactsTable(Body body, IList<ArtefactFile> artefactFiles)
     {
+        // Locate the Artefacts table.
+        // Match ONLY on "Artefact" — the table header contains "Document / Artefact Name".
+        // The broader "Document" fallback was removed because the Document Control table
+        // (first table in the document, header contains "Document Date" / "Document Control")
+        // would be picked up first, destroying the Document Control section.
         var table = body.Descendants<Table>().FirstOrDefault(t =>
         {
             if (IsInsideTable(t)) return false;
             var rows = t.Descendants<TableRow>().ToList();
             if (rows.Count == 0) return false;
             var headerText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
-            return headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase)
-                || headerText.Contains("Document", StringComparison.OrdinalIgnoreCase);
+            return headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase);
         });
 
         if (table == null) return;
