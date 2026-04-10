@@ -214,17 +214,17 @@ public class DocxReportService : IDocxReportService
                 replacements[fd.TemplatePlaceholder] = string.Empty;
         }
 
-        // ── Artefact list: build formatted text for the artefact_content placeholder ──
-        // If uploaded file names are provided, build a numbered list and add it to
-        // replacements so the paragraph placeholder is replaced with real file names.
+        // ── Artefact list: clear the paragraph placeholder ─────────────────────────
+        // The actual file list is rendered by ReplaceArtefactsTable into the proper table.
+        // Setting the placeholder to empty here prevents a numbered list like
+        // "1. file1\n...\n8. file8\n..." from being left as a body paragraph, which would
+        // otherwise cause ReplaceStructuredSectionTable (sectionHeading "8.") to false-match
+        // the artefact paragraph and overwrite the artefacts table with volumetrics data.
         if (artefactFiles != null && artefactFiles.Count > 0)
         {
             const string artefactPlaceholder =
                 "[All Document uploaded in task or Name of document, date when uploaded in a table]";
-            var artefactLines = artefactFiles
-                .Select((f, i) => $"{i + 1}. {f.FileName}")
-                .ToList();
-            replacements[artefactPlaceholder] = string.Join("\n", artefactLines);
+            replacements[artefactPlaceholder] = string.Empty;
         }
 
         using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);
@@ -1333,12 +1333,15 @@ public class DocxReportService : IDocxReportService
         // Skip TOC paragraphs: the section number appears in the TOC before the real heading.
         // Skip paragraphs inside table cells: numbered list items like "8. filename" in the
         // artefacts table would otherwise match section "8." and put the table in the wrong place.
+        // Use StartsWith (not Contains) so that a paragraph whose text is the artefact numbered
+        // list "1. file1...8. file8..." (which CONTAINS "8." mid-string) is never treated as the
+        // "8. Volumetrics" section heading.
         Paragraph? sectionPara = null;
         foreach (var para in body.Descendants<Paragraph>())
         {
             if (IsTocParagraph(para) || IsInsideTable(para)) continue;
             var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text));
-            if (txt.Contains(sectionHeading, StringComparison.OrdinalIgnoreCase))
+            if (txt.TrimStart().StartsWith(sectionHeading, StringComparison.OrdinalIgnoreCase))
             {
                 sectionPara = para;
                 break;
