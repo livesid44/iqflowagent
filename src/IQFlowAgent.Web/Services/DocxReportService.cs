@@ -1263,6 +1263,17 @@ public class DocxReportService : IDocxReportService
             // Skip if all cells are empty
             if (cells.All(string.IsNullOrWhiteSpace)) continue;
 
+            // Strip leading and trailing empty cells.
+            // LLMs sometimes produce Markdown-style rows such as "| Jan-25 | 12,346 | Peak |"
+            // or add a trailing pipe "Jan-25 | 12,346 | Peak |".  Both produce extra empty
+            // cells that create phantom columns and distort the rendered table.
+            int start = 0;
+            while (start < cells.Length && string.IsNullOrWhiteSpace(cells[start])) start++;
+            int end = cells.Length - 1;
+            while (end >= start && string.IsNullOrWhiteSpace(cells[end])) end--;
+            if (end < start) continue; // row was entirely empty pipes
+            cells = cells[start..(end + 1)];
+
             rows.Add(cells);
         }
 
