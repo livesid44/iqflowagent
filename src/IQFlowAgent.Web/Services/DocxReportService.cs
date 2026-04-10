@@ -1227,9 +1227,9 @@ public class DocxReportService : IDocxReportService
 
         var relationshipId = mainPart.GetIdOfPart(imagePart);
 
-        // 6 inches wide × 4 inches tall (in EMUs; 1 inch = 914400 EMUs)
-        const long widthEmu  = 5486400L;
-        const long heightEmu = 3657600L;
+        // 6 inches wide × 4 inches tall (1 inch = 914400 EMUs)
+        const long widthEmu  = 6 * 914400L;  // 5486400 EMU
+        const long heightEmu = 4 * 914400L;  // 3657600 EMU
 
         var drawing    = CreateInlineDrawing(relationshipId, $"{processName} Workflow", widthEmu, heightEmu);
         var imagePara  = new Paragraph(new Run(drawing));

@@ -2313,11 +2313,14 @@ public class AzureOpenAiService : IAzureOpenAiService
     private static string StripMermaidFences(string text)
     {
         // Remove opening ```mermaid or ``` fence
-        text = Regex.Replace(text, @"^```(?:mermaid)?\s*\n?", string.Empty, RegexOptions.Multiline);
+        text = MermaidOpenFenceRegex.Replace(text, string.Empty);
         // Remove closing ``` fence
-        text = Regex.Replace(text, @"\n?```\s*$", string.Empty, RegexOptions.Multiline);
+        text = MermaidCloseFenceRegex.Replace(text, string.Empty);
         return text.Trim();
     }
+
+    private static readonly Regex MermaidOpenFenceRegex  = new(@"^```(?:mermaid)?\s*\n?", RegexOptions.Multiline | RegexOptions.Compiled);
+    private static readonly Regex MermaidCloseFenceRegex = new(@"\n?```\s*$",             RegexOptions.Multiline | RegexOptions.Compiled);
 
     // ─── GenerateSopFromTranscriptAsync ──────────────────────────────────────
 
