@@ -157,7 +157,8 @@ public class DocxReportService : IDocxReportService
     public Task<byte[]> GenerateReportAsync(
         IntakeRecord intake, IList<ReportFieldStatus> fieldStatuses, string templatePath,
         IList<ArtefactFile>? artefactFiles = null,
-        IList<(string FileName, byte[] Data)>? processFlowImages = null)
+        IList<(string FileName, byte[] Data)>? processFlowImages = null,
+        byte[]? wiDiagramImage = null)
     {
         var templateBytes = File.ReadAllBytes(templatePath);
         using var ms = new MemoryStream();
@@ -285,10 +286,20 @@ public class DocxReportService : IDocxReportService
         if (!string.IsNullOrWhiteSpace(sopValue))
             ReplaceSopTableRows(body, sopValue);
 
-        // ── Work Instructions: replace paragraph section with LLM content ───────
+        // ── Work Instructions: embed workflow diagram image or insert text ───────
         var wiValue = GetFieldFillValue(fieldStatuses, "wi_content");
-        if (!string.IsNullOrWhiteSpace(wiValue))
+        if (wiDiagramImage != null && wiDiagramImage.Length > 0)
+        {
+            // A pre-generated workflow diagram image was supplied — embed it in the WI
+            // section instead of inserting text. The WI section body paragraphs (step
+            // text / sub-headings) are cleared by the same method that would insert text,
+            // so the heading and image are the only content in section 5.
+            InsertWiDiagramImage(wordDoc, body, wiDiagramImage, intake.ProcessName ?? "Workflow");
+        }
+        else if (!string.IsNullOrWhiteSpace(wiValue))
+        {
             ReplaceWorkInstructionParagraphs(body, wiValue);
+        }
 
         // ── Update Document Control table rows for Author and Approver ──────────
         // Both rows have the same placeholder text in the template, so we must use
@@ -1164,9 +1175,74 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
-    /// Parses pipe-delimited or tab-delimited LLM output into rows of cell values.
-    /// Skips empty lines and lines that look like header separators (e.g. "---|---|---").
+    /// Inserts a pre-rendered workflow diagram image (PNG bytes) into the
+    /// "5. Work Instructions" section, replacing any existing text paragraphs
+    /// in that section. The diagram is inserted as an inline drawing immediately
+    /// after the "5. Work Instructions" heading, keeping the DOCX layout clean.
     /// </summary>
+    private static void InsertWiDiagramImage(
+        WordprocessingDocument wordDoc,
+        Body body,
+        byte[] imageBytes,
+        string processName)
+    {
+        // ── Find "5. Work Instructions" heading ──────────────────────────────────
+        var bodyChildren = body.ChildElements.ToList();
+        int wiHeadingIdx   = -1;
+        int nextSectionIdx = bodyChildren.Count;
+
+        for (int i = 0; i < bodyChildren.Count; i++)
+        {
+            if (bodyChildren[i] is not Paragraph p) continue;
+            if (IsTocParagraph(p)) continue;
+            var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text));
+
+            if (wiHeadingIdx < 0 &&
+                txt.Contains("5. Work Instructions", StringComparison.OrdinalIgnoreCase))
+            {
+                wiHeadingIdx = i;
+            }
+            else if (wiHeadingIdx >= 0 && Regex.IsMatch(txt.TrimStart(), @"^6[\.\s]"))
+            {
+                nextSectionIdx = i;
+                break;
+            }
+        }
+
+        if (wiHeadingIdx < 0) return;
+
+        // ── Clear all paragraphs between the WI heading and the next section ─────
+        for (int i = nextSectionIdx - 1; i > wiHeadingIdx; i--)
+            bodyChildren[i].Remove();
+
+        var headingPara = body.ChildElements.ElementAt(wiHeadingIdx) as Paragraph;
+        if (headingPara == null) return;
+
+        // ── Embed the diagram image inline ────────────────────────────────────────
+        var mainPart  = wordDoc.MainDocumentPart!;
+        var imagePart = mainPart.AddImagePart(ImagePartType.Png);
+        using (var ms = new MemoryStream(imageBytes))
+            imagePart.FeedData(ms);
+
+        var relationshipId = mainPart.GetIdOfPart(imagePart);
+
+        // 6 inches wide × 4 inches tall (in EMUs; 1 inch = 914400 EMUs)
+        const long widthEmu  = 5486400L;
+        const long heightEmu = 3657600L;
+
+        var drawing    = CreateInlineDrawing(relationshipId, $"{processName} Workflow", widthEmu, heightEmu);
+        var imagePara  = new Paragraph(new Run(drawing));
+        var captionPara = new Paragraph(
+            new Run(new Text($"Figure: {processName} — Work Instruction Flow")
+            {
+                Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve
+            }));
+
+        headingPara.InsertAfterSelf(captionPara);
+        headingPara.InsertAfterSelf(imagePara);
+    }
+
+
     private static List<string[]> ParseDelimitedContent(string content)
     {
         var rows = new List<string[]>();

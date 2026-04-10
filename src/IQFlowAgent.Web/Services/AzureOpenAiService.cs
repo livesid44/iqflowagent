@@ -2,6 +2,7 @@ using IQFlowAgent.Web.Models;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace IQFlowAgent.Web.Services;
 
@@ -2176,6 +2177,146 @@ public class AzureOpenAiService : IAzureOpenAiService
             _logger.LogError(ex, "GenerateSingleFieldAsync failed for field '{FieldKey}' on intake {IntakeId}.", fieldKey, intake.IntakeId);
             return string.Empty;
         }
+    }
+
+    // ─── GenerateWorkflowDiagramAsync ────────────────────────────────────────
+
+    // Maximum WI content characters sent to LLM for diagram generation (token budget).
+    private const int MaxWiContentForDiagram  = 4000;
+    // Token budget for Mermaid definition generation — diagrams are compact.
+    private const int MermaidGenerationMaxTokens = 800;
+    // mermaid.ink render dimensions in pixels.
+    private const int MermaidRenderWidth  = 900;
+    private const int MermaidRenderHeight = 600;
+    // Timeout for the mermaid.ink render HTTP call.
+    private const int MermaidRenderTimeoutSeconds = 30;
+
+    /// <summary>
+    /// Generates a workflow diagram PNG for the Work Instructions section.
+    /// Step 1: The LLM converts the WI text into a Mermaid <c>graph TD</c> definition.
+    /// Step 2: The mermaid.ink public rendering API converts the definition to a PNG image.
+    /// Returns the PNG bytes, or <c>null</c> if generation fails (caller falls back to text).
+    /// </summary>
+    public async Task<byte[]?> GenerateWorkflowDiagramAsync(string wiContent, string processName)
+    {
+        if (string.IsNullOrWhiteSpace(wiContent)) return null;
+
+        // ── Step 1: Use LLM to produce a Mermaid flowchart definition ────────────
+        var (endpoint, apiKey, deployment, apiVersion, _, modelVersion) = await GetAiConfigAsync();
+        if (string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(apiKey)
+            || string.IsNullOrWhiteSpace(deployment)
+            || endpoint.Contains("YOUR_RESOURCE") || apiKey.Contains("YOUR_API_KEY"))
+        {
+            _logger.LogWarning("Azure OpenAI not configured — cannot generate workflow diagram for '{ProcessName}'.", processName);
+            return null;
+        }
+
+        var requestUrl = $"{endpoint.TrimEnd('/')}/openai/deployments/{deployment}/chat/completions?api-version={apiVersion}";
+
+        const string systemPrompt = """
+            You are a technical diagram specialist. Convert the provided work instructions into a
+            Mermaid flowchart definition using `graph TD` syntax. Rules:
+            - Output ONLY the raw Mermaid code block — no markdown fences, no explanation text.
+            - Each SOP step becomes a rectangular node; decision/check points use diamond nodes {}.
+            - Keep node labels concise (max 6 words). Use A, B, C… or Step1, Step2… as IDs.
+            - Connect nodes with arrows (-->).
+            - Start with a Start([Start]) node and end with an End([End]) node.
+            - Maximum 15 nodes to keep the diagram readable.
+            - Example output:
+              graph TD
+                Start([Start]) --> A[Receive Request]
+                A --> B[Validate Data]
+                B --> C{Valid?}
+                C -- Yes --> D[Process Request]
+                C -- No --> E[Return Error]
+                D --> End([End])
+                E --> End
+            """;
+
+        var userMessage = $"Process: {processName}\n\nWork Instructions:\n{wiContent[..Math.Min(wiContent.Length, MaxWiContentForDiagram)]}";
+
+        string mermaidDefinition;
+        try
+        {
+            var requestBody = new
+            {
+                messages = new object[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user",   content = userMessage }
+                },
+                max_tokens  = MermaidGenerationMaxTokens,
+                temperature = 0.2,
+                model       = modelVersion
+            };
+
+            var http = _httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Add("api-key", apiKey);
+
+            var response = await PostLlmAsync(http, requestUrl, requestBody, "GenerateWorkflowDiagram");
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("LLM returned {Status} for workflow diagram generation.", (int)response.StatusCode);
+                return null;
+            }
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(responseText);
+            mermaidDefinition = doc.RootElement
+                .GetProperty("choices")[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString()?.Trim() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(mermaidDefinition))
+                return null;
+
+            // Strip markdown fences if the LLM wrapped output anyway
+            mermaidDefinition = StripMermaidFences(mermaidDefinition);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to generate Mermaid definition for '{ProcessName}'.", processName);
+            return null;
+        }
+
+        // ── Step 2: Render the Mermaid definition to PNG via mermaid.ink ─────────
+        try
+        {
+            // mermaid.ink accepts base64url-encoded Mermaid definitions
+            var base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(mermaidDefinition))
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+            var renderUrl = $"https://mermaid.ink/img/{base64}?type=png&width={MermaidRenderWidth}&height={MermaidRenderHeight}";
+
+            using var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(MermaidRenderTimeoutSeconds);
+            var pngResponse = await http.GetAsync(renderUrl);
+
+            if (!pngResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("mermaid.ink returned {Status} for diagram render.", (int)pngResponse.StatusCode);
+                return null;
+            }
+
+            return await pngResponse.Content.ReadAsByteArrayAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to render Mermaid diagram via mermaid.ink for '{ProcessName}'.", processName);
+            return null;
+        }
+    }
+
+    /// <summary>Strips markdown code fences (```mermaid ... ```) from LLM output.</summary>
+    private static string StripMermaidFences(string text)
+    {
+        // Remove opening ```mermaid or ``` fence
+        text = Regex.Replace(text, @"^```(?:mermaid)?\s*\n?", string.Empty, RegexOptions.Multiline);
+        // Remove closing ``` fence
+        text = Regex.Replace(text, @"\n?```\s*$", string.Empty, RegexOptions.Multiline);
+        return text.Trim();
     }
 
     // ─── GenerateSopFromTranscriptAsync ──────────────────────────────────────

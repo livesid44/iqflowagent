@@ -117,4 +117,12 @@ public interface IAzureOpenAiService
         IntakeRecord intake,
         IList<(string Key, string Label, string Section, string Value)> documentSnapshot,
         string? artifactText);
+
+    /// <summary>
+    /// Generates a workflow diagram image (PNG) for the Work Instructions section.
+    /// Uses the LLM to produce a Mermaid flowchart definition from the WI content,
+    /// then renders it to PNG via the mermaid.ink public API.
+    /// Returns the PNG bytes, or <c>null</c> if generation fails or AI is not configured.
+    /// </summary>
+    Task<byte[]?> GenerateWorkflowDiagramAsync(string wiContent, string processName);
 }

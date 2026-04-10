@@ -603,12 +603,40 @@ public class ReportController : Controller
             }
         }
 
+        // ── Generate WI Workflow Diagram image ─────────────────────────────────
+        // Ask the AI to produce a Mermaid flowchart from the WI content, then render
+        // it to PNG via mermaid.ink. This replaces the plain WI text in the DOCX with
+        // a visual workflow diagram. Falls back to plain text if generation fails.
+        byte[]? wiDiagramImage = null;
+        try
+        {
+            var wiStatus = fieldStatuses.FirstOrDefault(f =>
+                f.FieldKey.Equals("wi_content", StringComparison.OrdinalIgnoreCase));
+            var wiContent = wiStatus is { IsNA: false } && !string.IsNullOrWhiteSpace(wiStatus.FillValue)
+                ? wiStatus.FillValue : null;
+
+            if (!string.IsNullOrWhiteSpace(wiContent))
+            {
+                wiDiagramImage = await _aiService.GenerateWorkflowDiagramAsync(
+                    wiContent, intake.ProcessName ?? "Process");
+                if (wiDiagramImage != null)
+                    _logger.LogInformation(
+                        "Generated WI workflow diagram ({Bytes} bytes) for intake {IntakeId}.",
+                        wiDiagramImage.Length, intakeId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "WI workflow diagram generation failed for intake {IntakeId} — using text fallback.", intakeId);
+        }
+
         try
         {
             var docxBytes = await _docxService.GenerateReportAsync(
                 intake, fieldStatuses, templatePath,
                 artefactFiles.Count > 0 ? artefactFiles : null,
-                processFlowImages.Count > 0 ? processFlowImages : null);
+                processFlowImages.Count > 0 ? processFlowImages : null,
+                wiDiagramImage);
 
             var now            = DateTime.UtcNow;
             var reportFileName = $"BARTOK_DD_{intake.IntakeId}_{now:yyyyMMddHHmmss}.docx";
