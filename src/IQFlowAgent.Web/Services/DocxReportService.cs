@@ -2069,17 +2069,19 @@ public class DocxReportService : IDocxReportService
 
         if (existingTable == null)
         {
-            // Keyword fallback for existing tables: "Artefact" OR "Uploaded By"
-            // ("Uploaded By" is unique to the artefacts table; "Document Control" table
-            // does NOT contain this phrase, so there is no false-match risk).
+            // Keyword fallback for existing tables: match only on "Uploaded By".
+            // "Uploaded By" is unique to a previously-generated artefacts table.
+            // DO NOT match on "Artefact" alone — the Regulation/Compliance table
+            // (section 9) has "Evidence Artefact" in its header and would be a
+            // false-positive, causing it to be destroyed and artefact rows written
+            // there instead of section 1.2.
             existingTable = body.Descendants<Table>().FirstOrDefault(t =>
             {
                 if (IsInsideTable(t)) return false;
                 var rows = t.Descendants<TableRow>().ToList();
                 if (rows.Count == 0) return false;
                 var headerText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
-                return headerText.Contains("Artefact",   StringComparison.OrdinalIgnoreCase)
-                    || headerText.Contains("Uploaded By", StringComparison.OrdinalIgnoreCase);
+                return headerText.Contains("Uploaded By", StringComparison.OrdinalIgnoreCase);
             });
         }
 
