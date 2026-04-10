@@ -243,6 +243,16 @@ public class DocxReportService : IDocxReportService
         const string wiParagraphPlaceholder = "[Details Work Instructions to come here]";
         replacements[wiParagraphPlaceholder] = string.Empty;
 
+        // ── RACI placeholder: clear so ApplyReplacements does not inject raw RACI text ─
+        // The raci_content placeholder [Roles and Responsibilities to be updated in a table
+        // here] is a standard bracket placeholder. If the raw RACI content (TASKS: / role rows)
+        // is injected here by ApplyReplacements it appears as unformatted text in section 3
+        // (between/after the RACI table that ReplaceRaciTable creates), making the raw content
+        // look like a "step by step" block sitting below the RACI section.
+        // Setting it to empty ensures only ReplaceRaciTable handles section 3.
+        const string raciParagraphPlaceholder = "[Roles and Responsibilities to be updated in a table here]";
+        replacements[raciParagraphPlaceholder] = string.Empty;
+
         using var wordDoc = WordprocessingDocument.Open(ms, isEditable: true);
         var body = wordDoc.MainDocumentPart!.Document.Body!;
 
@@ -361,6 +371,14 @@ public class DocxReportService : IDocxReportService
 
         // ── Strip italic instruction paragraphs ────────────────────────────────
         RemoveInstructionParagraphs(body);
+
+        // ── Clear stale cached TOC entries ─────────────────────────────────────
+        // The TOC SdtBlock caches the last-rendered TOC text. If the template was
+        // previously saved with Work Instruction sub-headings or other placeholder
+        // text as TOC entries, those stale entries show up in the generated document.
+        // Remove all TOC-styled paragraphs from the SdtContent so Word shows a blank
+        // TOC that it will regenerate on open (driven by UpdateFieldsOnOpen below).
+        ClearStaleTocContent(body);
 
         // ── Mark TOC as dirty so Word refreshes it on open ──────────────────────
         MarkTocDirty(wordDoc);
@@ -1597,6 +1615,44 @@ public class DocxReportService : IDocxReportService
     }
 
     /// <summary>
+    /// Removes stale cached TOC entries (paragraphs with "TOC1"/"TOC2"/etc. styles)
+    /// from every TOC <see cref="SdtBlock"/> in <paramref name="body"/>.
+    /// Word stores the last-rendered TOC text inside the SdtBlock's SdtContent; when
+    /// the document is generated the cached entries reflect the OLD template content
+    /// (e.g. Work Instruction sub-headings, placeholder text). Clearing them ensures
+    /// the TOC area is blank rather than showing misleading stale entries.
+    /// Word's <c>UpdateFieldsOnOpen</c> flag (set by <see cref="MarkTocDirty"/>) will
+    /// regenerate the correct TOC from the actual document headings on open.
+    /// </summary>
+    private static void ClearStaleTocContent(Body body)
+    {
+        foreach (var sdt in body.Descendants<SdtBlock>())
+        {
+            // Identify TOC SdtBlocks: either by alias name or by containing a TOC field code.
+            var alias = sdt.SdtProperties?.GetFirstChild<SdtAlias>();
+            bool isToc = alias?.Val?.Value?.Contains("TOC", StringComparison.OrdinalIgnoreCase) == true
+                      || alias?.Val?.Value?.Contains("Table of Contents", StringComparison.OrdinalIgnoreCase) == true
+                      || sdt.Descendants<FieldCode>().Any(fc =>
+                             fc.Text?.Contains("TOC", StringComparison.OrdinalIgnoreCase) == true);
+
+            if (!isToc) continue;
+
+            var sdtContent = sdt.GetFirstChild<SdtContentBlock>();
+            if (sdtContent == null) continue;
+
+            // Remove all paragraphs whose style begins with "TOC" (TOC1, TOC2, TOCHeading…).
+            // These are the cached rendered entries. Preserve all other paragraphs
+            // (the field-begin/field-end paragraphs that drive TOC regeneration).
+            foreach (var para in sdtContent.Elements<Paragraph>().ToList())
+            {
+                var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+                if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+                    para.Remove();
+            }
+        }
+    }
+
+    /// <summary>
     /// Finds the first table in <paramref name="body"/> whose first row contains ALL
     /// of the <paramref name="headerKeywords"/>, removes every data row beyond the
     /// first <paramref name="keepHeaderRows"/> rows, then appends a new merged-cell row
@@ -1890,19 +1946,61 @@ public class DocxReportService : IDocxReportService
     /// </summary>
     private static void ReplaceArtefactsTable(Body body, IList<ArtefactFile> artefactFiles)
     {
-        // Locate the Artefacts table.
-        // Match ONLY on "Artefact" — the table header contains "Document / Artefact Name".
-        // The broader "Document" fallback was removed because the Document Control table
-        // (first table in the document, header contains "Document Date" / "Document Control")
-        // would be picked up first, destroying the Document Control section.
-        var table = body.Descendants<Table>().FirstOrDefault(t =>
+        // ── Locate the artefacts table by scoping to section "1.2" ─────────────────
+        // Section-scoped search is more reliable than header-text matching because the
+        // actual header text in the template varies ("Document Name", "Artefact Name",
+        // "Document / Artefact Name" etc.). The "1.2 Inputs & Artefacts Received" heading
+        // always precedes the artefacts table.
+        Paragraph? sectionPara = null;
+        foreach (var para in body.Descendants<Paragraph>())
         {
-            if (IsInsideTable(t)) return false;
-            var rows = t.Descendants<TableRow>().ToList();
-            if (rows.Count == 0) return false;
-            var headerText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
-            return headerText.Contains("Artefact", StringComparison.OrdinalIgnoreCase);
-        });
+            if (IsTocParagraph(para) || IsInsideTable(para)) continue;
+            var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
+            // Match "1.2" followed by a space/dot/colon/end — e.g. "1.2 Inputs", "1.2.", "1.2:"
+            if (Regex.IsMatch(txt, @"^1\.2[\s\.\:]"))
+            {
+                sectionPara = para;
+                break;
+            }
+        }
+
+        Table? table = null;
+
+        if (sectionPara != null)
+        {
+            // Find first table between "1.2" heading and "2." section heading.
+            var curr = sectionPara.NextSibling();
+            while (curr != null)
+            {
+                if (curr is Paragraph p)
+                {
+                    var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
+                    if (Regex.IsMatch(txt, @"^2[\.\s]")) break; // reached section 2 — stop
+                }
+                else if (curr is Table t)
+                {
+                    table = t;
+                    break;
+                }
+                curr = curr.NextSibling();
+            }
+        }
+
+        // Fallback: search by header keywords when section-scoped search fails.
+        // Prefer "Artefact" (unambiguous), fall back to "Uploaded By" (unique to artefacts
+        // table — the Document Control table does not contain this phrase).
+        if (table == null)
+        {
+            table = body.Descendants<Table>().FirstOrDefault(t =>
+            {
+                if (IsInsideTable(t)) return false;
+                var rows = t.Descendants<TableRow>().ToList();
+                if (rows.Count == 0) return false;
+                var headerText = string.Concat(rows[0].Descendants<Text>().Select(x => x.Text));
+                return headerText.Contains("Artefact",   StringComparison.OrdinalIgnoreCase)
+                    || headerText.Contains("Uploaded By", StringComparison.OrdinalIgnoreCase);
+            });
+        }
 
         if (table == null) return;
 
