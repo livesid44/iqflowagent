@@ -1946,52 +1946,56 @@ public class DocxReportService : IDocxReportService
     /// </summary>
     private static void ReplaceArtefactsTable(Body body, IList<ArtefactFile> artefactFiles)
     {
-        // ── Locate the artefacts table by scoping to section "1.2" ─────────────────
-        // Section-scoped search is more reliable than header-text matching because the
-        // actual header text in the template varies ("Document Name", "Artefact Name",
-        // "Document / Artefact Name" etc.). The "1.2 Inputs & Artefacts Received" heading
-        // always precedes the artefacts table.
+        // ── Strategy 1: locate existing table inside section "1.2 Inputs" ───────────
+        // The template's "1.2 Inputs & Artefacts Received" heading is distinct from the
+        // "1.2 Scope" heading, so we match specifically on "Inputs" or "Artefacts" to
+        // avoid a false match on "1.2 Scope" (which precedes "1.2 Inputs" in the body).
         Paragraph? sectionPara = null;
         foreach (var para in body.Descendants<Paragraph>())
         {
             if (IsTocParagraph(para) || IsInsideTable(para)) continue;
             var txt = string.Concat(para.Descendants<Text>().Select(t => t.Text)).TrimStart();
-            // Match "1.2" followed by a space/dot/colon/end — e.g. "1.2 Inputs", "1.2.", "1.2:"
-            if (Regex.IsMatch(txt, @"^1\.2[\s\.\:]"))
+            // Match "1.2" followed by text containing "Inputs" or "Artefacts"
+            if (Regex.IsMatch(txt, @"^1\.2[\s\.\:]") &&
+                (txt.Contains("Input",    StringComparison.OrdinalIgnoreCase) ||
+                 txt.Contains("Artefact", StringComparison.OrdinalIgnoreCase)))
             {
                 sectionPara = para;
                 break;
             }
         }
 
-        Table? table = null;
-
+        // ── Strategy 2: keyword-based table search ───────────────────────────────────
+        // Only used when the existing template already contains an artefacts table
+        // (i.e. a prior report regenerated from a filled template). The section-scoped
+        // approach cannot find it because the section heading may have changed.
+        Table? existingTable = null;
         if (sectionPara != null)
         {
-            // Find first table between "1.2" heading and "2." section heading.
+            // Find first table after "1.2 Inputs" heading, stopping at the next major section.
             var curr = sectionPara.NextSibling();
             while (curr != null)
             {
                 if (curr is Paragraph p)
                 {
                     var txt = string.Concat(p.Descendants<Text>().Select(t => t.Text)).TrimStart();
-                    if (Regex.IsMatch(txt, @"^2[\.\s]")) break; // reached section 2 — stop
+                    if (Regex.IsMatch(txt, @"^\d+[\.\s]")) break; // reached next section — stop
                 }
                 else if (curr is Table t)
                 {
-                    table = t;
+                    existingTable = t;
                     break;
                 }
                 curr = curr.NextSibling();
             }
         }
 
-        // Fallback: search by header keywords when section-scoped search fails.
-        // Prefer "Artefact" (unambiguous), fall back to "Uploaded By" (unique to artefacts
-        // table — the Document Control table does not contain this phrase).
-        if (table == null)
+        if (existingTable == null)
         {
-            table = body.Descendants<Table>().FirstOrDefault(t =>
+            // Keyword fallback for existing tables: "Artefact" OR "Uploaded By"
+            // ("Uploaded By" is unique to the artefacts table; "Document Control" table
+            // does NOT contain this phrase, so there is no false-match risk).
+            existingTable = body.Descendants<Table>().FirstOrDefault(t =>
             {
                 if (IsInsideTable(t)) return false;
                 var rows = t.Descendants<TableRow>().ToList();
@@ -2002,58 +2006,113 @@ public class DocxReportService : IDocxReportService
             });
         }
 
-        if (table == null) return;
-
-        var allRows = table.Elements<TableRow>().ToList();
-        if (allRows.Count == 0) return;
-
-        // Keep only the header row; remove all existing data rows.
-        foreach (var row in allRows.Skip(1))
-            row.Remove();
-
-        // Determine column count from header row.
-        int colCount = allRows[0].Elements<TableCell>().Count();
-
-        var srcCells = allRows[0].Elements<TableCell>().ToList();
-
-        // Build one new row per file.
-        for (int i = 0; i < artefactFiles.Count; i++)
+        if (existingTable != null)
         {
-            var file   = artefactFiles[i];
-            var newRow = new TableRow();
+            // ── Populate existing artefacts table ─────────────────────────────────
+            var allRows = existingTable.Elements<TableRow>().ToList();
+            if (allRows.Count == 0) return;
 
-            // Copy table-row properties from the header row for consistent styling.
-            var srcRowProps = allRows[0].GetFirstChild<TableRowProperties>()?.CloneNode(true);
-            if (srcRowProps != null) newRow.AppendChild(srcRowProps);
+            // Keep only the header row; remove all existing data rows.
+            foreach (var row in allRows.Skip(1))
+                row.Remove();
 
-            for (int col = 0; col < colCount; col++)
+            int colCount       = allRows[0].Elements<TableCell>().Count();
+            var srcCells       = allRows[0].Elements<TableCell>().ToList();
+            var srcRowProps    = allRows[0].GetFirstChild<TableRowProperties>();
+
+            for (int i = 0; i < artefactFiles.Count; i++)
             {
-                var newCell = new TableCell();
+                var file   = artefactFiles[i];
+                var newRow = new TableRow();
 
-                if (col < srcCells.Count)
+                var clonedRowProps = srcRowProps?.CloneNode(true);
+                if (clonedRowProps != null) newRow.AppendChild(clonedRowProps);
+
+                for (int col = 0; col < colCount; col++)
                 {
-                    var srcCellProps = srcCells[col].GetFirstChild<TableCellProperties>()?.CloneNode(true);
-                    if (srcCellProps != null) newCell.AppendChild(srcCellProps);
+                    var newCell = new TableCell();
+
+                    if (col < srcCells.Count)
+                    {
+                        var srcCellProps = srcCells[col].GetFirstChild<TableCellProperties>()?.CloneNode(true);
+                        if (srcCellProps != null) newCell.AppendChild(srcCellProps);
+                    }
+
+                    var cellText = col switch
+                    {
+                        0 => (i + 1).ToString(),
+                        1 => file.FileName,
+                        2 => file.UploadedBy ?? string.Empty,
+                        3 => file.SourceId,
+                        _ => string.Empty
+                    };
+
+                    var cellPara = new Paragraph();
+                    if (!string.IsNullOrEmpty(cellText))
+                        cellPara.AppendChild(new Run(new Text(cellText)));
+                    newCell.AppendChild(cellPara);
+                    newRow.AppendChild(newCell);
                 }
 
-                var cellText = col switch
-                {
-                    0 => (i + 1).ToString(),                        // No.
-                    1 => file.FileName,                              // Document / Artefact Name
-                    2 => file.UploadedBy ?? string.Empty,            // Uploaded By
-                    3 => file.SourceId,                              // Task / Intake ID
-                    _ => string.Empty
-                };
-
-                var para = new Paragraph();
-                if (!string.IsNullOrEmpty(cellText))
-                    para.AppendChild(new Run(new Text(cellText)));
-                newCell.AppendChild(para);
-                newRow.AppendChild(newCell);
+                existingTable.AppendChild(newRow);
             }
-
-            table.AppendChild(newRow);
+            return;
         }
+
+        // ── No existing table — create one after the "1.2 Inputs" heading ───────────
+        // The template uses a paragraph placeholder rather than a pre-built table.
+        // Build a fresh table with four columns: No. | Document Name | Uploaded By | Source.
+        if (sectionPara == null) return;
+
+        var tbl = new Table();
+        tbl.AppendChild(new TableProperties(
+            new TableBorders(
+                new TopBorder              { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new BottomBorder           { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new LeftBorder             { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new RightBorder            { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4, Color = "000000" },
+                new InsideVerticalBorder   { Val = BorderValues.Single, Size = 4, Color = "000000" }),
+            new TableWidth { Type = TableWidthUnitValues.Pct, Width = "5000" }));
+
+        // Header row
+        var headerRow = new TableRow();
+        foreach (var h in new[] { "No.", "Document Name", "Uploaded By", "Source" })
+        {
+            var cell = new TableCell();
+            cell.AppendChild(new TableCellProperties(
+                new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" },
+                new Shading { Val = ShadingPatternValues.Clear, Fill = "D9E2F3" }));
+            var run = new Run(new Text(h));
+            run.PrependChild(new RunProperties(new Bold()));
+            cell.AppendChild(new Paragraph(run));
+            headerRow.AppendChild(cell);
+        }
+        tbl.AppendChild(headerRow);
+
+        // Data rows
+        for (int i = 0; i < artefactFiles.Count; i++)
+        {
+            var file = artefactFiles[i];
+            var dataRow = new TableRow();
+            foreach (var cellText in new[]
+            {
+                (i + 1).ToString(),
+                file.FileName,
+                file.UploadedBy ?? string.Empty,
+                file.SourceId
+            })
+            {
+                var cell = new TableCell();
+                cell.AppendChild(new TableCellProperties(
+                    new TableCellWidth { Type = TableWidthUnitValues.Auto, Width = "0" }));
+                cell.AppendChild(new Paragraph(new Run(new Text(cellText))));
+                dataRow.AppendChild(cell);
+            }
+            tbl.AppendChild(dataRow);
+        }
+
+        sectionPara.InsertAfterSelf(tbl);
     }
 
     /// <summary>
