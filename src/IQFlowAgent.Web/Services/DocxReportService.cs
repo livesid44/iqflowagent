@@ -1649,17 +1649,20 @@ public class DocxReportService : IDocxReportService
     /// </summary>
     private static void MarkTocDirty(WordprocessingDocument wordDoc)
     {
-        var settings = wordDoc.MainDocumentPart?.DocumentSettingsPart?.Settings;
-        if (settings != null)
-        {
-            // Add UpdateFieldsOnOpen if not already present
-            if (settings.GetFirstChild<UpdateFieldsOnOpen>() == null)
-                settings.PrependChild(new UpdateFieldsOnOpen { Val = true });
-        }
+        var mainPart = wordDoc.MainDocumentPart;
+        if (mainPart == null) return;
+
+        var settingsPart = mainPart.DocumentSettingsPart ?? mainPart.AddNewPart<DocumentSettingsPart>();
+        if (settingsPart.Settings == null)
+            settingsPart.Settings = new Settings();
+
+        // Add UpdateFieldsOnOpen if not already present
+        if (settingsPart.Settings.GetFirstChild<UpdateFieldsOnOpen>() == null)
+            settingsPart.Settings.PrependChild(new UpdateFieldsOnOpen { Val = true });
 
         // Also mark individual SdtBlock (structured document tags) as dirty —
         // the TOC is typically wrapped in an SdtBlock.
-        var body = wordDoc.MainDocumentPart?.Document.Body;
+        var body = mainPart.Document.Body;
         if (body == null) return;
 
         foreach (var sdt in body.Descendants<SdtBlock>())

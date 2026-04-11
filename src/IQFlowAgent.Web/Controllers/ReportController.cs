@@ -937,8 +937,13 @@ public class ReportController : Controller
             ("glossary_content", "Glossary Terms"),
         };
 
+        var intakePrioritizedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "sla_content", "perf_content", "vol_content", "raci_content", "sop_content"
+        };
+
         var combinedDocContext = string.Join("\n\n",
-            new[] { allTaskArtifactText, globalDocText }
+            new[] { globalDocText, allTaskArtifactText }
             .Where(t => !string.IsNullOrWhiteSpace(t)));
         var combinedDocContextOrNull = string.IsNullOrWhiteSpace(combinedDocContext)
             ? null : combinedDocContext;
@@ -962,7 +967,19 @@ public class ReportController : Controller
                         : fieldSpecificText;
                 }
             }
-            fieldArtifactContext ??= combinedDocContextOrNull;
+            if (string.IsNullOrWhiteSpace(fieldArtifactContext))
+            {
+                if (intakePrioritizedKeys.Contains(fieldKey))
+                {
+                    fieldArtifactContext = string.Join("\n\n",
+                        new[] { globalDocText, allTaskArtifactText }
+                        .Where(t => !string.IsNullOrWhiteSpace(t)));
+                }
+                else
+                {
+                    fieldArtifactContext = combinedDocContextOrNull;
+                }
+            }
 
             var generated = await _aiService.GenerateSingleFieldAsync(
                 intake, fieldKey, fieldLabel,
@@ -1212,7 +1229,7 @@ public class ReportController : Controller
         // ── Binary formats: try Azure Document Intelligence first ─────────────
         // Document Intelligence handles Excel tables, Word tables, and PDF layouts
         // with far greater accuracy than raw OpenXML text extraction.
-        if (ext is ".xlsx" or ".docx" or ".pdf")
+        if (ext is ".xlsx" or ".docx" or ".pdf" or ".jpg" or ".jpeg" or ".png" or ".bmp" or ".tiff")
         {
             byte[]? bytes = null;
             if (await _blobService.IsConfiguredAsync()
@@ -1229,7 +1246,7 @@ public class ReportController : Controller
 
             if (bytes != null)
             {
-                // Primary: Azure Document Intelligence (accurate table + paragraph extraction)
+                // Primary: Azure Document Intelligence (accurate table + paragraph extraction/OCR)
                 if (_docIntelligence.IsConfigured())
                 {
                     var diText = await _docIntelligence.ExtractTextAsync(bytes, doc.FileName ?? "file" + ext);

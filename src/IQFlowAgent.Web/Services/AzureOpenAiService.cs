@@ -2026,7 +2026,8 @@ public class AzureOpenAiService : IAzureOpenAiService
             Do NOT copy long bullet-point descriptions as task names.
             Each role line has EXACTLY one assignment letter per task column, separated by pipes.
             Include ALL roles and ALL tasks found in the source data (up to 8 roles x 8 tasks).
-            If no RACI data is available, infer a plausible 4-role x 4-task matrix from the process.
+            If no explicit RACI data is available in the provided documents, output exactly:
+            RACI data to be confirmed with process owner.
 
             sop_content — SOP Steps. Produce all steps in this format, one block per step:
               Step N: [Action description]
@@ -2052,14 +2053,15 @@ public class AzureOpenAiService : IAzureOpenAiService
               Metric | Target | Measurement Method | Reporting Frequency | Tool
               [metric1] | [target1] | [method1] | [frequency1] | [tool1]
             Use only SLA/KPI data explicitly stated in the intake or documents.
-            If no SLA data is present, output a single row: Processing Time | To be confirmed with process owner | Time from receipt to completion | TBC | TBC
+            If no SLA data is present, output the header row followed by one data row:
+              Processing Time | To be confirmed with process owner | Time from receipt to completion | TBC | TBC
 
             perf_content — Actual vs Target Performance (last 6 months). Format:
               Metric | Month | Actual | Target | Status (Met/Missed)
             Use only performance data from the source documents.
             If no data is present: "Performance data to be confirmed with process owner."
 
-            vol_content — Monthly Volume Data. Read the provided task documents and produce the
+            vol_content — Monthly Volume Data. Read the provided documents (task artifacts and intake uploads) and produce the
             LAST 12 MONTHS of volumetric data as a pipe-delimited table. Do NOT try to parse
             individual cells or rows — instead, understand the document as a whole and generate
             a clean table with one row per month:
@@ -3332,7 +3334,7 @@ public class AzureOpenAiService : IAzureOpenAiService
             else
             {
                 sb.AppendLine("=== GLOBAL INTAKE DOCUMENTS (supplementary context) ===");
-                const int globalCap = 4_000;
+                const int globalCap = 12_000;
                 sb.AppendLine(globalDocText.Length > globalCap
                     ? globalDocText[..globalCap] + "\n[...document truncated]"
                     : globalDocText);
